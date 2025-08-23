@@ -1,6 +1,7 @@
 #pragma once
 #include "piece.hpp"
 #include <vector>
+#include <string>
 
 enum MoveFlag {
     NORMAL,
@@ -20,6 +21,10 @@ struct Move {
 
     Move(int f, int t, Piece m, Piece c = Piece(), MoveFlag fl = NORMAL, Piece p = Piece());
     Move();
+    
+    // Utility methods
+    std::string toString() const;
+    bool operator==(const Move& other) const;
 };
 
 using MoveList = std::vector<Move>;

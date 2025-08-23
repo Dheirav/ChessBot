@@ -5,9 +5,17 @@
 #include "evaluation.hpp"
 #include <limits>
 #include <algorithm>
+#include <atomic>
+#include <iostream>
 
-// Minimax with alpha-beta pruning
-static int minimax(Board& board, int depth, int alpha, int beta, bool maximizingPlayer) {
+// Minimax with alpha-beta pruning and stop condition
+static int minimax(Board& board, int depth, int alpha, int beta, bool maximizingPlayer, 
+                  const std::atomic<bool>& shouldStop) {
+    // Check if we should stop searching
+    if (shouldStop.load()) {
+        return 0; // Return neutral score when stopped
+    }
+    
     if (depth == 0) {
         return evaluate(board);
     }
@@ -19,10 +27,15 @@ static int minimax(Board& board, int depth, int alpha, int beta, bool maximizing
     }
     int bestEval = maximizingPlayer ? std::numeric_limits<int>::min() : std::numeric_limits<int>::max();
     for (const Move& move : moves) {
+        // Check stop condition before each move
+        if (shouldStop.load()) {
+            break;
+        }
+        
         Board copy = board;
         copy.makeMove(move);
         copy.activeColor = (side == COLOR_WHITE ? COLOR_BLACK : COLOR_WHITE);
-        int eval = minimax(copy, depth - 1, alpha, beta, !maximizingPlayer);
+        int eval = minimax(copy, depth - 1, alpha, beta, !maximizingPlayer, shouldStop);
         if (maximizingPlayer) {
             if (eval > bestEval) bestEval = eval;
             if (bestEval > alpha) alpha = bestEval;
@@ -36,13 +49,32 @@ static int minimax(Board& board, int depth, int alpha, int beta, bool maximizing
     return bestEval;
 }
 
+// Original minimax without stop condition (for compatibility)
+static int minimaxOriginal(Board& board, int depth, int alpha, int beta, bool maximizingPlayer) {
+    std::atomic<bool> dummyStop{false};
+    return minimax(board, depth, alpha, beta, maximizingPlayer, dummyStop);
+}
+
 Move findBestMove(const Board& board, int depth) {
+    std::atomic<bool> dummyStop{false};
+    return findBestMoveWithStop(board, depth, dummyStop);
+}
+
+Move findBestMoveWithStop(const Board& board, int depth, const std::atomic<bool>& shouldStop) {
     MoveList moves = generateMoves(board, board.activeColor);
     if (moves.empty()) return Move();
+
+    // Early stop check
+    if (shouldStop.load()) {
+        return moves.empty() ? Move() : moves[0];
+    }
 
     // MVV-LVA: Most Valuable Victim, Least Valuable Attacker for captures
     extern const int pieceValues[];
     std::sort(moves.begin(), moves.end(), [&](const Move& a, const Move& b) {
+        // Check stop condition during sorting
+        if (shouldStop.load()) return false;
+        
         auto moveType = [&](const Move& m) -> int {
             Board copy = board;
             copy.makeMove(m);
@@ -85,15 +117,24 @@ Move findBestMove(const Board& board, int depth) {
 
     int bestEval = std::numeric_limits<int>::min();
     Move bestMove = moves[0];
+    
     for (const Move& move : moves) {
+        // Check stop condition before evaluating each move
+        if (shouldStop.load()) {
+            std::cout << "Search stopped during move evaluation" << std::endl;
+            break;
+        }
+        
         Board copy = board;
         copy.makeMove(move);
         copy.activeColor = (board.activeColor == COLOR_WHITE ? COLOR_BLACK : COLOR_WHITE);
-        int eval = minimax(copy, depth - 1, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), false);
-        if (eval > bestEval) {
+        int eval = minimax(copy, depth - 1, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), false, shouldStop);
+        
+        if (!shouldStop.load() && eval > bestEval) {
             bestEval = eval;
             bestMove = move;
         }
     }
+    
     return bestMove;
 }
