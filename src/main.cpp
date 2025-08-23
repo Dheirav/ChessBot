@@ -2,6 +2,7 @@
 #include <map>
 #include <string>
 #include <iostream>
+
 #include "engine/board.hpp"
 #include "engine/move.hpp"
 #include "engine/movegen.hpp"
@@ -12,6 +13,7 @@
 
 #include "engine/evaluation.hpp"
 #include "engine/search.hpp"
+#include <fstream>
 
 
 int main() {
@@ -32,6 +34,13 @@ int main() {
     if (sideInput == 'b' || sideInput == 'B') userSide = COLOR_BLACK;
     board.activeColor = COLOR_WHITE; // Always start with white to move
 
+    // Open evaluation log file
+    std::string logFileName = "evaluation_log_";
+    logFileName += std::to_string(time(nullptr));
+    logFileName += ".txt";
+    std::ofstream evalLog(logFileName);
+    evalLog << "FEN,Eval,Material,Mobility,KingSafety,CenterControl,BishopPair,DoubledPawn,IsolatedPawn,PassedPawn,BackwardPawn,ConnectedPawn,PawnChain,RooksOpenFile,RooksSemiOpenFile,Rooks7thRank,PST,Outpost,Trapped,Coordination,KingActivity,Threats,Undefended,Space,Drawish\n";
+
     while (window.isOpen()) {
         sf::Event event;
         while (window.pollEvent(event)) {
@@ -46,8 +55,10 @@ int main() {
                     Move move = input.getCompletedMove();
                     std::cout << "Board rendered with " << board.getFEN() << std::endl;
                     board.makeMove(move);
-                    int eval = evaluate(board);
-                    std::cout << "Current evaluation: " << eval << std::endl;
+                    // Get detailed evaluation
+                    auto evalDetails = evaluate_details(board);
+                    evalLog << board.getFEN() << "," << evalDetails.total << "," << evalDetails.material << "," << evalDetails.mobility << "," << evalDetails.kingSafety << "," << evalDetails.centerControl << "," << evalDetails.bishopPair << "," << evalDetails.doubledPawn << "," << evalDetails.isolatedPawn << "," << evalDetails.passedPawn << "," << evalDetails.backwardPawn << "," << evalDetails.connectedPawn << "," << evalDetails.pawnChain << "," << evalDetails.rooksOpenFile << "," << evalDetails.rooksSemiOpenFile << "," << evalDetails.rooks7thRank << "," << evalDetails.pst << "," << evalDetails.outpost << "," << evalDetails.trapped << "," << evalDetails.coordination << "," << evalDetails.kingActivity << "," << evalDetails.threats << "," << evalDetails.undefended << "," << evalDetails.space << "," << evalDetails.drawish << "\n";
+                    std::cout << "Current evaluation: " << evalDetails.total << std::endl;
                     input.resetCompletedMove();
                 }
             }
@@ -69,11 +80,31 @@ int main() {
             if (engineMove.from != -1 && engineMove.to != -1) {
                 board.saveStateForUndo();
                 board.makeMove(engineMove);
-                std::cout << "Engine played: from " << engineMove.from << " to " << engineMove.to << std::endl;
-                int eval = evaluate(board);
-                std::cout << "Current evaluation: " << eval << std::endl;
+                // Get detailed evaluation
+                auto evalDetails = evaluate_details(board);
+                evalLog << board.getFEN() << "," << evalDetails.total << "," << evalDetails.material << "," << evalDetails.mobility << "," << evalDetails.kingSafety << "," << evalDetails.centerControl << "," << evalDetails.bishopPair << "," << evalDetails.doubledPawn << "," << evalDetails.isolatedPawn << "," << evalDetails.passedPawn << "," << evalDetails.backwardPawn << "," << evalDetails.connectedPawn << "," << evalDetails.pawnChain << "," << evalDetails.rooksOpenFile << "," << evalDetails.rooksSemiOpenFile << "," << evalDetails.rooks7thRank << "," << evalDetails.pst << "," << evalDetails.outpost << "," << evalDetails.trapped << "," << evalDetails.coordination << "," << evalDetails.kingActivity << "," << evalDetails.threats << "," << evalDetails.undefended << "," << evalDetails.space << "," << evalDetails.drawish << "\n";
+                std::cout << "Current evaluation: " << evalDetails.total << std::endl;
             } else {
-                std::cout << "No legal moves for engine. Game over?\n";
+                // Check for checkmate or stalemate
+                int kingSq = -1;
+                PieceColor engineColor = (userSide == COLOR_WHITE) ? COLOR_BLACK : COLOR_WHITE;
+                for (int i = 0; i < 64; ++i) {
+                    if (board.squares[i].type() == KING && board.squares[i].color() == engineColor) {
+                        kingSq = i;
+                        break;
+                    }
+                }
+                bool isCheckmate = false;
+                if (kingSq != -1 && board.isSquareAttacked(kingSq, userSide)) {
+                    isCheckmate = true;
+                }
+                if (isCheckmate) {
+                    std::cout << "Checkmate! You win.\n";
+                } else {
+                    std::cout << "Stalemate! It's a draw.\n";
+                }
+                evalLog.close();
+                return 0;
             }
         }
 
@@ -82,5 +113,6 @@ int main() {
         input.drawDraggedPiece(window, textures);
         window.display();
     }
+    evalLog.close();
     return 0;
 }

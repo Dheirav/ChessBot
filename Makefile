@@ -35,4 +35,4 @@ remake:
 	$(MAKE) all
 
 # Mark these targets as not actual files
-.PHONY: all clean remake
+.PHONY: all clean remake test_eval

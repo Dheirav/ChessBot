@@ -28,7 +28,6 @@ make
 This will compile the code and produce an executable named `chessbot`.
 
 ## Run
-Start the program with:
 
 ```bash
 ./chessbot
