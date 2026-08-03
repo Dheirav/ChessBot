@@ -1,5 +1,6 @@
 #include "game_manager.hpp"
 #include "engine/movegen.hpp"
+#include "engine/chessbot_engine.hpp"
 #include <iostream>
 #include <algorithm>
 #include <ctime>
@@ -40,6 +41,9 @@ void GameManager::setHumanSide(PieceColor side) {
 }
 
 void GameManager::startNewGame() {
+    // Stop any in-progress search so it can't mutate state mid-reset
+    stopEngineAndDiscardPending();
+    
     // Reset board to initial position
     board = Board();
     
@@ -62,6 +66,8 @@ void GameManager::startNewGame() {
 }
 
 void GameManager::loadGameFromFEN(const std::string& fen) {
+    stopEngineAndDiscardPending();
+    
     if (board.setFromFEN(fen)) {
         gameHistory.clear();
         moveHistory.clear();
@@ -124,10 +130,60 @@ void GameManager::requestEngineMove() {
     
     std::cout << "Requesting engine move..." << std::endl;
     
-    // Request move from engine asynchronously
+    {
+        std::lock_guard<std::mutex> lock(moveMutex);
+        if (hasPendingEngineMove) {
+            // Engine already finished but the move hasn't been applied yet.
+            return;
+        }
+    }
+    
+    // Request move from engine asynchronously. The callback only stores the
+    // result; the actual board mutation happens on the main thread via
+    // processPendingEngineMove().
     engine->findBestMoveAsync(board, [this](const Move& move) {
-        this->onEngineMove(move);
+        std::lock_guard<std::mutex> lock(moveMutex);
+        pendingEngineMove = move;
+        hasPendingEngineMove = true;
     });
+}
+
+void GameManager::processPendingEngineMove() {
+    Move move;
+    {
+        std::lock_guard<std::mutex> lock(moveMutex);
+        if (!hasPendingEngineMove) {
+            return;
+        }
+        move = pendingEngineMove;
+        hasPendingEngineMove = false;
+    }
+    
+    // Defensive: if the board changed while the engine was thinking (e.g. an
+    // undo), discard the stale move instead of applying it to a new position.
+    if (move.from != -1 && move.to != -1 && !isValidMove(move)) {
+        std::cout << "Discarding stale engine move: " << move.toString() << std::endl;
+        return;
+    }
+    
+    onEngineMove(move);
+}
+
+void GameManager::stopEngineThinking() {
+    if (engine) {
+        engine->stopThinking();
+    }
+}
+
+void GameManager::discardPendingEngineMove() {
+    std::lock_guard<std::mutex> lock(moveMutex);
+    hasPendingEngineMove = false;
+    pendingEngineMove = Move();
+}
+
+void GameManager::stopEngineAndDiscardPending() {
+    stopEngineThinking();
+    discardPendingEngineMove();
 }
 
 void GameManager::onEngineMove(const Move& move) {
@@ -164,7 +220,7 @@ bool GameManager::isValidMove(const Move& move) const {
 }
 
 std::vector<Move> GameManager::getLegalMoves() const {
-    return generateMoves(board, board.activeColor);
+    return generateLegalMoves(board, board.activeColor);
 }
 
 std::vector<Move> GameManager::getLegalMovesFromSquare(int fromSquare) const {
@@ -185,6 +241,9 @@ void GameManager::undoLastMove() {
         std::cout << "Nothing to undo!" << std::endl;
         return;
     }
+    
+    // Stop the engine so a stale move isn't applied to the undone position
+    stopEngineAndDiscardPending();
     
     // Save current state to redo stack
     redoStack.push_back(board.getFEN());
@@ -213,6 +272,9 @@ void GameManager::redoLastMove() {
         return;
     }
     
+    // Stop the engine so a stale move isn't applied to the redone position
+    stopEngineAndDiscardPending();
+    
     // Save current state to undo stack
     saveStateForUndo();
     
@@ -227,6 +289,7 @@ void GameManager::redoLastMove() {
 }
 
 void GameManager::resignGame() {
+    stopEngineAndDiscardPending();
     currentState = GameState::GAME_OVER_RESIGNATION;
     gameResult = (board.activeColor == humanSide) ? "Human resigned" : "Engine resigned";
     std::cout << gameResult << std::endl;
@@ -256,15 +319,26 @@ void GameManager::updateGameState() {
             }
         }
         
-        if (kingSq != -1 && board.isSquareAttacked(kingSq, (currentSide == COLOR_WHITE) ? COLOR_BLACK : COLOR_WHITE)) {
+        std::cout << "DEBUG: No legal moves found for " << (currentSide == COLOR_WHITE ? "White" : "Black") << std::endl;
+        std::cout << "DEBUG: King square: " << kingSq << std::endl;
+        
+        bool kingInCheck = false;
+        if (kingSq != -1) {
+            PieceColor opponent = (currentSide == COLOR_WHITE) ? COLOR_BLACK : COLOR_WHITE;
+            kingInCheck = board.isSquareAttacked(kingSq, opponent);
+            std::cout << "DEBUG: King in check: " << (kingInCheck ? "YES" : "NO") << std::endl;
+        }
+        
+        if (kingInCheck) {
             currentState = GameState::GAME_OVER_CHECKMATE;
             gameResult = (currentSide == humanSide) ? "Engine wins by checkmate" : "Human wins by checkmate";
+            std::cout << "CHECKMATE DETECTED: " << gameResult << std::endl;
         } else {
             currentState = GameState::GAME_OVER_STALEMATE;
             gameResult = "Draw by stalemate";
+            std::cout << "STALEMATE DETECTED: " << gameResult << std::endl;
         }
         
-        std::cout << gameResult << std::endl;
         return;
     }
     
@@ -309,5 +383,19 @@ void GameManager::saveStateForUndo() {
     const size_t MAX_UNDO_STATES = 100;
     if (undoStack.size() > MAX_UNDO_STATES) {
         undoStack.erase(undoStack.begin());
+    }
+}
+
+void GameManager::clearTranspositionTable() {
+    // Try to cast to ChessBotEngine to access TT methods
+    if (auto* chessBotEngine = dynamic_cast<ChessBotEngine*>(engine.get())) {
+        chessBotEngine->clearTranspositionTable();
+    }
+}
+
+void GameManager::printTranspositionTableStats() const {
+    // Try to cast to ChessBotEngine to access TT methods
+    if (auto* chessBotEngine = dynamic_cast<ChessBotEngine*>(engine.get())) {
+        chessBotEngine->printTranspositionTableStats();
     }
 }

@@ -59,9 +59,29 @@ void GUIManager::handleEvents() {
 }
 
 void GUIManager::update() {
+    // Apply any engine move that finished computing (main thread only)
+    gameManager->processPendingEngineMove();
+    
+    // Check for game over states first
+    GameState state = gameManager->getGameState();
+    if (state == GameState::GAME_OVER_CHECKMATE ||
+        state == GameState::GAME_OVER_STALEMATE ||
+        state == GameState::GAME_OVER_DRAW ||
+        state == GameState::GAME_OVER_RESIGNATION) {
+        
+        // Game is over, but keep window open to show final position
+        static bool gameOverMessageShown = false;
+        if (!gameOverMessageShown) {
+            std::cout << "\n=== GAME OVER ===" << std::endl;
+            std::cout << gameManager->getGameResult() << std::endl;
+            std::cout << "Press any key or close window to exit..." << std::endl;
+            gameOverMessageShown = true;
+        }
+        return; // Don't process any more game logic
+    }
+    
     // Check if it's engine's turn and request move
-    if (gameManager->getGameState() == GameState::WAITING_FOR_ENGINE && 
-        !gameManager->isEngineThinking()) {
+    if (state == GameState::WAITING_FOR_ENGINE && !gameManager->isEngineThinking()) {
         gameManager->requestEngineMove();
     }
     
@@ -130,7 +150,7 @@ void GUIManager::handleKeyboardInput(const sf::Event& event) {
         else if (event.key.code == sf::Keyboard::Escape) {
             if (gameManager->isEngineThinking()) {
                 std::cout << "User interrupted engine thinking..." << std::endl;
-                // Note: The engine will handle the stop gracefully
+                gameManager->stopEngineThinking();
             }
         }
     }

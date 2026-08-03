@@ -2,25 +2,27 @@
 #include "piece.hpp"
 #include "gui/constants.hpp"
 #include "move.hpp"
+#include "zobrist_hash.hpp"
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <cstdint>
 
-struct AttackMemoKey {
-    int square;
-    int byColor;
-    bool operator==(const AttackMemoKey& other) const {
-        return square == other.square && byColor == other.byColor;
-    }
+// Data required to reverse a move made via makeMove (see unmakeMove)
+struct UndoInfo {
+    uint64_t hashBefore = 0;
+    int from = -1;
+    int to = -1;
+    Piece movedPiece;
+    Piece capturedPiece;
+    int capturedSquare = -1;      // square the captured piece was removed from (for en passant this differs from 'to')
+    int castlingRookFrom = -1;
+    int castlingRookTo = -1;
+    std::string castlingBefore;
+    std::string enPassantBefore;
+    int halfmoveBefore = 0;
+    int fullmoveBefore = 0;
 };
-namespace std {
-    template<>
-    struct hash<AttackMemoKey> {
-        std::size_t operator()(const AttackMemoKey& k) const {
-            return std::hash<int>()(k.square) ^ (std::hash<int>()(k.byColor) << 1);
-        }
-    };
-}
 
 class Board {
 public:
@@ -36,12 +38,19 @@ public:
     // Store the initial FEN as a static constant
     static constexpr const char* INITIAL_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
     // static constexpr const char* INITIAL_FEN = " 8/8/8/8/8/8/5r2/4K3 w - - 0 1";
+
+private:
+    // Zobrist hash for transposition table
+    uint64_t currentHash;
+    
+public:
     Board(); // sets up initial position
 
     bool setFromFEN(const std::string& fen);
     std::string getFEN() const;
 
-    void makeMove(const Move& move);
+    UndoInfo makeMove(const Move& move);
+    void unmakeMove(const UndoInfo& undo);
 
     // Undo/redo stacks
     std::vector<std::string> undoStack;
@@ -61,6 +70,11 @@ public:
     void saveStateForUndo();
     void undoMove();
     void redoMove();
+
+    // Hash functions for transposition table
+    uint64_t computeHash() const;
+    uint64_t getHash() const { return currentHash; }
+    void updateHash();
 
     // Helper functions to convert between 1D and 2D indices
     static int get1DIndex(int file, int rank);

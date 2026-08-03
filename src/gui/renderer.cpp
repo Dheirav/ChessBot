@@ -152,4 +152,7 @@ void renderBoard(sf::RenderWindow& window, const Board& board, const std::map<st
             }
         }
     }
+    
+    // Draw promotion dialog if active
+    input.drawPromotionDialog(window, textures);
 }

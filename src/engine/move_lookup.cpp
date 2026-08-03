@@ -1,12 +1,26 @@
 
+#include "move_lookup.hpp"
+#include "gui/constants.hpp"
 #include <fstream>
 #include <filesystem>
 #include <vector>
 #include <iostream>
 
+// Resolve the move-table directory relative to the executable location so the
+static std::string lookupDataDir() {
+    std::error_code ec;
+    std::filesystem::path exe = std::filesystem::read_symlink("/proc/self/exe", ec);
+    if (!ec) {
+        std::filesystem::path dir = exe.parent_path() / "src" / "engine" / "lookup_data";
+        return dir.string() + "/";
+    }
+    return "src/engine/lookup_data/";
+}
+
 // Helper to save/load a vector<int> array
 static void saveTable(const std::vector<int> arr[64], const std::string& filename) {
     std::ofstream out(filename, std::ios::binary);
+    if (!out) return;
     for (int i = 0; i < 64; ++i) {
         int sz = arr[i].size();
         out.write(reinterpret_cast<const char*>(&sz), sizeof(int));
@@ -14,22 +28,34 @@ static void saveTable(const std::vector<int> arr[64], const std::string& filenam
     }
 }
 
-static void loadTable(std::vector<int> arr[64], const std::string& filename) {
+// Loads a table; returns false if the file is missing, truncated or otherwise
+// corrupt so the caller can recompute instead of trusting bad data.
+static bool loadTable(std::vector<int> arr[64], const std::string& filename) {
     std::ifstream in(filename, std::ios::binary);
+    if (!in) return false;
     for (int i = 0; i < 64; ++i) {
         int sz = 0;
         in.read(reinterpret_cast<char*>(&sz), sizeof(int));
+        if (!in || sz < 0 || sz > 28) return false;
         arr[i].resize(sz);
-        in.read(reinterpret_cast<char*>(arr[i].data()), sz * sizeof(int));
+        if (sz > 0) {
+            in.read(reinterpret_cast<char*>(arr[i].data()), sz * sizeof(int));
+            if (!in) return false;
+        }
     }
+    return true;
 }
 
-static bool tablesExist() {
-    using std::filesystem::exists;
-    return exists("src/engine/lookup_data/rook.dat") && exists("src/engine/lookup_data/bishop.dat") && exists("src/engine/lookup_data/knight.dat") && exists("src/engine/lookup_data/king.dat") && exists("src/engine/lookup_data/white_pawn.dat") && exists("src/engine/lookup_data/black_pawn.dat");
+static void clearTables() {
+    for (int i = 0; i < 64; ++i) {
+        rookMovesFrom[i].clear();
+        bishopMovesFrom[i].clear();
+        knightMovesFrom[i].clear();
+        kingMovesFrom[i].clear();
+        whitePawnMovesFrom[i].clear();
+        blackPawnMovesFrom[i].clear();
+    }
 }
-#include "move_lookup.hpp"
-#include "gui/constants.hpp"
 
 std::vector<int> rookMovesFrom[64];
 std::vector<int> bishopMovesFrom[64];
@@ -44,15 +70,18 @@ static const int KNIGHT_DELTAS[8][2]     = { {1,2}, {2,1}, {2,-1}, {1,-2}, {-1,-
 static const int KING_DELTAS[8][2]       = { {1,1}, {1,0}, {1,-1}, {0,-1}, {-1,-1}, {-1,0}, {-1,1}, {0,1} };
 
 void initMoveLookupTables() {
-    if (tablesExist()) {
-        loadTable(rookMovesFrom, "src/engine/lookup_data/rook.dat");
-        loadTable(bishopMovesFrom, "src/engine/lookup_data/bishop.dat");
-        loadTable(knightMovesFrom, "src/engine/lookup_data/knight.dat");
-        loadTable(kingMovesFrom, "src/engine/lookup_data/king.dat");
-        loadTable(whitePawnMovesFrom, "src/engine/lookup_data/white_pawn.dat");
-        loadTable(blackPawnMovesFrom, "src/engine/lookup_data/black_pawn.dat");
+    clearTables();
+    std::string dir = lookupDataDir();
+
+    if (loadTable(rookMovesFrom, dir + "rook.dat") &&
+        loadTable(bishopMovesFrom, dir + "bishop.dat") &&
+        loadTable(knightMovesFrom, dir + "knight.dat") &&
+        loadTable(kingMovesFrom, dir + "king.dat") &&
+        loadTable(whitePawnMovesFrom, dir + "white_pawn.dat") &&
+        loadTable(blackPawnMovesFrom, dir + "black_pawn.dat")) {
         std::cout << "Loaded move lookup tables from disk." << std::endl;
     } else {
+        clearTables();
         for (int sq = 0; sq < 64; ++sq) {
             int x = sq % BOARD_SIZE;
             int y = sq / BOARD_SIZE;
@@ -117,12 +146,14 @@ void initMoveLookupTables() {
                     blackPawnMovesFrom[sq].push_back((y + 1) * BOARD_SIZE + (x + 1));
             }
         }
-        saveTable(rookMovesFrom, "src/engine/lookup_data/rook.dat");
-        saveTable(bishopMovesFrom, "src/engine/lookup_data/bishop.dat");
-        saveTable(knightMovesFrom, "src/engine/lookup_data/knight.dat");
-        saveTable(kingMovesFrom, "src/engine/lookup_data/king.dat");
-        saveTable(whitePawnMovesFrom, "src/engine/lookup_data/white_pawn.dat");
-        saveTable(blackPawnMovesFrom, "src/engine/lookup_data/black_pawn.dat");
+        std::error_code ec;
+        std::filesystem::create_directories(dir, ec);
+        saveTable(rookMovesFrom, dir + "rook.dat");
+        saveTable(bishopMovesFrom, dir + "bishop.dat");
+        saveTable(knightMovesFrom, dir + "knight.dat");
+        saveTable(kingMovesFrom, dir + "king.dat");
+        saveTable(whitePawnMovesFrom, dir + "white_pawn.dat");
+        saveTable(blackPawnMovesFrom, dir + "black_pawn.dat");
         std::cout << "Computed and saved move lookup tables to disk." << std::endl;
     }
 }

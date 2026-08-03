@@ -36,7 +36,6 @@ EvalDetails evaluate_details(const Board& board);
 
 // Piece values for MVV-LVA and evaluation
 extern const int pieceValues[7];
-extern const int pst[7][2][64];
 
 // Returns a score from the perspective of the side to move (positive = good for white, negative = good for black)
 int evaluate(const Board& board);

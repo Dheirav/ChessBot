@@ -4,10 +4,12 @@
 #include "move.hpp"
 #include "search.hpp"
 #include "evaluation.hpp"
+#include "transposition_table.hpp"
 #include <thread>
 #include <atomic>
 #include <future>
 #include <mutex>
+#include <memory>
 
 /**
  * Implementation of the chess engine interface
@@ -24,6 +26,10 @@ private:
     // Threading support
     std::thread searchThread;
     std::mutex engineMutex;
+    mutable std::mutex ttMutex;
+    
+    // Transposition table
+    std::unique_ptr<TranspositionTable> transpositionTable;
 
 public:
     ChessBotEngine();
@@ -45,4 +51,9 @@ public:
     void findBestMoveAsync(const Board& board, MoveCallback callback) override;
     bool isThinking() const override;
     void stopThinking() override;
+    
+    // Transposition table management
+    void clearTranspositionTable();
+    void printTranspositionTableStats() const;
+    void resizeTranspositionTable(size_t sizeMB);
 };

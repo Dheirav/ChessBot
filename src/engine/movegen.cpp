@@ -1,15 +1,17 @@
 #include "movegen.hpp"
 #include "move_lookup.hpp"
 #include "piece.hpp"
+#include "legal_move_validator.hpp"
 #include <cctype>
 #include <iostream>
 
 // Helper for en passant target index
+// FEN rank 1-8 maps to board y 7-0 (board y=0 is FEN rank 8).
 static int getEnPassantIdx(const Board& board) {
     if (board.enPassantTarget != "-" && board.enPassantTarget.length() == 2) {
         int file = board.enPassantTarget[0] - 'a';
         int rank = board.enPassantTarget[1] - '1';
-        return Board::get1DIndex(file, rank);
+        return Board::get1DIndex(file, 7 - rank);
     }
     return -1;
 }
@@ -20,14 +22,16 @@ static bool isSquareAttacked(const Board& board, int sq, PieceColor byColor) {
     int x = sq % 8, y = sq / 8;
     // Pawn attacks
     if (byColor == COLOR_WHITE) {
-        if (y > 0) {
-            if (x > 0 && board.squares[(y-1)*8 + (x-1)].type() == PAWN && board.squares[(y-1)*8 + (x-1)].color() == byColor) return true;
-            if (x < 7 && board.squares[(y-1)*8 + (x+1)].type() == PAWN && board.squares[(y-1)*8 + (x+1)].color() == byColor) return true;
-        }
-    } else {
+        // White pawns move toward rank 8 (decreasing y); a white pawn attacking sq sits below it.
         if (y < 7) {
             if (x > 0 && board.squares[(y+1)*8 + (x-1)].type() == PAWN && board.squares[(y+1)*8 + (x-1)].color() == byColor) return true;
             if (x < 7 && board.squares[(y+1)*8 + (x+1)].type() == PAWN && board.squares[(y+1)*8 + (x+1)].color() == byColor) return true;
+        }
+    } else {
+        // Black pawns move toward rank 1 (increasing y); a black pawn attacking sq sits above it.
+        if (y > 0) {
+            if (x > 0 && board.squares[(y-1)*8 + (x-1)].type() == PAWN && board.squares[(y-1)*8 + (x-1)].color() == byColor) return true;
+            if (x < 7 && board.squares[(y-1)*8 + (x+1)].type() == PAWN && board.squares[(y-1)*8 + (x+1)].color() == byColor) return true;
         }
     }
     // Knight attacks
@@ -101,7 +105,7 @@ MoveList generateMoves(const Board& board, PieceColor sideToMove, bool includeCa
                 for (int to : pawnMoves) {
                     int dx = (to % 8) - (sq % 8);
                     int toRank = to / 8;
-                    bool isPromotion = (sideToMove == COLOR_WHITE && toRank == 7) || (sideToMove == COLOR_BLACK && toRank == 0);
+                    bool isPromotion = (sideToMove == COLOR_WHITE && toRank == 0) || (sideToMove == COLOR_BLACK && toRank == 7);
                     bool isCapture = board.squares[to].type() != NONE && board.squares[to].color() != sideToMove;
                     bool isEnPassant = (to == enPassantIdx);
                     bool isDiagonal = (dx != 0);
@@ -318,4 +322,13 @@ MoveList generateMoves(const Board& board, PieceColor sideToMove, bool includeCa
 // Overload for default includeCastling=true
 MoveList generateMoves(const Board& board, PieceColor sideToMove) {
     return generateMoves(board, sideToMove, true);
+}
+
+// Generate only legal moves (filters out illegal moves)
+MoveList generateLegalMoves(const Board& board, PieceColor sideToMove) {
+    // Generate all pseudo-legal moves
+    MoveList pseudoLegalMoves = generateMoves(board, sideToMove, true);
+    
+    // Filter to only legal moves
+    return LegalMoveValidator::filterLegalMoves(board, pseudoLegalMoves);
 }

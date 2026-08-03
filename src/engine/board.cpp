@@ -1,20 +1,25 @@
 #include "board.hpp"
 #include "fen.hpp"
 #include "piece.hpp"
+#include "zobrist_hash.hpp"
 #include <algorithm>
+#include <iostream>
 #include <sstream>
 #include <unordered_map>
 
-// Memoization cache (not thread-safe, but fine for single-threaded GUI)
-static std::unordered_map<AttackMemoKey, bool> attackMemo;
-
 Board::Board() {
+    ZobristHash::initialize();
+    currentHash = 0;
     setFromFEN(INITIAL_FEN);
 }
 
 bool Board::setFromFEN(const std::string& fen) {
     FENInfo info;
-    return parseFEN(fen, *this, info);
+    bool result = parseFEN(fen, *this, info);
+    if (result) {
+        updateHash();
+    }
+    return result;
 }
 
 std::string Board::getFEN() const {
@@ -60,104 +65,196 @@ std::string Board::getFEN() const {
     return fen.str();
 }
 
-void Board::makeMove(const Move& move) {
-
-    int fromIdx = move.from;
-    int toIdx = move.to;
+UndoInfo Board::makeMove(const Move& move) {
+    UndoInfo u;
+    u.hashBefore = currentHash;
+    u.from = move.from;
+    u.to = move.to;
+    u.movedPiece = squares[move.from];
+    u.castlingBefore = castlingRights;
+    u.enPassantBefore = enPassantTarget;
+    u.halfmoveBefore = halfmoveClock;
+    u.fullmoveBefore = fullmoveNumber;
+    u.castlingRookFrom = -1;
+    u.castlingRookTo = -1;
 
     // Bounds check before accessing squares
-    if (fromIdx < 0 || fromIdx >= BOARD_SIZE * BOARD_SIZE) {
-        return;
-    }
-    if (toIdx < 0 || toIdx >= BOARD_SIZE * BOARD_SIZE) {
-        return;
+    if (u.from < 0 || u.from >= BOARD_SIZE * BOARD_SIZE ||
+        u.to < 0 || u.to >= BOARD_SIZE * BOARD_SIZE) {
+        return u;
     }
 
-    // Move the piece
-    // If capturing, clear the destination square first (important for king captures)
-    if (move.capturedPiece.type() != NONE) {
-        squares[toIdx] = Piece();
-    }
-    squares[toIdx] = squares[fromIdx];
-    squares[fromIdx] = Piece(); // Clear the moved square
+    uint64_t h = currentHash;
 
-    // Defensive: don't move rook if from/to are out of bounds and only if rook exists
-    auto safe_move_rook = [&](int from, int to) {
-        if (from < 0 || from >= BOARD_SIZE * BOARD_SIZE) {
-            return;
+    // Determine the piece actually captured and where it is removed from
+    int capturedSq = -1;
+    Piece captured;
+    if (move.flag == EN_PASSANT) {
+        capturedSq = (u.movedPiece.color() == COLOR_WHITE) ? move.to + 8 : move.to - 8;
+        if (capturedSq >= 0 && capturedSq < BOARD_SIZE * BOARD_SIZE) {
+            captured = squares[capturedSq];
         }
-        if (to < 0 || to >= BOARD_SIZE * BOARD_SIZE) {
-            return;
+    } else {
+        captured = squares[move.to];
+        if (captured.type() != NONE) {
+            capturedSq = move.to;
         }
-        if (squares[from].type() != ROOK) {
-            return;
-        }
-        squares[to] = squares[from];
-        squares[from] = Piece();
-    };
+    }
+    u.capturedPiece = captured;
+    u.capturedSquare = capturedSq;
+
+    // Remove the moved piece from its source square
+    h ^= ZobristHash::getPieceSquareHash(move.from, u.movedPiece.type(), u.movedPiece.color());
+    squares[move.from] = Piece();
+
+    // Remove the captured piece
+    if (captured.type() != NONE && capturedSq >= 0) {
+        h ^= ZobristHash::getPieceSquareHash(capturedSq, captured.type(), captured.color());
+        squares[capturedSq] = Piece();
+    }
+
+    // Place the moved (or promoted) piece on the destination square
+    if (move.flag == PROMOTION && move.promotionPiece.type() != NONE) {
+        const Piece& promo = move.promotionPiece;
+        h ^= ZobristHash::getPieceSquareHash(move.to, promo.type(), promo.color());
+        squares[move.to] = promo;
+    } else {
+        h ^= ZobristHash::getPieceSquareHash(move.to, u.movedPiece.type(), u.movedPiece.color());
+        squares[move.to] = u.movedPiece;
+    }
 
     // Handle castling rook move
     if (move.flag == CASTLING) {
-        // White king-side
-        if (move.from == get1DIndex(4, 7) && move.to == get1DIndex(6, 7)) {
-            safe_move_rook(get1DIndex(7, 7), get1DIndex(5, 7));
+        int rookFrom = -1, rookTo = -1;
+        if (u.movedPiece.color() == COLOR_WHITE) {
+            if (move.from == get1DIndex(4, 7) && move.to == get1DIndex(6, 7)) {
+                rookFrom = get1DIndex(7, 7); rookTo = get1DIndex(5, 7);
+            } else if (move.from == get1DIndex(4, 7) && move.to == get1DIndex(2, 7)) {
+                rookFrom = get1DIndex(0, 7); rookTo = get1DIndex(3, 7);
+            }
+        } else {
+            if (move.from == get1DIndex(4, 0) && move.to == get1DIndex(6, 0)) {
+                rookFrom = get1DIndex(7, 0); rookTo = get1DIndex(5, 0);
+            } else if (move.from == get1DIndex(4, 0) && move.to == get1DIndex(2, 0)) {
+                rookFrom = get1DIndex(0, 0); rookTo = get1DIndex(3, 0);
+            }
         }
-        // White queen-side
-        else if (move.from == get1DIndex(4, 7) && move.to == get1DIndex(2, 7)) {
-            safe_move_rook(get1DIndex(0, 7), get1DIndex(3, 7));
-        }
-        // Black king-side
-        else if (move.from == get1DIndex(4, 0) && move.to == get1DIndex(6, 0)) {
-            safe_move_rook(get1DIndex(7, 0), get1DIndex(5, 0));
-        }
-        // Black queen-side
-        else if (move.from == get1DIndex(4, 0) && move.to == get1DIndex(2, 0)) {
-            safe_move_rook(get1DIndex(0, 0), get1DIndex(3, 0));
+        if (rookFrom >= 0 && squares[rookFrom].type() == ROOK) {
+            const Piece rook = squares[rookFrom];
+            h ^= ZobristHash::getPieceSquareHash(rookFrom, rook.type(), rook.color());
+            squares[rookFrom] = Piece();
+            h ^= ZobristHash::getPieceSquareHash(rookTo, rook.type(), rook.color());
+            squares[rookTo] = rook;
+            u.castlingRookFrom = rookFrom;
+            u.castlingRookTo = rookTo;
         }
     }
 
-    // Handle captured piece
-    if (move.capturedPiece.type() != NONE) {
-        // Normally we would handle captured pieces here, e.g. remove from game state
+    // Update castling rights if the king or a rook moves
+    if (u.movedPiece.type() == KING) {
+        if (u.movedPiece.color() == COLOR_WHITE) {
+            castlingRights.erase(std::remove(castlingRights.begin(), castlingRights.end(), 'K'), castlingRights.end());
+            castlingRights.erase(std::remove(castlingRights.begin(), castlingRights.end(), 'Q'), castlingRights.end());
+        } else {
+            castlingRights.erase(std::remove(castlingRights.begin(), castlingRights.end(), 'k'), castlingRights.end());
+            castlingRights.erase(std::remove(castlingRights.begin(), castlingRights.end(), 'q'), castlingRights.end());
+        }
+    } else if (u.movedPiece.type() == ROOK) {
+        if (u.movedPiece.color() == COLOR_WHITE) {
+            if (move.from == get1DIndex(0, 7)) // a1
+                castlingRights.erase(std::remove(castlingRights.begin(), castlingRights.end(), 'Q'), castlingRights.end());
+            if (move.from == get1DIndex(7, 7)) // h1
+                castlingRights.erase(std::remove(castlingRights.begin(), castlingRights.end(), 'K'), castlingRights.end());
+        } else {
+            if (move.from == get1DIndex(0, 0)) // a8
+                castlingRights.erase(std::remove(castlingRights.begin(), castlingRights.end(), 'q'), castlingRights.end());
+            if (move.from == get1DIndex(7, 0)) // h8
+                castlingRights.erase(std::remove(castlingRights.begin(), castlingRights.end(), 'k'), castlingRights.end());
+        }
     }
 
-    // Update active color
-    activeColor = (activeColor == COLOR_WHITE) ? COLOR_BLACK : COLOR_WHITE;
+    // Revoke castling rights when a rook is captured on its home square
+    if (captured.type() == ROOK) {
+        if (capturedSq == get1DIndex(0, 7)) // a1 rook captured
+            castlingRights.erase(std::remove(castlingRights.begin(), castlingRights.end(), 'Q'), castlingRights.end());
+        if (capturedSq == get1DIndex(7, 7)) // h1 rook captured
+            castlingRights.erase(std::remove(castlingRights.begin(), castlingRights.end(), 'K'), castlingRights.end());
+        if (capturedSq == get1DIndex(0, 0)) // a8 rook captured
+            castlingRights.erase(std::remove(castlingRights.begin(), castlingRights.end(), 'q'), castlingRights.end());
+        if (capturedSq == get1DIndex(7, 0)) // h8 rook captured
+            castlingRights.erase(std::remove(castlingRights.begin(), castlingRights.end(), 'k'), castlingRights.end());
+    }
+
+    // Update en passant target square
+    std::string newEp;
+    if (u.movedPiece.type() == PAWN) {
+        int rankDiff = abs((move.to / 8) - (move.from / 8));
+        if (rankDiff == 2) {
+            int targetSquare = (move.from + move.to) / 2; // Square between from and to
+            int file = targetSquare % 8;
+            int rank = targetSquare / 8;
+            // Convert to chess notation (a1-h8)
+            newEp = static_cast<char>('a' + file);
+            newEp += static_cast<char>('1' + (7 - rank));
+        }
+    }
+
+    // Update hash for castling rights and en passant changes
+    h ^= ZobristHash::getCastlingHash(u.castlingBefore) ^ ZobristHash::getCastlingHash(castlingRights);
+    h ^= ZobristHash::getEnPassantHash(u.enPassantBefore) ^ ZobristHash::getEnPassantHash(newEp);
+    enPassantTarget = newEp;
 
     // Update halfmove clock and fullmove number
-    halfmoveClock++;
+    if (u.movedPiece.type() == PAWN || captured.type() != NONE || move.flag == PROMOTION) {
+        halfmoveClock = 0;
+    } else {
+        halfmoveClock++;
+    }
+
+    activeColor = (activeColor == COLOR_WHITE) ? COLOR_BLACK : COLOR_WHITE;
     if (activeColor == COLOR_WHITE) {
         fullmoveNumber++;
     }
 
-    // Update castling rights if king or rook moves
-    // White king moves
-    if (move.movedPiece.type() == KING && move.movedPiece.color() == COLOR_WHITE) {
-        castlingRights.erase(std::remove(castlingRights.begin(), castlingRights.end(), 'K'), castlingRights.end());
-        castlingRights.erase(std::remove(castlingRights.begin(), castlingRights.end(), 'Q'), castlingRights.end());
-    }
-    // Black king moves
-    if (move.movedPiece.type() == KING && move.movedPiece.color() == COLOR_BLACK) {
-        castlingRights.erase(std::remove(castlingRights.begin(), castlingRights.end(), 'k'), castlingRights.end());
-        castlingRights.erase(std::remove(castlingRights.begin(), castlingRights.end(), 'q'), castlingRights.end());
-    }
-    // White rook moves
-    if (move.movedPiece.type() == ROOK && move.movedPiece.color() == COLOR_WHITE) {
-        if (move.from == get1DIndex(0, 7)) // a1
-            castlingRights.erase(std::remove(castlingRights.begin(), castlingRights.end(), 'Q'), castlingRights.end());
-        if (move.from == get1DIndex(7, 7)) // h1
-            castlingRights.erase(std::remove(castlingRights.begin(), castlingRights.end(), 'K'), castlingRights.end());
-    }
-    // Black rook moves
-    if (move.movedPiece.type() == ROOK && move.movedPiece.color() == COLOR_BLACK) {
-        if (move.from == get1DIndex(0, 0)) // a8
-            castlingRights.erase(std::remove(castlingRights.begin(), castlingRights.end(), 'q'), castlingRights.end());
-        if (move.from == get1DIndex(7, 0)) // h8
-            castlingRights.erase(std::remove(castlingRights.begin(), castlingRights.end(), 'k'), castlingRights.end());
+    // Toggle the side-to-move component of the hash
+    h ^= ZobristHash::getSideToMoveHash();
+
+    currentHash = h;
+    return u;
+}
+
+void Board::unmakeMove(const UndoInfo& u) {
+    if (u.from < 0 || u.from >= BOARD_SIZE * BOARD_SIZE ||
+        u.to < 0 || u.to >= BOARD_SIZE * BOARD_SIZE) {
+        return;
     }
 
-    // Optionally print FEN after each move for debugging or logging
-    // std::cout << getFEN() << std::endl;
+    // Restore the moved piece to its source square
+    squares[u.from] = u.movedPiece;
+
+    // Clear the destination square and restore the captured piece (if any).
+    // For en passant the captured square differs from the destination square.
+    squares[u.to] = Piece();
+    if (u.capturedPiece.type() != NONE && u.capturedSquare >= 0 && u.capturedSquare < BOARD_SIZE * BOARD_SIZE) {
+        squares[u.capturedSquare] = u.capturedPiece;
+    }
+
+    // Restore the castling rook
+    if (u.castlingRookFrom >= 0 && u.castlingRookTo >= 0 &&
+        u.castlingRookFrom < BOARD_SIZE * BOARD_SIZE && u.castlingRookTo < BOARD_SIZE * BOARD_SIZE) {
+        squares[u.castlingRookTo] = Piece();
+        squares[u.castlingRookFrom] = Piece(u.movedPiece.color(), ROOK);
+    }
+
+    // Restore game state
+    activeColor = (activeColor == COLOR_WHITE) ? COLOR_BLACK : COLOR_WHITE;
+    castlingRights = u.castlingBefore;
+    enPassantTarget = u.enPassantBefore;
+    halfmoveClock = u.halfmoveBefore;
+    fullmoveNumber = u.fullmoveBefore;
+
+    // Restore the hash from before the move (simplest and always correct)
+    currentHash = u.hashBefore;
 }
 
 void Board::saveStateForUndo() {
@@ -184,78 +281,55 @@ void Board::redoMove() {
 }
 
 bool Board::isSquareAttacked(int square, int byColor) const {
-    static thread_local int callDepth = 0;
-    ++callDepth;
-    static thread_local bool topLevel = true;
-    if (topLevel) attackMemo.clear();
-    topLevel = false;
-
     // Defensive: check square and color bounds
-    if (square < 0 || square >= 64) {
-        if (topLevel) topLevel = true;
-        --callDepth;
+    if (square < 0 || square >= BOARD_SIZE * BOARD_SIZE) {
         return false;
     }
     if (byColor != COLOR_WHITE && byColor != COLOR_BLACK) {
-        if (topLevel) topLevel = true;
-        --callDepth;
         return false;
     }
-    // Defensive: check squares array size (assume squares is std::vector<Piece> or fixed array of 64)
-    #ifdef __cpp_lib_span
-    if (squares.size() < 64) {
-        if (topLevel) topLevel = true;
-        --callDepth;
-        return false;
-    }
-    #endif
-
-    AttackMemoKey key{square, byColor};
-    auto it = attackMemo.find(key);
-    if (it != attackMemo.end()) {
-        if (topLevel) topLevel = true;
-        --callDepth;
-        return it->second;
-    }
-    bool attacked = false;
 
     int x = square % 8, y = square / 8;
 
-    // Pawn attacks (fixed logic)
+    // Pawn attacks
     if (byColor == COLOR_WHITE) {
         // White pawns attack from (y+1,x-1) and (y+1,x+1)
         if (x > 0 && y < 7) {
             int idx = (y + 1) * 8 + (x - 1);
-            if (idx >= 0 && idx < 64 && squares[idx].type() == PAWN && squares[idx].color() == byColor) attacked = true;
+            if (squares[idx].type() == PAWN && squares[idx].color() == byColor) return true;
         }
         if (x < 7 && y < 7) {
             int idx = (y + 1) * 8 + (x + 1);
-            if (idx >= 0 && idx < 64 && squares[idx].type() == PAWN && squares[idx].color() == byColor) attacked = true;
+            if (squares[idx].type() == PAWN && squares[idx].color() == byColor) return true;
         }
-    } else if (byColor == COLOR_BLACK) {
+    } else {
         // Black pawns attack from (y-1,x-1) and (y-1,x+1)
         if (x > 0 && y > 0) {
             int idx = (y - 1) * 8 + (x - 1);
-            if (idx >= 0 && idx < 64 && squares[idx].type() == PAWN && squares[idx].color() == byColor) attacked = true;
+            if (squares[idx].type() == PAWN && squares[idx].color() == byColor) return true;
         }
         if (x < 7 && y > 0) {
             int idx = (y - 1) * 8 + (x + 1);
-            if (idx >= 0 && idx < 64 && squares[idx].type() == PAWN && squares[idx].color() == byColor) attacked = true;
+            if (squares[idx].type() == PAWN && squares[idx].color() == byColor) return true;
         }
     }
     // Knight attacks
     const int knightDeltas[8][2] = { {1,2},{2,1},{2,-1},{1,-2},{-1,-2},{-2,1},{-2,-1},{-1,2} };
     for (int i = 0; i < 8; ++i) {
         int nx = x + knightDeltas[i][0], ny = y + knightDeltas[i][1];
-        int idx = ny * 8 + nx;
-        if (nx >= 0 && nx < 8 && ny >= 0 && ny < 8 && idx >= 0 && idx < 64 && squares[idx].type() == KNIGHT && squares[idx].color() == byColor) attacked = true;
+        if (nx >= 0 && nx < 8 && ny >= 0 && ny < 8) {
+            int idx = ny * 8 + nx;
+            if (squares[idx].type() == KNIGHT && squares[idx].color() == byColor) return true;
+        }
     }
     // King attacks
     const int kingDeltas[8][2] = { {1,1},{1,0},{1,-1},{0,1},{0,-1},{-1,1},{-1,0},{-1,-1} };
     for (int i = 0; i < 8; ++i) {
         int nx = x + kingDeltas[i][0], ny = y + kingDeltas[i][1];
-        int idx = ny * 8 + nx;
-        if (nx >= 0 && nx < 8 && ny >= 0 && ny < 8 && idx >= 0 && idx < 64 && squares[idx].type() == KING && squares[idx].color() == byColor) attacked = true;
+        if (nx >= 0 && nx < 8 && ny >= 0 && ny < 8) {
+            int idx = ny * 8 + nx;
+            if (squares[idx].type() == KING && squares[idx].color() == byColor) return true;
+        }
     }
     // Sliding pieces (rook/queen)
     const int rookDirs[4][2] = { {0,1},{1,0},{0,-1},{-1,0} };
@@ -265,9 +339,8 @@ bool Board::isSquareAttacked(int square, int byColor) const {
             nx += rookDirs[d][0]; ny += rookDirs[d][1];
             if (nx < 0 || nx >= 8 || ny < 0 || ny >= 8) break;
             int idx = ny * 8 + nx;
-            if (idx < 0 || idx >= 64) break;
             if (squares[idx].type() != NONE) {
-                if ((squares[idx].type() == ROOK || squares[idx].type() == QUEEN) && squares[idx].color() == byColor) attacked = true;
+                if ((squares[idx].type() == ROOK || squares[idx].type() == QUEEN) && squares[idx].color() == byColor) return true;
                 break;
             }
         }
@@ -280,17 +353,13 @@ bool Board::isSquareAttacked(int square, int byColor) const {
             nx += bishopDirs[d][0]; ny += bishopDirs[d][1];
             if (nx < 0 || nx >= 8 || ny < 0 || ny >= 8) break;
             int idx = ny * 8 + nx;
-            if (idx < 0 || idx >= 64) break;
             if (squares[idx].type() != NONE) {
-                if ((squares[idx].type() == BISHOP || squares[idx].type() == QUEEN) && squares[idx].color() == byColor) attacked = true;
+                if ((squares[idx].type() == BISHOP || squares[idx].type() == QUEEN) && squares[idx].color() == byColor) return true;
                 break;
             }
         }
     }
-    attackMemo[key] = attacked;
-    if (topLevel) topLevel = true;
-    --callDepth;
-    return attacked;
+    return false;
 }
 
 char Board::pieceToChar(Piece piece) const {
@@ -338,4 +407,33 @@ int Board::getRank(int index) {
 }
 int Board::getFile(int index) {
     return index % BOARD_SIZE;
+}
+
+uint64_t Board::computeHash() const {
+    uint64_t hash = 0;
+    
+    // Hash pieces on squares
+    for (int square = 0; square < 64; ++square) {
+        const Piece& piece = squares[square];
+        if (piece.type() != NONE) {
+            hash ^= ZobristHash::getPieceSquareHash(square, piece.type(), piece.color());
+        }
+    }
+    
+    // Hash side to move
+    if (activeColor == COLOR_BLACK) {
+        hash ^= ZobristHash::getSideToMoveHash();
+    }
+    
+    // Hash castling rights
+    hash ^= ZobristHash::getCastlingHash(castlingRights);
+    
+    // Hash en passant target
+    hash ^= ZobristHash::getEnPassantHash(enPassantTarget);
+    
+    return hash;
+}
+
+void Board::updateHash() {
+    currentHash = computeHash();
 }

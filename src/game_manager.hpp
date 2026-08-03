@@ -7,6 +7,10 @@
 #include <vector>
 #include <fstream>
 #include <memory>
+#include <mutex>
+
+// Forward declaration
+class ChessBotEngine;
 
 enum class GameState {
     WAITING_FOR_PLAYER,
@@ -48,6 +52,11 @@ private:
     // Game result
     std::string gameResult;
     
+    // Pending engine move hand-off (engine thread stores, main thread applies)
+    mutable std::mutex moveMutex;
+    Move pendingEngineMove;
+    bool hasPendingEngineMove = false;
+    
 public:
     GameManager(std::unique_ptr<IChessEngine> chessEngine);
     ~GameManager();
@@ -74,6 +83,11 @@ public:
     std::vector<Move> getLegalMoves() const;
     std::vector<Move> getLegalMovesFromSquare(int fromSquare) const;
     
+    // Applies an engine move that finished computing on the engine thread.
+    // Must be called on the main thread (e.g. every GUI update tick).
+    void processPendingEngineMove();
+    void stopEngineThinking();
+    
     // Game control
     void undoLastMove();
     void redoLastMove();
@@ -90,10 +104,16 @@ public:
     int getEngineDepth() const { return engine->getSearchDepth(); }
     std::string getEngineName() const { return engine->getEngineName(); }
     
+    // Transposition table control (if engine supports it)
+    void clearTranspositionTable();
+    void printTranspositionTableStats() const;
+    
 private:
     void updateGameState();
     void logEvaluation();
     void onEngineMove(const Move& move);
     bool isGameOver() const;
     void saveStateForUndo();
+    void discardPendingEngineMove();
+    void stopEngineAndDiscardPending();
 };

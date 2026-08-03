@@ -41,11 +41,19 @@ int main() {
     std::cout << "  - Ctrl+Y: Redo move" << std::endl;
     std::cout << "  - R: Resign game" << std::endl;
     std::cout << "  - ESC: Interrupt engine thinking" << std::endl;
+    std::cout << "Engine: " << gameManager.getEngineName() << " with Transposition Table" << std::endl;
     
     // Run the main game loop
     guiManager.run();
     
     std::cout << "Game ended. Final result: " << gameManager.getGameResult() << std::endl;
+    
+    // Make sure any in-progress search is stopped before inspecting the TT
+    gameManager.stopEngineThinking();
+    
+    // Show transposition table statistics
+    std::cout << "\n=== Final Engine Statistics ===" << std::endl;
+    gameManager.printTranspositionTableStats();
     
     return 0;
 }

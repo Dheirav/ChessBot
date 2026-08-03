@@ -1,10 +1,13 @@
 #include "chessbot_engine.hpp"
 #include "move_lookup.hpp"
+#include "search.hpp"
 #include <iostream>
 
 ChessBotEngine::ChessBotEngine() 
-    : searchDepth(3), thinking(false), stopSearch(false), 
-      engineName("ChessBot"), engineVersion("1.0") {
+    : searchDepth(5), thinking(false), stopSearch(false), 
+      engineName("ChessBot with Iterative Deepening"), engineVersion("1.1") {
+    // Initialize transposition table with 256MB (increased size for better performance)
+    transpositionTable = std::make_unique<TranspositionTable>(256);
 }
 
 void ChessBotEngine::initialize() {
@@ -29,8 +32,13 @@ Move ChessBotEngine::findBestMove(const Board& board, int depth) {
     thinking = true;
     stopSearch = false;
     
-    // Use the existing search function with stop condition
-    Move bestMove = ::findBestMoveWithStop(board, depth > 0 ? depth : searchDepth, stopSearch);
+    // Use iterative deepening search for better move ordering and time management
+    Board searchBoard = board;
+    Move bestMove;
+    {
+        std::lock_guard<std::mutex> ttLock(ttMutex);
+        bestMove = ::findBestMoveIterativeDeepening(searchBoard, depth > 0 ? depth : searchDepth, stopSearch, *transpositionTable);
+    }
     
     thinking = false;
     return bestMove;
@@ -76,8 +84,15 @@ void ChessBotEngine::findBestMoveAsync(const Board& board, MoveCallback callback
             
             std::cout << "Engine thinking asynchronously..." << std::endl;
             
-            // Perform the search with stop condition checking
-            Move bestMove = ::findBestMoveWithStop(board, searchDepth, stopSearch);
+            // Perform the search with iterative deepening for better time management
+            Board searchBoard = board;
+            Move bestMove;
+            {
+                // Hold the TT lock for the whole search so that
+                // clear/resize/stats calls from other threads are serialized.
+                std::lock_guard<std::mutex> ttLock(ttMutex);
+                bestMove = ::findBestMoveIterativeDeepening(searchBoard, searchDepth, stopSearch, *transpositionTable);
+            }
             
             // Only call callback if we weren't stopped
             if (!stopSearch.load()) {
@@ -108,4 +123,26 @@ void ChessBotEngine::stopThinking() {
     
     // Note: The search thread will check stopSearch and exit gracefully
     // We don't force-kill the thread, just signal it to stop
+}
+
+void ChessBotEngine::clearTranspositionTable() {
+    std::lock_guard<std::mutex> ttLock(ttMutex);
+    if (transpositionTable) {
+        transpositionTable->clear();
+        std::cout << "Transposition table cleared" << std::endl;
+    }
+}
+
+void ChessBotEngine::printTranspositionTableStats() const {
+    std::lock_guard<std::mutex> ttLock(ttMutex);
+    if (transpositionTable) {
+        transpositionTable->printStats();
+    }
+}
+
+void ChessBotEngine::resizeTranspositionTable(size_t sizeMB) {
+    std::lock_guard<std::mutex> ttLock(ttMutex);
+    if (transpositionTable) {
+        transpositionTable->resize(sizeMB);
+    }
 }

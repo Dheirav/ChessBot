@@ -14,9 +14,9 @@ std::string Move::toString() const {
     
     // Convert square indices to algebraic notation
     char fromFile = 'a' + (from % 8);
-    char fromRank = '1' + (from / 8);
+    char fromRank = '8' - (from / 8);
     char toFile = 'a' + (to % 8);
-    char toRank = '1' + (to / 8);
+    char toRank = '8' - (to / 8);
     
     oss << fromFile << fromRank << toFile << toRank;
     
