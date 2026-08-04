@@ -33,7 +33,7 @@ Move ChessBotEngine::findBestMove(const Board& board, int depth) {
     stopSearch = false;
     
     // Use iterative deepening search for better move ordering and time management
-    Board searchBoard = board;
+    Board searchBoard = board.copyForSearch();
     Move bestMove;
     {
         std::lock_guard<std::mutex> ttLock(ttMutex);
@@ -85,7 +85,7 @@ void ChessBotEngine::findBestMoveAsync(const Board& board, MoveCallback callback
             std::cout << "Engine thinking asynchronously..." << std::endl;
             
             // Perform the search with iterative deepening for better time management
-            Board searchBoard = board;
+            Board searchBoard = board.copyForSearch();
             Move bestMove;
             {
                 // Hold the TT lock for the whole search so that

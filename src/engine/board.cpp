@@ -3,6 +3,7 @@
 #include "piece.hpp"
 #include "zobrist_hash.hpp"
 #include <algorithm>
+#include <cstring>
 #include <iostream>
 #include <sstream>
 #include <unordered_map>
@@ -11,6 +12,22 @@ Board::Board() {
     ZobristHash::initialize();
     currentHash = 0;
     setFromFEN(INITIAL_FEN);
+}
+
+// Lightweight constructor: leaves the position uninitialized, so the caller
+// must populate it (see copyForSearch). Avoids FEN parsing and hash setup.
+Board::Board(SearchCopyTag) : currentHash(0) {}
+
+Board Board::copyForSearch() const {
+    Board copy(SearchCopyTag{});
+    std::memcpy(copy.squares, squares, sizeof(squares));
+    copy.activeColor = activeColor;
+    copy.castlingRights = castlingRights;
+    copy.enPassantTarget = enPassantTarget;
+    copy.halfmoveClock = halfmoveClock;
+    copy.fullmoveNumber = fullmoveNumber;
+    copy.currentHash = currentHash;
+    return copy;
 }
 
 bool Board::setFromFEN(const std::string& fen) {

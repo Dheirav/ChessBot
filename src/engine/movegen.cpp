@@ -292,7 +292,7 @@ MoveList generateMoves(const Board& board, PieceColor sideToMove, bool includeCa
     // --- Filter out illegal moves that leave king in check ---
     MoveList legalMoves;
     for (const Move& m : moves) {
-        Board boardCopy = board;
+        Board boardCopy = board.copyForSearch();
         boardCopy.makeMove(m);
         int newKingSq = -1;
         // Check if the move is a king move by looking at the piece type at the source square in the original board
@@ -324,11 +324,8 @@ MoveList generateMoves(const Board& board, PieceColor sideToMove) {
     return generateMoves(board, sideToMove, true);
 }
 
-// Generate only legal moves (filters out illegal moves)
+// generateMoves() already filters out moves that leave the king in check,
+// so it returns fully legal moves. No second legality pass is needed.
 MoveList generateLegalMoves(const Board& board, PieceColor sideToMove) {
-    // Generate all pseudo-legal moves
-    MoveList pseudoLegalMoves = generateMoves(board, sideToMove, true);
-    
-    // Filter to only legal moves
-    return LegalMoveValidator::filterLegalMoves(board, pseudoLegalMoves);
+    return generateMoves(board, sideToMove, true);
 }

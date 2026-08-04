@@ -3,8 +3,8 @@
 #include <iostream>
 
 bool LegalMoveValidator::isMoveLegal(const Board& board, const Move& move) {
-    // Make a copy of the board and try the move
-    Board testBoard = board;
+    // Make a search copy of the board and try the move (skips the undo/redo stacks)
+    Board testBoard = board.copyForSearch();
     testBoard.makeMove(move);
     
     // Find our king on the test board

@@ -42,6 +42,10 @@ public:
 private:
     // Zobrist hash for transposition table
     uint64_t currentHash;
+
+    // Tag for a lightweight constructor that skips FEN parsing (used by copyForSearch)
+    struct SearchCopyTag {};
+    explicit Board(SearchCopyTag);
     
 public:
     Board(); // sets up initial position
@@ -75,6 +79,10 @@ public:
     uint64_t computeHash() const;
     uint64_t getHash() const { return currentHash; }
     void updateHash();
+
+    // Lightweight copy for search: copies the position state but skips the
+    // GUI undo/redo stacks (FEN strings), which the search never uses.
+    Board copyForSearch() const;
 
     // Helper functions to convert between 1D and 2D indices
     static int get1DIndex(int file, int rank);

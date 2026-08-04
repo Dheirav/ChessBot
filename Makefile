@@ -1,6 +1,6 @@
 # Compiler and flags
 CXX = g++                             # The C++ compiler to use
-CXXFLAGS = -std=c++17 -Wall -I./src   # Compiler flags: use C++17, show all warnings, add src to include path
+CXXFLAGS = -std=c++17 -O2 -Wall -I./src   # Compiler flags: use C++17, optimize, show all warnings, add src to include path
 
 # SFML libraries to link against
 SFML_LIBS = -lsfml-graphics -lsfml-window -lsfml-system

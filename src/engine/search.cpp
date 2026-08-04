@@ -269,7 +269,7 @@ static int minimaxWithTT(Board& board, int depth, int alpha, int beta,
 
 Move findBestMove(const Board& board, int depth) {
     std::atomic<bool> dummyStop{false};
-    Board searchBoard = board;
+    Board searchBoard = board.copyForSearch();
     return findBestMoveWithStop(searchBoard, depth, dummyStop);
 }
 
@@ -349,30 +349,49 @@ Move findBestMoveWithTT(Board& board, int depth, const std::atomic<bool>& should
     bool whiteToMove = (board.activeColor == COLOR_WHITE);
     int bestEval = whiteToMove ? std::numeric_limits<int>::min() : std::numeric_limits<int>::max();
     Move bestMove = moves[0];
-    
-    for (const Move& move : moves) {
+
+    // Narrowing alpha/beta window across root moves (see iterative deepening).
+    int alpha = std::numeric_limits<int>::min();
+    int beta = std::numeric_limits<int>::max();
+
+    for (size_t i = 0; i < moves.size(); ++i) {
+        const Move& move = moves[i];
         // Check stop condition before evaluating each move
         if (shouldStop.load()) {
             std::cout << "Search stopped during move evaluation (TT version)" << std::endl;
             break;
         }
-        
+
         UndoInfo undo = board.makeMove(move);
-        int eval = minimaxWithTT(board, depth - 1, std::numeric_limits<int>::min(), 
-                                std::numeric_limits<int>::max(), shouldStop, tt);
+        int eval;
+        if (i == 0) {
+            eval = minimaxWithTT(board, depth - 1, alpha, beta, shouldStop, tt);
+        } else if (whiteToMove) {
+            eval = minimaxWithTT(board, depth - 1, alpha, alpha + 1, shouldStop, tt);
+            if (!shouldStop.load() && eval > alpha && eval < beta) {
+                eval = minimaxWithTT(board, depth - 1, alpha, beta, shouldStop, tt);
+            }
+        } else {
+            eval = minimaxWithTT(board, depth - 1, beta - 1, beta, shouldStop, tt);
+            if (!shouldStop.load() && eval < beta && eval > alpha) {
+                eval = minimaxWithTT(board, depth - 1, alpha, beta, shouldStop, tt);
+            }
+        }
         board.unmakeMove(undo);
-        
+
         if (!shouldStop.load()) {
             if (whiteToMove) {
                 if (eval > bestEval) {
                     bestEval = eval;
                     bestMove = move;
                 }
+                if (eval > alpha) alpha = eval;
             } else {
                 if (eval < bestEval) {
                     bestEval = eval;
                     bestMove = move;
                 }
+                if (eval < beta) beta = eval;
             }
         }
     }
@@ -432,32 +451,53 @@ Move findBestMoveIterativeDeepening(Board& board, int maxDepth,
         int currentBestScore = whiteToMove ? std::numeric_limits<int>::min() : std::numeric_limits<int>::max();
         Move currentBestMove = moves[0];
         bool completedDepth = true;
-        
-        for (const Move& move : moves) {
+
+        // Narrowing alpha/beta window across root moves: later moves are pruned
+        // against the current best, and non-first moves get a cheap null-window
+        // search first (principal variation search). Alpha-beta is exact, so the
+        // chosen move is unchanged.
+        int alpha = std::numeric_limits<int>::min();
+        int beta = std::numeric_limits<int>::max();
+
+        for (size_t i = 0; i < moves.size(); ++i) {
+            const Move& move = moves[i];
             // Check stop condition before evaluating each move
             if (shouldStop.load()) {
                 std::cout << "Search interrupted during depth " << currentDepth << std::endl;
                 completedDepth = false;
                 break;
             }
-            
+
             UndoInfo undo = board.makeMove(move);
-            int eval = minimaxWithTT(board, currentDepth - 1, std::numeric_limits<int>::min(), 
-                                    std::numeric_limits<int>::max(), shouldStop, tt);
+            int eval;
+            if (i == 0) {
+                eval = minimaxWithTT(board, currentDepth - 1, alpha, beta, shouldStop, tt);
+            } else if (whiteToMove) {
+                eval = minimaxWithTT(board, currentDepth - 1, alpha, alpha + 1, shouldStop, tt);
+                if (!shouldStop.load() && eval > alpha && eval < beta) {
+                    eval = minimaxWithTT(board, currentDepth - 1, alpha, beta, shouldStop, tt);
+                }
+            } else {
+                eval = minimaxWithTT(board, currentDepth - 1, beta - 1, beta, shouldStop, tt);
+                if (!shouldStop.load() && eval < beta && eval > alpha) {
+                    eval = minimaxWithTT(board, currentDepth - 1, alpha, beta, shouldStop, tt);
+                }
+            }
             board.unmakeMove(undo);
-            
-            
+
             if (!shouldStop.load()) {
                 if (whiteToMove) {
                     if (eval > currentBestScore) {
                         currentBestScore = eval;
                         currentBestMove = move;
                     }
+                    if (eval > alpha) alpha = eval;
                 } else {
                     if (eval < currentBestScore) {
                         currentBestScore = eval;
                         currentBestMove = move;
                     }
+                    if (eval < beta) beta = eval;
                 }
             }
         }
