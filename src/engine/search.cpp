@@ -30,7 +30,7 @@ static const int QS_PIECE_VALUES[7] = { 0, 20000, 100, 320, 330, 500, 900 };
 // mated is -(MATE_SCORE - ply). Subtracting ply makes nearer mates score
 // higher, so the engine converges on the fastest mate instead of shuffling
 // between equally "mating" lines forever. Stalemate is scored 0.
-static constexpr int MATE_SCORE = 30000;
+static constexpr int MATE_SCORE = SEARCH_MATE_SCORE;
 
 // Window infinities. Deliberately not std::numeric_limits<int>::min(): negamax
 // negates the window on every recursion, and -INT_MIN is undefined behaviour.
@@ -46,6 +46,7 @@ static int scoreForSideToMove(const Board& board) {
 
 SearchOptions g_searchOptions;
 uint64_t g_searchNodes = 0;
+SearchInfoFn g_searchInfo = nullptr;
 
 // --- Time control ---
 //
@@ -517,6 +518,12 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
             haveScore = true;
             auto depthEnd = std::chrono::steady_clock::now();
             auto depthDuration = std::chrono::duration_cast<std::chrono::milliseconds>(depthEnd - depthStart);
+            if (g_searchInfo) {
+                auto sinceStart = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    depthEnd - searchStart).count();
+                g_searchInfo(currentDepth, bestScore, g_searchNodes,
+                             (long)sinceStart, bestMove);
+            }
             if (!g_searchOptions.quiet) {
                 std::cout << "Depth " << currentDepth << " complete in " << depthDuration.count()
                          << "ms. Best move: " << bestMove.toString()

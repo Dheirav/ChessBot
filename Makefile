@@ -106,6 +106,12 @@ bench-regen: tests/bench
 test-timecontrol: tests/timecontrol
 	./tests/timecontrol
 
+# Check the UCI protocol. Needs the main binary, since UCI is a mode of it.
+# A protocol bug is invisible to every other test here: the engine plays fine
+# through its own GUI while being undrivable by any external tool.
+test-uci: $(EXEC)
+	python3 tests/uci_smoke.py
+
 # Clean up build files
 clean:
 	rm -f $(OBJ) $(DEP) $(EXEC) $(TESTS)
@@ -116,4 +122,4 @@ remake:
 	$(MAKE) all
 
 # Mark these targets as not actual files
-.PHONY: all clean remake tests test-perft test-match test-gamestate test-evalref evalref-regen bench test-bench bench-regen test-timecontrol
+.PHONY: all clean remake tests test-perft test-match test-gamestate test-evalref evalref-regen bench test-bench bench-regen test-timecontrol test-uci

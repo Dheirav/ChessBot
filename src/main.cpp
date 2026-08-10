@@ -1,12 +1,21 @@
 #include <iostream>
 #include <memory>
+#include <string>
 
 #include "config.hpp"
 #include "game_manager.hpp"
 #include "gui_manager.hpp"
 #include "engine/chessbot_engine.hpp"
+#include "engine/uci.hpp"
 
-int main() {
+int main(int argc, char** argv) {
+    // UCI mode is a pure stdin/stdout protocol with no window, so it is handled
+    // before anything touches SFML. This is what lets cutechess-cli, Arena and
+    // the rest of the standard tooling drive the engine.
+    for (int i = 1; i < argc; ++i) {
+        if (std::string(argv[i]) == "--uci") return uciLoop();
+    }
+
     std::cout << "=== ChessBot ===" << std::endl;
 
     // Load optional settings from chessbot.conf (defaults if absent)

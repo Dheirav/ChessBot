@@ -45,6 +45,10 @@ jobs:
       - name: time control
         run: make test-timecontrol
 
+      # The UCI protocol, which is how any external tool drives the engine.
+      - name: UCI protocol
+        run: make test-uci
+
       # Not a strength measurement — just a check that the engine plays a legal
       # game end to end. Real matches are far too long for CI.
       - name: match smoke test

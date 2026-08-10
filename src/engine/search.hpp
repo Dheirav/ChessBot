@@ -29,6 +29,19 @@ extern SearchOptions g_searchOptions;
 // behaviour must reproduce the signature exactly.
 extern uint64_t g_searchNodes;
 
+// Checkmate score, from the perspective of the side to move: being mated is
+// -(SEARCH_MATE_SCORE - ply). Exposed so callers can recognise a mate score and
+// convert it to a distance (UCI reports "mate N" rather than a centipawn value).
+constexpr int SEARCH_MATE_SCORE = 30000;
+
+// Called once per completed iteration, if set. `score` is centipawns from the
+// side to move's point of view, or a mate score as above. Used by the UCI layer
+// to emit "info depth ... score ... nodes ... pv ...". Null by default, so the
+// search prints nothing extra unless someone asks.
+using SearchInfoFn = void (*)(int depth, int score, uint64_t nodes,
+                              long elapsedMs, const Move& best);
+extern SearchInfoFn g_searchInfo;
+
 // What the search is allowed to spend.
 //
 // A depth limit alone cannot play a real game: the same depth costs

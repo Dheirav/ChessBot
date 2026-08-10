@@ -75,7 +75,9 @@ void TranspositionTable::resize(size_t sizeMB) {
     table.resize(tableSize);
     clearStats();
     
-    std::cout << "Transposition table resized to " << sizeMB << "MB (" 
+    // stderr, not stdout: in UCI mode stdout carries the protocol and any
+    // stray line on it desynchronises the GUI.
+    std::cerr << "Transposition table resized to " << sizeMB << "MB ("
               << tableSize << " entries)" << std::endl;
 }
 
@@ -91,15 +93,15 @@ void TranspositionTable::clearStats() {
 void TranspositionTable::printStats() const {
     uint64_t total = hits + misses;
     
-    std::cout << "=== Transposition Table Stats ===" << std::endl;
-    std::cout << "Size: " << getSizeMB() << "MB (" << tableSize << " entries)" << std::endl;
-    std::cout << "Hits: " << hits << std::endl;
-    std::cout << "Misses: " << misses << std::endl;
-    std::cout << "Total lookups: " << total << std::endl;
-    std::cout << "Hit rate: " << std::fixed << std::setprecision(2) 
+    std::cerr << "=== Transposition Table Stats ===" << std::endl;
+    std::cerr << "Size: " << getSizeMB() << "MB (" << tableSize << " entries)" << std::endl;
+    std::cerr << "Hits: " << hits << std::endl;
+    std::cerr << "Misses: " << misses << std::endl;
+    std::cerr << "Total lookups: " << total << std::endl;
+    std::cerr << "Hit rate: " << std::fixed << std::setprecision(2) 
               << (getHitRate() * 100) << "%" << std::endl;
-    std::cout << "Collisions: " << collisions << std::endl;
-    std::cout << "=================================" << std::endl;
+    std::cerr << "Collisions: " << collisions << std::endl;
+    std::cerr << "=================================" << std::endl;
 }
 
 bool TranspositionTable::shouldReplace(const TTEntry& existing, const TTEntry& newEntry) const {

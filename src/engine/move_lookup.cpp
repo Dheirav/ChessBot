@@ -79,7 +79,7 @@ void initMoveLookupTables() {
         loadTable(kingMovesFrom, dir + "king.dat") &&
         loadTable(whitePawnMovesFrom, dir + "white_pawn.dat") &&
         loadTable(blackPawnMovesFrom, dir + "black_pawn.dat")) {
-        std::cout << "Loaded move lookup tables from disk." << std::endl;
+        std::cerr << "Loaded move lookup tables from disk." << std::endl;
     } else {
         clearTables();
         for (int sq = 0; sq < 64; ++sq) {
@@ -154,6 +154,6 @@ void initMoveLookupTables() {
         saveTable(kingMovesFrom, dir + "king.dat");
         saveTable(whitePawnMovesFrom, dir + "white_pawn.dat");
         saveTable(blackPawnMovesFrom, dir + "black_pawn.dat");
-        std::cout << "Computed and saved move lookup tables to disk." << std::endl;
+        std::cerr << "Computed and saved move lookup tables to disk." << std::endl;
     }
 }
