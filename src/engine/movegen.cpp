@@ -83,17 +83,10 @@ static bool isSquareAttacked(const Board& board, int sq, PieceColor byColor) {
     return false;
 }
 
-MoveList generateMoves(const Board& board, PieceColor sideToMove, bool includeCastling) {
-    MoveList moves;
+void generatePseudoLegalMoves(const Board& board, PieceColor sideToMove, bool includeCastling, MoveList& moves) {
+    moves.clear();
     int enPassantIdx = getEnPassantIdx(board);
 
-    int kingSq = -1;
-    for (int i = 0; i < 64; ++i) {
-        if (board.squares[i].type() == KING && board.squares[i].color() == sideToMove) {
-            kingSq = i;
-            break;
-        }
-    }
     for (int sq = 0; sq < 64; ++sq) {
         const Piece& piece = board.squares[sq];
         if (piece.type() == NONE || piece.color() != sideToMove)
@@ -289,11 +282,31 @@ MoveList generateMoves(const Board& board, PieceColor sideToMove, bool includeCa
         }
     }
 
+}
+
+MoveList generateMoves(const Board& board, PieceColor sideToMove, bool includeCastling) {
+    MoveList moves;
+    generatePseudoLegalMoves(board, sideToMove, includeCastling, moves);
+
+    int kingSq = -1;
+    for (int i = 0; i < 64; ++i) {
+        if (board.squares[i].type() == KING && board.squares[i].color() == sideToMove) {
+            kingSq = i;
+            break;
+        }
+    }
+
     // --- Filter out illegal moves that leave king in check ---
+    // This used to copy the entire board for every candidate move - about 35
+    // copies per call, and this function runs at every search node. One
+    // scratch copy plus makeMove/unmakeMove does identical work, since
+    // unmakeMove restores the position exactly (the search already relies on
+    // that invariant for every node it visits).
+    Board scratch = board.copyForSearch();
     MoveList legalMoves;
+    const PieceColor oppColor = (sideToMove == COLOR_WHITE) ? COLOR_BLACK : COLOR_WHITE;
     for (const Move& m : moves) {
-        Board boardCopy = board.copyForSearch();
-        boardCopy.makeMove(m);
+        UndoInfo undo = scratch.makeMove(m);
         int newKingSq = -1;
         // Check if the move is a king move by looking at the piece type at the source square in the original board
         if (board.squares[m.from].type() == KING) {
@@ -301,20 +314,20 @@ MoveList generateMoves(const Board& board, PieceColor sideToMove, bool includeCa
         } else {
             newKingSq = kingSq;
             // If the king was captured (shouldn't happen), skip
-            if (boardCopy.squares[newKingSq].type() != KING || boardCopy.squares[newKingSq].color() != sideToMove) {
+            if (scratch.squares[newKingSq].type() != KING || scratch.squares[newKingSq].color() != sideToMove) {
                 // Try to find the king (shouldn't be needed)
                 for (int i = 0; i < 64; ++i) {
-                    if (boardCopy.squares[i].type() == KING && boardCopy.squares[i].color() == sideToMove) {
+                    if (scratch.squares[i].type() == KING && scratch.squares[i].color() == sideToMove) {
                         newKingSq = i;
                         break;
                     }
                 }
             }
         }
-        PieceColor oppColor = (sideToMove == COLOR_WHITE) ? COLOR_BLACK : COLOR_WHITE;
-        if (!isSquareAttacked(boardCopy, newKingSq, oppColor)) {
+        if (!isSquareAttacked(scratch, newKingSq, oppColor)) {
             legalMoves.push_back(m);
         }
+        scratch.unmakeMove(undo);
     }
     return legalMoves;
 }

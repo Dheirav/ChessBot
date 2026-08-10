@@ -5,6 +5,7 @@
 #include "movegen.hpp" // For generateMoves
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <vector>
 
 // Piece values indexed by PieceType (NONE=0, KING=1, PAWN=2, KNIGHT=3, BISHOP=4, ROOK=5, QUEEN=6)
@@ -126,6 +127,94 @@ static bool isCenter(int idx) {
     return idx == 27 || idx == 28 || idx == 35 || idx == 36;
 }
 
+// Calls fn(sq) for every square the piece on 'from' attacks, using exactly the
+// geometry of Board::isSquareAttacked(): sliders stop at and include the first
+// occupied square, pawns hit their two forward diagonals, knights and kings use
+// fixed offsets. Never yields 'from' itself.
+//
+// This replaces two patterns that dominated the evaluation: a 64x64 sweep that
+// ran a geometry test on every ordered pair of squares, and two full
+// isSquareAttacked() ray-scans per piece (~52 scans per evaluation).
+template <typename F>
+static inline void forEachAttackedSquare(const Board& board, int from, F fn) {
+    static const int KNIGHT_D[8][2] = { {1,2},{2,1},{2,-1},{1,-2},{-1,-2},{-2,1},{-2,-1},{-1,2} };
+    static const int KING_D[8][2]   = { {1,1},{1,0},{1,-1},{0,1},{0,-1},{-1,1},{-1,0},{-1,-1} };
+    static const int ROOK_D[4][2]   = { {0,1},{1,0},{0,-1},{-1,0} };
+    static const int BISHOP_D[4][2] = { {1,1},{1,-1},{-1,-1},{-1,1} };
+
+    const Piece& a = board.squares[from];
+    const int x = from % 8, y = from / 8;
+
+    switch (a.type()) {
+        case PAWN: {
+            int ny = y + ((a.color() == COLOR_WHITE) ? -1 : 1);
+            if (ny >= 0 && ny < 8) {
+                if (x > 0) fn(ny * 8 + x - 1);
+                if (x < 7) fn(ny * 8 + x + 1);
+            }
+            break;
+        }
+        case KNIGHT:
+        case KING: {
+            const int (*d)[2] = (a.type() == KNIGHT) ? KNIGHT_D : KING_D;
+            for (int i = 0; i < 8; ++i) {
+                int nx = x + d[i][0], ny = y + d[i][1];
+                if (nx >= 0 && nx < 8 && ny >= 0 && ny < 8) fn(ny * 8 + nx);
+            }
+            break;
+        }
+        case ROOK:
+        case BISHOP:
+        case QUEEN: {
+            for (int pass = 0; pass < 2; ++pass) {
+                if (pass == 0 && a.type() == BISHOP) continue;
+                if (pass == 1 && a.type() == ROOK) continue;
+                const int (*d)[2] = (pass == 0) ? ROOK_D : BISHOP_D;
+                for (int dir = 0; dir < 4; ++dir) {
+                    int nx = x, ny = y;
+                    while (true) {
+                        nx += d[dir][0]; ny += d[dir][1];
+                        if (nx < 0 || nx >= 8 || ny < 0 || ny >= 8) break;
+                        int idx = ny * 8 + nx;
+                        fn(idx);
+                        if (board.squares[idx].type() != NONE) break;
+                    }
+                }
+            }
+            break;
+        }
+        default: break;
+    }
+}
+
+// Mobility is counted over pseudo-legal moves rather than legal ones.
+// generateMoves() filters for legality by copying the whole board, making the
+// move and testing the king square for every candidate - roughly 35 board
+// copies per call, paid twice per evaluated node, to produce two integers.
+// Pseudo-legal counts differ from legal counts only when pieces are pinned or
+// the king is in check, which is the standard trade engines make here.
+// Castling is excluded: it is not mobility, and each castling test costs three
+// more isSquareAttacked() scans.
+static thread_local MoveList mobilityScratch;
+
+// kingSq is the square of 'color's king, or -1 if it has none.
+static int countMobility(const Board& board, PieceColor color, int kingSq) {
+    // In check the pseudo-legal count is not an approximation but simply
+    // wrong: nearly every generated move is illegal, so the side in check
+    // would be credited with mobility it does not have (measured at up to
+    // 108cp, more than a pawn). Checks occur in only ~3% of positions, so
+    // paying for the real legality filter here costs almost nothing and
+    // removes the one large distortion.
+    PieceColor opp = (color == COLOR_WHITE) ? COLOR_BLACK : COLOR_WHITE;
+    if (kingSq >= 0 && board.isSquareAttacked(kingSq, (int)opp))
+        return (int)generateMoves(board, color, true).size();
+
+    // Reused across calls: clear() keeps the capacity, so this stops
+    // allocating after the first few evaluations.
+    generatePseudoLegalMoves(board, color, /*includeCastling=*/false, mobilityScratch);
+    return (int)mobilityScratch.size();
+}
+
 // Returns a detailed breakdown of evaluation for logging
 EvalDetails evaluate_details(const Board& board) {
     EvalDetails e{};
@@ -167,15 +256,38 @@ EvalDetails evaluate_details(const Board& board) {
     int whiteBishopPair = 0, blackBishopPair = 0;
     int whiteKingFile = -1, blackKingFile = -1;
     int whiteKingRank = -1, blackKingRank = -1;
-    int whiteOutposts = 0, blackOutposts = 0;
-    int whiteTrapped = 0, blackTrapped = 0;
-    int whiteCoord = 0, blackCoord = 0;
-    int whiteKingActivity = 0, blackKingActivity = 0;
     int whiteThreats = 0, blackThreats = 0;
     int whiteUndefended = 0, blackUndefended = 0;
     int whiteSpace = 0, blackSpace = 0;
     int whiteDrawish = 0, blackDrawish = 0;
     int whiteBishopCount = 0, blackBishopCount = 0;
+
+    // Per-file pawn masks: bit r set means a pawn of that colour stands on
+    // rank r of that file. The passed/doubled/isolated/backward tests and the
+    // rook open-file test each used to walk a file or a rank range square by
+    // square; with these they become constant-time bit tests.
+    uint8_t whitePawnFile[8] = {}, blackPawnFile[8] = {};
+    for (int i = 0; i < 64; ++i) {
+        const Piece& p = board.squares[i];
+        if (p.type() != PAWN) continue;
+        if (p.color() == COLOR_WHITE) whitePawnFile[i % 8] |= (uint8_t)(1u << (i / 8));
+        else                          blackPawnFile[i % 8] |= (uint8_t)(1u << (i / 8));
+    }
+    // Union of a file and its two neighbours; and of the two neighbours alone.
+    auto span3 = [](const uint8_t m[8], int f) -> uint8_t {
+        uint8_t r = m[f];
+        if (f > 0) r |= m[f - 1];
+        if (f < 7) r |= m[f + 1];
+        return r;
+    };
+    auto adj2 = [](const uint8_t m[8], int f) -> uint8_t {
+        uint8_t r = 0;
+        if (f > 0) r |= m[f - 1];
+        if (f < 7) r |= m[f + 1];
+        return r;
+    };
+    auto ranksBelow = [](int rank) -> uint8_t { return (uint8_t)((1u << rank) - 1u); };
+    auto ranksAbove = [](int rank) -> uint8_t { return (uint8_t)(~((1u << (rank + 1)) - 1u)); };
 
     // --- Feature extraction logic (copied from evaluate) ---
     for (int i = 0; i < 64; ++i) {
@@ -197,41 +309,13 @@ EvalDetails evaluate_details(const Board& board) {
                 whitePawns++;
                 if (file > 0 && board.squares[i-1].type() == PAWN && board.squares[i-1].color() == COLOR_WHITE) whiteConnectedPawns++;
                 if (file < 7 && board.squares[i+1].type() == PAWN && board.squares[i+1].color() == COLOR_WHITE) whiteConnectedPawns++;
-                bool passed = true;
-                for (int r = rank - 1; r >= 0; --r) {
-                    for (int df = -1; df <= 1; ++df) {
-                        int f2 = file + df;
-                        if (f2 < 0 || f2 > 7) continue;
-                        int idx = r * 8 + f2;
-                        if (board.squares[idx].type() == PAWN && board.squares[idx].color() == COLOR_BLACK) passed = false;
-                    }
-                }
-                if (passed) whitePassedPawns++;
-                for (int r = rank + 1; r < 8; ++r) {
-                    int idx = r * 8 + file;
-                    if (board.squares[idx].type() == PAWN && board.squares[idx].color() == COLOR_WHITE) whiteDoubledPawns++;
-                }
-                bool isolated = true;
-                for (int df = -1; df <= 1; ++df) {
-                    if (df == 0) continue;
-                    int f2 = file + df;
-                    if (f2 < 0 || f2 > 7) continue;
-                    for (int r = 0; r < 8; ++r) {
-                        int idx = r * 8 + f2;
-                        if (board.squares[idx].type() == PAWN && board.squares[idx].color() == COLOR_WHITE) isolated = false;
-                    }
-                }
-                if (isolated) whiteIsolatedPawns++;
-                bool backward = true;
-                for (int df = -1; df <= 1; ++df) {
-                    int f2 = file + df;
-                    if (f2 < 0 || f2 > 7) continue;
-                    for (int r = rank + 1; r < 8; ++r) {
-                        int idx = r * 8 + f2;
-                        if (board.squares[idx].type() == PAWN && board.squares[idx].color() == COLOR_WHITE) backward = false;
-                    }
-                }
-                if (backward) whiteBackwardPawns++;
+                // No black pawn on this or an adjacent file, ahead of us
+                // (white advances toward rank 0).
+                if ((span3(blackPawnFile, file) & ranksBelow(rank)) == 0) whitePassedPawns++;
+                // Every friendly pawn behind us on the same file.
+                whiteDoubledPawns += __builtin_popcount((unsigned)(whitePawnFile[file] & ranksAbove(rank)));
+                if (adj2(whitePawnFile, file) == 0) whiteIsolatedPawns++;
+                if ((span3(whitePawnFile, file) & ranksAbove(rank)) == 0) whiteBackwardPawns++;
                 if ((file > 0 && rank < 7 && board.squares[(rank+1)*8+file-1].type() == PAWN && board.squares[(rank+1)*8+file-1].color() == COLOR_WHITE) ||
                     (file < 7 && rank < 7 && board.squares[(rank+1)*8+file+1].type() == PAWN && board.squares[(rank+1)*8+file+1].color() == COLOR_WHITE))
                     whitePawnChains++;
@@ -240,78 +324,25 @@ EvalDetails evaluate_details(const Board& board) {
                 whiteKingFile = file;
                 whiteKingRank = rank;
             }
-            if ((p.type() == KNIGHT || p.type() == BISHOP) && rank <= 3) {
-                bool protectedByPawn = false;
-                if ((file > 0 && rank < 7 && board.squares[(rank+1)*8+file-1].type() == PAWN && board.squares[(rank+1)*8+file-1].color() == COLOR_WHITE) ||
-                    (file < 7 && rank < 7 && board.squares[(rank+1)*8+file+1].type() == PAWN && board.squares[(rank+1)*8+file+1].color() == COLOR_WHITE))
-                    protectedByPawn = true;
-                if (protectedByPawn) whiteOutposts++;
-            }
-            if ((p.type() == ROOK || p.type() == BISHOP) && (file == 0 || file == 7 || rank == 0 || rank == 7)) whiteTrapped++;
             if (p.type() == ROOK) {
-                bool openFile = true, semiOpen = true;
-                for (int r = 0; r < 8; ++r) {
-                    int idx = r * 8 + file;
-                    if (board.squares[idx].type() == PAWN) {
-                        openFile = false;
-                        if (board.squares[idx].color() == COLOR_WHITE) semiOpen = false;
-                    }
-                }
+                bool openFile = (whitePawnFile[file] | blackPawnFile[file]) == 0;
+                bool semiOpen = whitePawnFile[file] == 0;
                 if (openFile) whiteRooksOpenFile++;
                 else if (semiOpen) whiteRooksSemiOpenFile++;
                 if (rank == 1) whiteRooks7th++;
             }
             if (p.type() == BISHOP) whiteBishopCount++;
-            for (int j = 0; j < 64; ++j) {
-                if (i == j) continue;
-                if (board.squares[j].type() != NONE && board.squares[j].color() == COLOR_WHITE) {
-                    if (std::abs((i%8)-(j%8)) <= 1 && std::abs((i/8)-(j/8)) <= 1) whiteCoord++;
-                }
-            }
-            if (p.type() == KING && whiteMaterial + blackMaterial - pieceValues[KING]*2 < 2000) {
-                whiteKingActivity += (int)(4 - std::abs(file - 3.5) - std::abs(rank - 3.5));
-            }
         } else {
             blackMaterial += pieceValues[p.type()];
             if (p.type() == PAWN) {
                 blackPawns++;
                 if (file > 0 && board.squares[i-1].type() == PAWN && board.squares[i-1].color() == COLOR_BLACK) blackConnectedPawns++;
                 if (file < 7 && board.squares[i+1].type() == PAWN && board.squares[i+1].color() == COLOR_BLACK) blackConnectedPawns++;
-                bool passed = true;
-                for (int r = rank + 1; r < 8; ++r) {
-                    for (int df = -1; df <= 1; ++df) {
-                        int f2 = file + df;
-                        if (f2 < 0 || f2 > 7) continue;
-                        int idx = r * 8 + f2;
-                        if (board.squares[idx].type() == PAWN && board.squares[idx].color() == COLOR_WHITE) passed = false;
-                    }
-                }
-                if (passed) blackPassedPawns++;
-                for (int r = rank - 1; r >= 0; --r) {
-                    int idx = r * 8 + file;
-                    if (board.squares[idx].type() == PAWN && board.squares[idx].color() == COLOR_BLACK) blackDoubledPawns++;
-                }
-                bool isolated = true;
-                for (int df = -1; df <= 1; ++df) {
-                    if (df == 0) continue;
-                    int f2 = file + df;
-                    if (f2 < 0 || f2 > 7) continue;
-                    for (int r = 0; r < 8; ++r) {
-                        int idx = r * 8 + f2;
-                        if (board.squares[idx].type() == PAWN && board.squares[idx].color() == COLOR_BLACK) isolated = false;
-                    }
-                }
-                if (isolated) blackIsolatedPawns++;
-                bool backward = true;
-                for (int df = -1; df <= 1; ++df) {
-                    int f2 = file + df;
-                    if (f2 < 0 || f2 > 7) continue;
-                    for (int r = rank - 1; r >= 0; --r) {
-                        int idx = r * 8 + f2;
-                        if (board.squares[idx].type() == PAWN && board.squares[idx].color() == COLOR_BLACK) backward = false;
-                    }
-                }
-                if (backward) blackBackwardPawns++;
+                // Mirror of the white case: black advances toward rank 7.
+                if ((span3(whitePawnFile, file) & ranksAbove(rank)) == 0) blackPassedPawns++;
+                blackDoubledPawns += __builtin_popcount((unsigned)(blackPawnFile[file] & ranksBelow(rank)));
+                if (adj2(blackPawnFile, file) == 0) blackIsolatedPawns++;
+                if ((span3(blackPawnFile, file) & ranksBelow(rank)) == 0) blackBackwardPawns++;
                 if ((file > 0 && rank > 0 && board.squares[(rank-1)*8+file-1].type() == PAWN && board.squares[(rank-1)*8+file-1].color() == COLOR_BLACK) ||
                     (file < 7 && rank > 0 && board.squares[(rank-1)*8+file+1].type() == PAWN && board.squares[(rank-1)*8+file+1].color() == COLOR_BLACK))
                     blackPawnChains++;
@@ -320,37 +351,14 @@ EvalDetails evaluate_details(const Board& board) {
                 blackKingFile = file;
                 blackKingRank = rank;
             }
-            if ((p.type() == KNIGHT || p.type() == BISHOP) && rank >= 4) {
-                bool protectedByPawn = false;
-                if ((file > 0 && rank > 0 && board.squares[(rank-1)*8+file-1].type() == PAWN && board.squares[(rank-1)*8+file-1].color() == COLOR_BLACK) ||
-                    (file < 7 && rank > 0 && board.squares[(rank-1)*8+file+1].type() == PAWN && board.squares[(rank-1)*8+file+1].color() == COLOR_BLACK))
-                    protectedByPawn = true;
-                if (protectedByPawn) blackOutposts++;
-            }
-            if ((p.type() == ROOK || p.type() == BISHOP) && (file == 0 || file == 7 || rank == 0 || rank == 7)) blackTrapped++;
             if (p.type() == ROOK) {
-                bool openFile = true, semiOpen = true;
-                for (int r = 0; r < 8; ++r) {
-                    int idx = r * 8 + file;
-                    if (board.squares[idx].type() == PAWN) {
-                        openFile = false;
-                        if (board.squares[idx].color() == COLOR_BLACK) semiOpen = false;
-                    }
-                }
+                bool openFile = (whitePawnFile[file] | blackPawnFile[file]) == 0;
+                bool semiOpen = blackPawnFile[file] == 0;
                 if (openFile) blackRooksOpenFile++;
                 else if (semiOpen) blackRooksSemiOpenFile++;
                 if (rank == 6) blackRooks7th++;
             }
             if (p.type() == BISHOP) blackBishopCount++;
-            for (int j = 0; j < 64; ++j) {
-                if (i == j) continue;
-                if (board.squares[j].type() != NONE && board.squares[j].color() == COLOR_BLACK) {
-                    if (std::abs((i%8)-(j%8)) <= 1 && std::abs((i/8)-(j/8)) <= 1) blackCoord++;
-                }
-            }
-            if (p.type() == KING && whiteMaterial + blackMaterial - pieceValues[KING]*2 < 2000) {
-                blackKingActivity += (int)(4 - std::abs(file - 3.5) - std::abs(rank - 3.5));
-            }
         }
     }
 
@@ -373,8 +381,11 @@ EvalDetails evaluate_details(const Board& board) {
     pawnChainBonus = 5 * (whitePawnChains - blackPawnChains);
 
     // Mobility
-    whiteMobility = (int)generateMoves(board, COLOR_WHITE).size();
-    blackMobility = (int)generateMoves(board, COLOR_BLACK).size();
+    // King squares were located during the piece scan above (index = rank*8 + file).
+    int whiteKingSq = (whiteKingFile >= 0) ? whiteKingRank * 8 + whiteKingFile : -1;
+    int blackKingSq = (blackKingFile >= 0) ? blackKingRank * 8 + blackKingFile : -1;
+    whiteMobility = countMobility(board, COLOR_WHITE, whiteKingSq);
+    blackMobility = countMobility(board, COLOR_BLACK, blackKingSq);
     mobilityScore = 2 * (whiteMobility - blackMobility);
 
     // King safety
@@ -475,104 +486,72 @@ EvalDetails evaluate_details(const Board& board) {
     int captureIncentive = 0;
     int hangingPiecePenalty = 0;
 
-    // Real attack test: same geometry rules as isSquareAttacked, but for a specific
-    // from-square attacker, so sliding pieces are blocked by intervening pieces.
-    auto attacks = [&board](int from, int to) -> bool {
-        const Piece& a = board.squares[from];
-        if (a.type() == NONE) return false;
-        int fx = from % 8, fy = from / 8;
-        int tx = to % 8, ty = to / 8;
-        int dx = std::abs(tx - fx), dy = std::abs(ty - fy);
-        switch (a.type()) {
-            case PAWN: {
-                int dir = (a.color() == COLOR_WHITE) ? -1 : 1;
-                return (ty == fy + dir) && (std::abs(tx - fx) == 1);
-            }
-            case KNIGHT:
-                return (dx == 2 && dy == 1) || (dx == 1 && dy == 2);
-            case KING:
-                return dx <= 1 && dy <= 1;
-            case ROOK:
-                if (dx != 0 && dy != 0) return false;
-                break;
-            case BISHOP:
-                if (dx != dy) return false;
-                break;
-            case QUEEN:
-                if (dx != 0 && dy != 0 && dx != dy) return false;
-                break;
-            default:
-                return false;
-        }
-        int sx = (tx > fx) ? 1 : (tx < fx) ? -1 : 0;
-        int sy = (ty > fy) ? 1 : (ty < fy) ? -1 : 0;
-        for (int x = fx + sx, y = fy + sy; x != tx || y != ty; x += sx, y += sy) {
-            if (board.squares[y * 8 + x].type() != NONE) return false;
-        }
-        return true;
-    };
+    // One walk over each piece's attack set does both jobs at once: it
+    // accumulates the threat terms (previously a 64x64 sweep with a geometry
+    // test per ordered pair) and fills the attack maps used by the hanging
+    // test below (previously two isSquareAttacked() ray-scans per piece).
+    // Indexed by PieceColor, so slot 1 is white and slot 2 is black.
+    bool attackedBy[3][64] = {};
 
     for (int i = 0; i < 64; ++i) {
         const Piece& attacker = board.squares[i];
         if (attacker.type() == NONE) continue;
+        const PieceColor ac = attacker.color();
+        const int attackerValue = pieceValues[attacker.type()];
 
-        // Threat bonus for each enemy piece this piece really attacks
-        for (int j = 0; j < 64; ++j) {
-            if (i == j) continue;
+        forEachAttackedSquare(board, i, [&](int j) {
+            attackedBy[ac][j] = true;
+
             const Piece& target = board.squares[j];
-            if (target.type() == NONE || attacker.color() == target.color()) continue;
+            if (target.type() == NONE || target.color() == ac) return;
             // The king is handled by the search's mate scores, not the static threats.
-            if (target.type() == KING) continue;
-            if (!attacks(i, j)) continue;
+            if (target.type() == KING) return;
 
             int threatValue = ::threatBonus[target.type()];
-            if (attacker.color() == COLOR_WHITE) {
-                whiteThreats += threatValue;
-            } else {
-                blackThreats += threatValue;
-            }
+            if (ac == COLOR_WHITE) whiteThreats += threatValue;
+            else                   blackThreats += threatValue;
 
             // Extra bonus for attacking more valuable pieces with less valuable pieces
-            if (pieceValues[target.type()] > pieceValues[attacker.type()]) {
-                int valueGap = pieceValues[target.type()] - pieceValues[attacker.type()];
-                if (attacker.color() == COLOR_WHITE) {
-                    captureIncentive += valueGap / 10; // 10% of value difference
-                } else {
-                    captureIncentive -= valueGap / 10;
-                }
+            if (pieceValues[target.type()] > attackerValue) {
+                int valueGap = pieceValues[target.type()] - attackerValue;
+                if (ac == COLOR_WHITE) captureIncentive += valueGap / 10; // 10% of value difference
+                else                   captureIncentive -= valueGap / 10;
             }
-        }
+        });
+    }
 
-        // Penalize pieces that are really attacked but not really defended.
-        // isSquareAttacked is sliding-aware and uses the correct pawn direction.
-        // The king is never a hangable piece; checkmate is scored by the search.
-        if (attacker.type() == KING) continue;
-        PieceColor enemyColor = (attacker.color() == COLOR_WHITE) ? COLOR_BLACK : COLOR_WHITE;
-        bool isAttacked = board.isSquareAttacked(i, enemyColor);
-        bool isDefended = board.isSquareAttacked(i, attacker.color());
-        if (isAttacked && !isDefended) {
-            int hangingPenalty = pieceValues[attacker.type()];
-            if (attacker.color() == COLOR_WHITE) {
-                hangingPiecePenalty -= hangingPenalty;
-            } else {
-                hangingPiecePenalty += hangingPenalty;
-            }
+    // Penalize pieces that are really attacked but not really defended.
+    // The king is never a hangable piece; checkmate is scored by the search.
+    for (int i = 0; i < 64; ++i) {
+        const Piece& p = board.squares[i];
+        if (p.type() == NONE || p.type() == KING) continue;
+        PieceColor own = p.color();
+        PieceColor enemyColor = (own == COLOR_WHITE) ? COLOR_BLACK : COLOR_WHITE;
+        if (attackedBy[enemyColor][i] && !attackedBy[own][i]) {
+            int hangingPenalty = pieceValues[p.type()];
+            if (own == COLOR_WHITE) hangingPiecePenalty -= hangingPenalty;
+            else                    hangingPiecePenalty += hangingPenalty;
         }
     }
-    
+
     threatScore = (whiteThreats - blackThreats) + captureIncentive + hangingPiecePenalty;
 
     // Undefended pieces
     for (int i = 0; i < 64; ++i) {
         const Piece& p = board.squares[i];
         if (p.type() == NONE) continue;
+        // "Defended" here means simply an adjacent friendly piece. The old
+        // 64-square sweep tested Chebyshev distance <= 1, which is exactly
+        // the eight neighbouring squares.
         bool defended = false;
-        for (int j = 0; j < 64; ++j) {
-            if (i == j) continue;
-            const Piece& q = board.squares[j];
-            if (q.type() == NONE) continue;
-            if (p.color() == q.color()) {
-                if (std::abs((i%8)-(j%8)) <= 1 && std::abs((i/8)-(j/8)) <= 1) defended = true;
+        const int x = i % 8, y = i / 8;
+        for (int dy = -1; dy <= 1 && !defended; ++dy) {
+            for (int dx = -1; dx <= 1; ++dx) {
+                if (dx == 0 && dy == 0) continue;
+                int nx = x + dx, ny = y + dy;
+                if (nx < 0 || nx > 7 || ny < 0 || ny > 7) continue;
+                const Piece& q = board.squares[ny * 8 + nx];
+                if (q.type() != NONE && q.color() == p.color()) { defended = true; break; }
             }
         }
         if (!defended) {
