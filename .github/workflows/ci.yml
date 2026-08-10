@@ -45,6 +45,12 @@ jobs:
       - name: static exchange evaluation
         run: make test-see
 
+      # Magic tables exhaustively, plus attack/checker/pin queries cross-checked
+      # against the mailbox engine. Magic bitboards fail silently, so nothing
+      # short of exhaustive verification is worth anything here.
+      - name: bitboard attacks
+        run: make test-bitboard
+
       # A search given a clock must return inside it; one that does not hangs
       # the GUI and forfeits on time.
       - name: time control

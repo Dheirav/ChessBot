@@ -37,7 +37,7 @@ $(EXEC): $(OBJ)
 ENGINE_SRC = $(wildcard src/engine/*.cpp)
 # game_manager has no GUI dependency, so game-state tests link without SFML too.
 GM_SRC = src/game_manager.cpp
-TESTS = tests/perft tests/match tests/gamestate tests/evalref tests/bench tests/timecontrol tests/see_test
+TESTS = tests/perft tests/match tests/gamestate tests/evalref tests/bench tests/timecontrol tests/see_test tests/bitboard_test
 
 # perft guards move generation: leaf counts must match published references.
 tests/perft: tests/perft.cpp $(ENGINE_SRC)
@@ -65,6 +65,11 @@ tests/timecontrol: tests/timecontrol.cpp $(ENGINE_SRC)
 
 # see_test checks static exchange evaluation against hand-computed positions.
 tests/see_test: tests/see_test.cpp $(ENGINE_SRC)
+	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
+
+# bitboard_test validates the magic tables exhaustively and cross-checks the
+# attack, checker and pin queries against the mailbox engine.
+tests/bitboard_test: tests/bitboard_test.cpp $(ENGINE_SRC)
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
 
 tests: $(TESTS)
@@ -114,6 +119,10 @@ test-timecontrol: tests/timecontrol
 test-see: tests/see_test
 	./tests/see_test
 
+# Validate the magic tables and the bitboard attack queries.
+test-bitboard: tests/bitboard_test
+	./tests/bitboard_test
+
 # Check the UCI protocol. Needs the main binary, since UCI is a mode of it.
 # A protocol bug is invisible to every other test here: the engine plays fine
 # through its own GUI while being undrivable by any external tool.
@@ -130,4 +139,4 @@ remake:
 	$(MAKE) all
 
 # Mark these targets as not actual files
-.PHONY: all clean remake tests test-perft test-match test-gamestate test-evalref evalref-regen bench test-bench bench-regen test-timecontrol test-see test-uci
+.PHONY: all clean remake tests test-perft test-match test-gamestate test-evalref evalref-regen bench test-bench bench-regen test-timecontrol test-see test-bitboard test-uci
