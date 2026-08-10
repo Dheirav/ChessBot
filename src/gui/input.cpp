@@ -84,7 +84,7 @@ void Input::handleEvent(const sf::Event& event, Board& board) {
         int x = px / TILE_SIZE;
         int y = py / TILE_SIZE;
         if (px >= 0 && py >= 0 && x < BOARD_SIZE && y < BOARD_SIZE) {
-        int idx = board.get1DIndex(x, y);
+        int idx = screenToSquare(x, y, flipped);
         const Piece& piece = board.squares[idx];
         if (piece.type() != NONE) {
             if (piece.color() == board.activeColor) {
@@ -126,7 +126,7 @@ void Input::handleEvent(const sf::Event& event, Board& board) {
         int x = px / TILE_SIZE;
         int y = py / TILE_SIZE;
         if (px >= 0 && py >= 0 && x < BOARD_SIZE && y < BOARD_SIZE) {
-            int idx = board.get1DIndex(x, y);
+            int idx = screenToSquare(x, y, flipped);
             if (idx == selectedSquare) {
                 dragging = true;
                 dragStartX = x;
@@ -147,8 +147,8 @@ void Input::handleEvent(const sf::Event& event, Board& board) {
             dragging = false;
             return;
         }
-        int from = Board::get1DIndex(dragStartX, dragStartY);
-        int to = Board::get1DIndex(x, y);
+        int from = screenToSquare(dragStartX, dragStartY, flipped);
+        int to = screenToSquare(x, y, flipped);
         if (from != to) {
             // Check if this is a promotion move
             bool found = false;

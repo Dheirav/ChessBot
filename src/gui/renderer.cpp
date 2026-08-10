@@ -63,7 +63,7 @@ void renderBoard(sf::RenderWindow& window, const Board& board, const std::map<st
             window.draw(tile);
 
             // Draw square index overlay
-            int squareIdx = Board::get1DIndex(x, y);
+            int squareIdx = screenToSquare(x, y, input.isFlipped());
             if (fontLoaded) {
                 sf::Text idxText;
                 idxText.setFont(indexFont);

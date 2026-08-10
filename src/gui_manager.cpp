@@ -36,7 +36,11 @@ void GUIManager::run() {
         std::cerr << "No game manager set!" << std::endl;
         return;
     }
-    
+
+    // Draw the board from the human player's side
+    input.setFlipped(gameManager->getHumanSide() == COLOR_BLACK);
+
+
     while (isRunning && window.isOpen()) {
         handleEvents();
         update();

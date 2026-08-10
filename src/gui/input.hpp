@@ -34,10 +34,16 @@ public:
 
     int getSelectedSquare() const { return selectedSquare; }
 
+    // Board orientation: when flipped, black is drawn at the bottom.
+    // The renderer reads this so both use the same screen<->square mapping.
+    void setFlipped(bool value) { flipped = value; }
+    bool isFlipped() const { return flipped; }
+
     std::vector<int> highlightedSquares;
     std::vector<Move> legalMoves;
 private:
     bool dragging;
+    bool flipped = false;
     bool moveCompleted = false;
     Move completedMove;
     int selectedSquare = -1;
