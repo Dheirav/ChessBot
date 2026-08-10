@@ -4,6 +4,7 @@
 #include "transposition_table.hpp"
 #include <atomic>
 #include <cstdint>
+#include <string>
 
 // Search heuristics. Unlike alpha-beta these are not exact: they trade a small
 // risk of missing a line for a much smaller tree, so they are toggleable both
@@ -15,6 +16,16 @@ struct SearchOptions {
     bool quiet = false;      // suppress the per-depth progress output
 };
 extern SearchOptions g_searchOptions;
+
+// Set one option by name: "nullmove", "lmr", "aspiration". Returns false if the
+// name is unknown, so a caller can report a typo rather than silently ignore it.
+//
+// Named lookup exists so a single heuristic can be toggled on its own. Every
+// Phase 3 search feature is accepted or rejected by an A/B match, and that
+// needs the control arm to differ in exactly one thing — which a single "all
+// heuristics on/off" switch cannot express. Each new feature adds one line
+// here and becomes testable from the match harness and over UCI at once.
+bool setSearchOption(SearchOptions& opts, const std::string& name, bool value);
 
 // Nodes visited by the last search: every entry to the main search or to
 // quiescence. Reset at the start of findBestMoveIterativeDeepening.

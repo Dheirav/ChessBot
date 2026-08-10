@@ -37,7 +37,7 @@ $(EXEC): $(OBJ)
 ENGINE_SRC = $(wildcard src/engine/*.cpp)
 # game_manager has no GUI dependency, so game-state tests link without SFML too.
 GM_SRC = src/game_manager.cpp
-TESTS = tests/perft tests/match tests/gamestate tests/evalref tests/bench tests/timecontrol
+TESTS = tests/perft tests/match tests/gamestate tests/evalref tests/bench tests/timecontrol tests/see_test
 
 # perft guards move generation: leaf counts must match published references.
 tests/perft: tests/perft.cpp $(ENGINE_SRC)
@@ -61,6 +61,10 @@ tests/bench: tests/bench.cpp $(ENGINE_SRC)
 
 # timecontrol guards that a search with a budget returns inside it.
 tests/timecontrol: tests/timecontrol.cpp $(ENGINE_SRC)
+	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
+
+# see_test checks static exchange evaluation against hand-computed positions.
+tests/see_test: tests/see_test.cpp $(ENGINE_SRC)
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
 
 tests: $(TESTS)
@@ -106,6 +110,10 @@ bench-regen: tests/bench
 test-timecontrol: tests/timecontrol
 	./tests/timecontrol
 
+# Check static exchange evaluation against hand-computed positions.
+test-see: tests/see_test
+	./tests/see_test
+
 # Check the UCI protocol. Needs the main binary, since UCI is a mode of it.
 # A protocol bug is invisible to every other test here: the engine plays fine
 # through its own GUI while being undrivable by any external tool.
@@ -122,4 +130,4 @@ remake:
 	$(MAKE) all
 
 # Mark these targets as not actual files
-.PHONY: all clean remake tests test-perft test-match test-gamestate test-evalref evalref-regen bench test-bench bench-regen test-timecontrol test-uci
+.PHONY: all clean remake tests test-perft test-match test-gamestate test-evalref evalref-regen bench test-bench bench-regen test-timecontrol test-see test-uci

@@ -29,7 +29,12 @@
 //   -t <ms>         per-move time budget for both sides; 0 = depth only
 //   --da/--db <d>   per-side depth, for comparing two depth settings
 //   --ta/--tb <ms>  per-side time budget
-//   --ha/--hb on|off  per-side search heuristics (default A on, B off)
+//   --ha/--hb on|off  all three search heuristics at once (default A on, B off)
+//   --optA/--optB     individual options, e.g. --optA nullmove=on,lmr=off
+//                     Applied after --ha/--hb, so they refine that baseline.
+//                     This is how a single feature gets its own A/B: the two
+//                     sides must differ in exactly one thing for the result to
+//                     mean anything about that thing.
 //   --sprt          stop as soon as the result is decided (see below)
 //   --elo0/--elo1   SPRT hypotheses in Elo (default 0 and 10)
 //
@@ -198,6 +203,23 @@ int main(int argc, char** argv) {
 
     auto onOff = [](const char* v) { return std::string(v) == "on"; };
 
+    // "nullmove=on,lmr=off" -> individual option settings on one side.
+    std::vector<std::string> optsA, optsB;
+    auto splitOpts = [](const char* text) {
+        std::vector<std::string> out;
+        std::string cur;
+        for (const char* c = text; ; ++c) {
+            if (*c == ',' || *c == '\0') {
+                if (!cur.empty()) out.push_back(cur);
+                cur.clear();
+                if (*c == '\0') break;
+            } else {
+                cur += *c;
+            }
+        }
+        return out;
+    };
+
     // Positional form kept working: ./tests/match [pairs] [depth] [seed]
     if (argc > 1 && argv[1][0] != '-') {
         pairs = std::atoi(argv[1]);
@@ -217,6 +239,8 @@ int main(int argc, char** argv) {
             else if (a == "--tb")    timeB = std::atol(next());
             else if (a == "--ha")    heurA = onOff(next());
             else if (a == "--hb")    heurB = onOff(next());
+            else if (a == "--optA")  optsA = splitOpts(next());
+            else if (a == "--optB")  optsB = splitOpts(next());
             else if (a == "--sprt")  useSprt = true;
             else if (a == "--elo0")  elo0 = std::atof(next());
             else if (a == "--elo1")  elo1 = std::atof(next());
@@ -248,8 +272,36 @@ int main(int argc, char** argv) {
     EngineConfig B{"B", SearchOptions{}, SearchLimits(ceilB, budgetB)};
     B.opts.nullMove = heurB; B.opts.lmr = heurB; B.opts.aspiration = heurB;
 
-    std::string nameA = std::string(heurA ? "heuristics-on" : "heuristics-off");
-    std::string nameB = std::string(heurB ? "heuristics-on" : "heuristics-off");
+    // Individual options refine the on/off baseline set above.
+    auto applyOpts = [](SearchOptions& opts, const std::vector<std::string>& list,
+                        const char* which) {
+        for (const std::string& item : list) {
+            size_t eq = item.find('=');
+            std::string key = (eq == std::string::npos) ? item : item.substr(0, eq);
+            bool value = (eq == std::string::npos) ? true
+                                                  : (item.substr(eq + 1) == "on");
+            if (!setSearchOption(opts, key, value)) {
+                std::printf("unknown option for %s: %s\n", which, key.c_str());
+                std::exit(1);
+            }
+        }
+    };
+    applyOpts(A.opts, optsA, "--optA");
+    applyOpts(B.opts, optsB, "--optB");
+
+    // Name each side by the options it actually ends up with, not by the
+    // --ha/--hb baseline. A logged result has to say precisely what was
+    // compared, or it cannot be interpreted later — which is the whole problem
+    // with the -30 Elo figure in BACKLOG.md that did not record its depth.
+    auto describe = [](const SearchOptions& o) {
+        std::string d;
+        if (o.nullMove)   d += (d.empty() ? "" : "+") + std::string("nullmove");
+        if (o.lmr)        d += (d.empty() ? "" : "+") + std::string("lmr");
+        if (o.aspiration) d += (d.empty() ? "" : "+") + std::string("asp");
+        return d.empty() ? std::string("plain-alphabeta") : d;
+    };
+    std::string nameA = describe(A.opts);
+    std::string nameB = describe(B.opts);
     if (budgetA > 0) nameA += " @" + std::to_string(budgetA) + "ms";
     else             nameA += " @d" + std::to_string(ceilA);
     if (budgetB > 0) nameB += " @" + std::to_string(budgetB) + "ms";

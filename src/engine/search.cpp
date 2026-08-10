@@ -45,6 +45,13 @@ static int scoreForSideToMove(const Board& board) {
 }
 
 SearchOptions g_searchOptions;
+
+bool setSearchOption(SearchOptions& opts, const std::string& name, bool value) {
+    if (name == "nullmove")   { opts.nullMove = value;   return true; }
+    if (name == "lmr")        { opts.lmr = value;        return true; }
+    if (name == "aspiration") { opts.aspiration = value; return true; }
+    return false;
+}
 uint64_t g_searchNodes = 0;
 SearchInfoFn g_searchInfo = nullptr;
 

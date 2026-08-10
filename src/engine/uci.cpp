@@ -7,6 +7,7 @@
 #include "transposition_table.hpp"
 
 #include <atomic>
+#include <cctype>
 #include <cmath>
 #include <iostream>
 #include <memory>
@@ -208,12 +209,16 @@ void handleSetOption(std::istringstream& is) {
             g_hashMb = mb;
             g_tt = std::make_unique<TranspositionTable>((size_t)g_hashMb);
         }
-    } else if (name == "NullMove") {
-        g_searchOptions.nullMove = isTrue(value);
-    } else if (name == "LMR") {
-        g_searchOptions.lmr = isTrue(value);
-    } else if (name == "Aspiration") {
-        g_searchOptions.aspiration = isTrue(value);
+        return;
+    }
+
+    // Search heuristics go through the same named lookup the match harness
+    // uses, so a feature added there is switchable over UCI without a second
+    // edit here. UCI names are capitalised; the lookup keys are not.
+    std::string key;
+    for (char c : name) key += (char)std::tolower((unsigned char)c);
+    if (!setSearchOption(g_searchOptions, key, isTrue(value))) {
+        std::cout << "info string unknown option: " << name << std::endl;
     }
 }
 

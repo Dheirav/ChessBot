@@ -18,3 +18,6 @@ evaluation_log_*.txt
 
 # Evaluation dumps produced by GameManager::logEvaluation()
 evaluation_log_*.txt
+
+# Match gate logs (tee output, often still being written)
+gate-*.log
