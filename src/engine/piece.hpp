@@ -29,6 +29,4 @@ public:
 
     PieceColor color() const;
     PieceType type() const;
-
-    static Piece fromValue(uint8_t val);
 };

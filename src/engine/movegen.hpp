@@ -9,9 +9,12 @@
 void generatePseudoLegalMoves(const Board& board, PieceColor sideToMove,
                               bool includeCastling, MoveList& out);
 
-// Generate pseudo-legal moves (may leave king in check)
-MoveList generateMoves(const Board& board, PieceColor sideToMove, bool includeCastling);
-MoveList generateMoves(const Board& board, PieceColor sideToMove);
-
-// Generate only legal moves (filters out moves that leave king in check)
-MoveList generateLegalMoves(const Board& board, PieceColor sideToMove);
+// Generate fully legal moves: the pseudo-legal set above, filtered by making
+// each move and testing whether the side's own king is left attacked.
+//
+// This is the only legal generator. It used to have a second name,
+// generateMoves(), which was documented as "pseudo-legal" and was in fact the
+// identical function — callers reasonably believed they were skipping the
+// legality filter when they were not.
+MoveList generateLegalMoves(const Board& board, PieceColor sideToMove,
+                            bool includeCastling = true);

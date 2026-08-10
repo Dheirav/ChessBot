@@ -2,7 +2,7 @@
 // compares against published reference values.
 //
 // This is the standard regression guard for move generation. Any change to
-// generateMoves(), makeMove()/unmakeMove(), castling, en passant or promotion
+// generateLegalMoves(), makeMove()/unmakeMove(), castling, en passant or promotion
 // handling should be checked against it: a single wrong or missing move shows
 // up as a mismatched count.
 //

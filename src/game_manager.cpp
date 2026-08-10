@@ -480,8 +480,8 @@ void GameManager::logEvaluation() {
                   << evalDetails.pawnChain << "," << evalDetails.rooksOpenFile << "," 
                   << evalDetails.rooksSemiOpenFile << "," << evalDetails.rooks7thRank << "," 
                   << evalDetails.pst << "," << evalDetails.outpost << "," 
-                  << evalDetails.trapped << "," << evalDetails.coordination << "," 
-                  << evalDetails.kingActivity << "," << evalDetails.threats << "," 
+                  << evalDetails.trapped << ","
+                  << evalDetails.kingActivity << "," << evalDetails.threats << ","
                   << evalDetails.undefended << "," << evalDetails.space << "," 
                   << evalDetails.drawish << "\n";
 }

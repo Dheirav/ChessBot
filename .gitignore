@@ -15,3 +15,6 @@ tests/src/
 # Profiling and logs
 gmon.out
 evaluation_log_*.txt
+
+# Evaluation dumps produced by GameManager::logEvaluation()
+evaluation_log_*.txt

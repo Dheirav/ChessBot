@@ -2,7 +2,7 @@
 
 #include "evaluation.hpp"
 #include "board.hpp"
-#include "movegen.hpp" // For generateMoves
+#include "movegen.hpp" // For generateLegalMoves
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -11,11 +11,11 @@
 // Piece values indexed by PieceType (NONE=0, KING=1, PAWN=2, KNIGHT=3, BISHOP=4, ROOK=5, QUEEN=6)
 const int pieceValues[] = { 0, 20000, 100, 325, 335, 525, 950 };
 
-// Capture bonus values - extra points for capturing these pieces
-const int captureBonus[] = { 0, 10000, 50, 100, 110, 200, 400 };
-
-// Threat bonus - bonus for threatening to capture valuable pieces
-const int threatBonus[] = { 0, 500, 10, 25, 30, 50, 100 };
+// Threat bonus - bonus for threatening to capture valuable pieces.
+// The KING slot is 0 and must stay in place to keep the PieceType indexing:
+// the threat loop skips king targets entirely (a king can never be captured),
+// so any value here would be unreachable.
+const int threatBonus[] = { 0, 0, 10, 25, 30, 50, 100 };
 
 // Piece-square tables (centipawns), white perspective, index 0 = a8 (matches board indexing).
 // Standard simplified evaluation tables. Black uses the vertically mirrored table (sq ^ 56).
@@ -188,7 +188,7 @@ static inline void forEachAttackedSquare(const Board& board, int from, F fn) {
 }
 
 // Mobility is counted over pseudo-legal moves rather than legal ones.
-// generateMoves() filters for legality by copying the whole board, making the
+// generateLegalMoves() filters for legality by copying the whole board, making the
 // move and testing the king square for every candidate - roughly 35 board
 // copies per call, paid twice per evaluated node, to produce two integers.
 // Pseudo-legal counts differ from legal counts only when pieces are pinned or
@@ -207,7 +207,7 @@ static int countMobility(const Board& board, PieceColor color, int kingSq) {
     // removes the one large distortion.
     PieceColor opp = (color == COLOR_WHITE) ? COLOR_BLACK : COLOR_WHITE;
     if (kingSq >= 0 && board.isSquareAttacked(kingSq, (int)opp))
-        return (int)generateMoves(board, color, true).size();
+        return (int)generateLegalMoves(board, color, true).size();
 
     // Reused across calls: clear() keeps the capacity, so this stops
     // allocating after the first few evaluations.
@@ -229,15 +229,11 @@ EvalDetails evaluate_details(const Board& board) {
     int pstScore = 0;
     int outpostBonus = 0;
     int trappedPiecePenalty = 0;
-    int coordinationBonus = 0;
     int kingActivityBonus = 0;
     float gamePhaseFactor = 1.0f;
-    float tempoBonus = 0.01f; 
+    float tempoBonus = 0.01f;
     int threatScore = 0, undefendedPenalty = 0;
     int spaceScore = 0;
-    int nnueEvalScore = 0;
-    int repetitionPenalty = 0;
-    int drawishPenalty = 0;
 
     int whiteMaterial = 0, blackMaterial = 0;
     int whitePawns = 0, blackPawns = 0;
@@ -577,15 +573,8 @@ EvalDetails evaluate_details(const Board& board) {
         blackDrawish = 1;
     }
 
-    // NNUE stub
-    nnueEvalScore = 0;
-
-    // Repetition/drawish material stub
-    repetitionPenalty = 0;
-    drawishPenalty = 0;
-
     // Assign to EvalDetails
-    e.total = materialScore + mobilityScore + kingSafetyScore + centerControlScore + bishopPairBonus + doubledPawnPenalty + isolatedPawnPenalty + passedPawnBonus + backwardPawnPenalty + connectedPawnBonus + pawnChainBonus + rooksOpenFileBonus + rooksSemiOpenFileBonus + rooks7thRankBonus + pstScore + outpostBonus + trappedPiecePenalty + coordinationBonus + kingActivityBonus + (int)(gamePhaseFactor * 1.5f) + tempoBonus + threatScore + undefendedPenalty + spaceScore + nnueEvalScore + repetitionPenalty + drawishPenalty;
+    e.total = materialScore + mobilityScore + kingSafetyScore + centerControlScore + bishopPairBonus + doubledPawnPenalty + isolatedPawnPenalty + passedPawnBonus + backwardPawnPenalty + connectedPawnBonus + pawnChainBonus + rooksOpenFileBonus + rooksSemiOpenFileBonus + rooks7thRankBonus + pstScore + outpostBonus + trappedPiecePenalty + kingActivityBonus + (int)(gamePhaseFactor * 1.5f) + tempoBonus + threatScore + undefendedPenalty + spaceScore;
     e.material = materialScore;
     e.mobility = mobilityScore;
     e.kingSafety = kingSafetyScore;
@@ -603,12 +592,12 @@ EvalDetails evaluate_details(const Board& board) {
     e.pst = pstScore;
     e.outpost = outpostBonus;
     e.trapped = trappedPiecePenalty;
-    e.coordination = coordinationBonus;
     e.kingActivity = kingActivityBonus;
     e.threats = threatScore;
     e.undefended = undefendedPenalty;
     e.space = spaceScore;
-    e.drawish = drawishPenalty + 30 * (whiteDrawish - blackDrawish) + 30 * (whiteBishopPair - blackBishopPair);
+    // Reported for diagnostics only — deliberately not part of e.total.
+    e.drawish = 30 * (whiteDrawish - blackDrawish) + 30 * (whiteBishopPair - blackBishopPair);
     return e;
 }
 

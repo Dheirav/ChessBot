@@ -15,18 +15,13 @@ struct SearchOptions {
 };
 extern SearchOptions g_searchOptions;
 
-// Returns the best move for the given board and side, searching to the given depth
-Move findBestMove(const Board& board, int depth);
-
-// Thread-safe version that can be stopped
-Move findBestMoveWithStop(Board& board, int depth, const std::atomic<bool>& shouldStop);
-
-// Version with transposition table
-Move findBestMoveWithTT(Board& board, int depth, const std::atomic<bool>& shouldStop, 
-                       TranspositionTable& tt);
-
-// Iterative deepening version with time management
-Move findBestMoveIterativeDeepening(Board& board, int maxDepth, 
-                                   const std::atomic<bool>& shouldStop, 
+// The engine's only search entry point. Iterative deepening over a
+// transposition table, with the heuristics in SearchOptions above.
+//
+// There is deliberately no non-TT variant: a second copy of the search logic
+// drifts from this one, and benchmarking it produces numbers that describe a
+// search the application never runs.
+Move findBestMoveIterativeDeepening(Board& board, int maxDepth,
+                                   const std::atomic<bool>& shouldStop,
                                    TranspositionTable& tt);
 

@@ -21,7 +21,6 @@ struct EvalDetails {
 	int pst;
 	int outpost;
 	int trapped;
-	int coordination;
 	int kingActivity;
 	int threats;
 	int undefended;

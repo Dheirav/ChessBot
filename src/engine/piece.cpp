@@ -13,9 +13,3 @@ PieceColor Piece::color() const {
 PieceType Piece::type() const {
     return static_cast<PieceType>(value & 0b111);
 }
-
-Piece Piece::fromValue(uint8_t val) {
-    Piece p;
-    p.value = val & 0b11111;
-    return p;
-}

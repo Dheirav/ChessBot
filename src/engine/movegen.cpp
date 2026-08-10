@@ -284,7 +284,7 @@ void generatePseudoLegalMoves(const Board& board, PieceColor sideToMove, bool in
 
 }
 
-MoveList generateMoves(const Board& board, PieceColor sideToMove, bool includeCastling) {
+MoveList generateLegalMoves(const Board& board, PieceColor sideToMove, bool includeCastling) {
     MoveList moves;
     generatePseudoLegalMoves(board, sideToMove, includeCastling, moves);
 
@@ -330,15 +330,4 @@ MoveList generateMoves(const Board& board, PieceColor sideToMove, bool includeCa
         scratch.unmakeMove(undo);
     }
     return legalMoves;
-}
-
-// Overload for default includeCastling=true
-MoveList generateMoves(const Board& board, PieceColor sideToMove) {
-    return generateMoves(board, sideToMove, true);
-}
-
-// generateMoves() already filters out moves that leave the king in check,
-// so it returns fully legal moves. No second legality pass is needed.
-MoveList generateLegalMoves(const Board& board, PieceColor sideToMove) {
-    return generateMoves(board, sideToMove, true);
 }
