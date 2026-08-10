@@ -12,6 +12,11 @@ void BitboardState::clear() {
         black[i] = 0ULL;
     }
     occupancyWhite = occupancyBlack = occupancyAll = 0ULL;
+    // Reset non-piece state too, or a reused BitboardState keeps the
+    // previous position's castling rights and en passant square
+    castlingRights = 0;
+    enPassantSquare = -1;
+    sideToMove = BB_WHITE;
 }
 
 int popcount(Bitboard b) {
@@ -95,4 +100,35 @@ void setBitboardFromFEN(BitboardState& state, const std::string& fen) {
         state.occupancyBlack |= state.black[t];
     }
     state.occupancyAll = state.occupancyWhite | state.occupancyBlack;
+
+    // Parse the remaining FEN fields: side to move, castling rights, and en
+    // passant target. These were previously ignored, so every loaded
+    // position had no castling rights and no EP square.
+    auto skipSpaces = [&]() { while (i < fen.size() && fen[i] == ' ') ++i; };
+
+    skipSpaces();
+    if (i < fen.size()) {
+        state.sideToMove = (fen[i] == 'b') ? BB_BLACK : BB_WHITE;
+        while (i < fen.size() && fen[i] != ' ') ++i;
+    }
+
+    skipSpaces();
+    while (i < fen.size() && fen[i] != ' ') {
+        switch (fen[i]) {
+            case 'K': state.castlingRights |= 1; break;
+            case 'Q': state.castlingRights |= 2; break;
+            case 'k': state.castlingRights |= 4; break;
+            case 'q': state.castlingRights |= 8; break;
+            default: break; // '-'
+        }
+        ++i;
+    }
+
+    skipSpaces();
+    if (i + 1 < fen.size() && fen[i] >= 'a' && fen[i] <= 'h' &&
+        fen[i + 1] >= '1' && fen[i + 1] <= '8') {
+        int file = fen[i] - 'a';
+        int rank = fen[i + 1] - '1';
+        state.enPassantSquare = rank * 8 + file;
+    }
 }

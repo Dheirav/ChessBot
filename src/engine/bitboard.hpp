@@ -28,6 +28,8 @@ struct BitboardState {
     uint8_t castlingRights = 0;
     // En passant target square (0-63, or -1 if none)
     int enPassantSquare = -1;
+    // Side to move
+    BitboardColor sideToMove = BB_WHITE;
 
     BitboardState();
     void clear();

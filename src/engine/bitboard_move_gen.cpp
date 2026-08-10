@@ -3,11 +3,13 @@
 #include <cassert>
 #include <bitset>
 
-// Helper: shift bitboard north/south
+// Helper: shift bitboard north/south/east/west (a1 = bit 0, h1 = bit 7).
+// East (+1) must drop the H-file before shifting or H-file pieces wrap to
+// the A-file of the next rank; west (-1) must drop the A-file.
 constexpr Bitboard north(Bitboard b) { return b << 8; }
 constexpr Bitboard south(Bitboard b) { return b >> 8; }
-constexpr Bitboard east(Bitboard b)  { return (b & 0xfefefefefefefefeULL) << 1; }
-constexpr Bitboard west(Bitboard b)  { return (b & 0x7f7f7f7f7f7f7f7fULL) >> 1; }
+constexpr Bitboard east(Bitboard b)  { return (b & 0x7f7f7f7f7f7f7f7fULL) << 1; }
+constexpr Bitboard west(Bitboard b)  { return (b & 0xfefefefefefefefeULL) >> 1; }
 
 // Helper: mask for rank 2, 7, 8, 1
 constexpr Bitboard rank1 = 0x00000000000000FFULL;
@@ -25,9 +27,11 @@ void generatePawnMoves(const BitboardState& state, BitboardColor color, Bitboard
         Bitboard singlePush = north(pawns) & empty;
         Bitboard promotionPush = singlePush & rank8;
         Bitboard quietPush = singlePush & ~rank8;
-        // Double pushes
-        Bitboard doublePush = north(quietPush & rank2) & empty;
-        doublePush = north(doublePush) & empty;
+        // Double pushes: pawns still on rank 2 whose single-push square AND
+        // double-push square are both empty. (Masking quietPush - a set of
+        // destinations on rank 3+ - with rank2 was always empty, so double
+        // pushes were never generated.)
+        Bitboard doublePush = north(north(pawns & rank2) & empty) & empty;
         // Captures
         Bitboard eastCap = north(east(pawns)) & enemy;
         Bitboard westCap = north(west(pawns)) & enemy;
@@ -78,19 +82,17 @@ void generatePawnMoves(const BitboardState& state, BitboardColor color, Bitboard
                 }
             }
         }
-        // En passant
+        // En passant: any white pawn that attacks the EP target square may
+        // capture onto it. The attackers sit one rank below the target on
+        // an adjacent file. (The old code tested a shifted board against
+        // itself - never true - and pushed a move from the EP square to a
+        // rank-7 square, neither of which was the capturing pawn.)
         if (state.enPassantSquare >= 0 && state.enPassantSquare < 64) {
-            Bitboard epSquare = 1ULL << state.enPassantSquare;
-            Bitboard epCapture = (color == BB_WHITE) ? (epSquare >> 8) : (epSquare << 8);
-            // Check if pawns can capture en passant
-            Bitboard pawnsEast = east(pawns);
-            Bitboard pawnsWest = west(pawns);
-            if (testBit(epCapture, state.enPassantSquare)) {
-                if (testBit(pawnsEast, state.enPassantSquare)) {
-                    moves.push_back({state.enPassantSquare, state.enPassantSquare + ((color == BB_WHITE) ? 8 : -8), true, false, BB_NONE});
-                }
-                if (testBit(pawnsWest, state.enPassantSquare)) {
-                    moves.push_back({state.enPassantSquare, state.enPassantSquare + ((color == BB_WHITE) ? 8 : -8), true, false, BB_NONE});
+            Bitboard epBB = 1ULL << state.enPassantSquare;
+            Bitboard attackers = (south(east(epBB)) | south(west(epBB))) & pawns;
+            for (int from = 0; from < 64; ++from) {
+                if (testBit(attackers, from)) {
+                    moves.push_back({from, state.enPassantSquare, true, false, BB_NONE});
                 }
             }
         }
@@ -99,9 +101,8 @@ void generatePawnMoves(const BitboardState& state, BitboardColor color, Bitboard
         Bitboard singlePush = south(pawns) & empty;
         Bitboard promotionPush = singlePush & rank1;
         Bitboard quietPush = singlePush & ~rank1;
-        // Double pushes
-        Bitboard doublePush = south(quietPush & rank7) & empty;
-        doublePush = south(doublePush) & empty;
+        // Double pushes (see the white-side comment)
+        Bitboard doublePush = south(south(pawns & rank7) & empty) & empty;
         // Captures
         Bitboard eastCap = south(east(pawns)) & enemy;
         Bitboard westCap = south(west(pawns)) & enemy;
@@ -130,41 +131,39 @@ void generatePawnMoves(const BitboardState& state, BitboardColor color, Bitboard
                 }
             }
         }
-        // Captures
+        // Captures. eastCap = south(east(pawns)) puts the destination at
+        // from - 7, so the origin is to + 7 (and to + 9 for westCap); the
+        // previous offsets were swapped, generating every black capture
+        // from the wrong square.
         for (int to = 0; to < 64; ++to) {
             if (testBit(normalEastCap, to)) {
-                moves.push_back({to + 9, to, true, false, BB_NONE});
+                moves.push_back({to + 7, to, true, false, BB_NONE});
             }
             if (testBit(normalWestCap, to)) {
-                moves.push_back({to + 7, to, true, false, BB_NONE});
+                moves.push_back({to + 9, to, true, false, BB_NONE});
             }
         }
         // Promotion captures
         for (int to = 0; to < 64; ++to) {
             if (testBit(promoEastCap, to)) {
                 for (BitboardPieceType pt : {BB_QUEEN, BB_ROOK, BB_BISHOP, BB_KNIGHT}) {
-                    moves.push_back({to + 9, to, true, true, pt});
+                    moves.push_back({to + 7, to, true, true, pt});
                 }
             }
             if (testBit(promoWestCap, to)) {
                 for (BitboardPieceType pt : {BB_QUEEN, BB_ROOK, BB_BISHOP, BB_KNIGHT}) {
-                    moves.push_back({to + 7, to, true, true, pt});
+                    moves.push_back({to + 9, to, true, true, pt});
                 }
             }
         }
-        // En passant
+        // En passant: black attackers sit one rank above the target square
+        // (see the white-side comment)
         if (state.enPassantSquare >= 0 && state.enPassantSquare < 64) {
-            Bitboard epSquare = 1ULL << state.enPassantSquare;
-            Bitboard epCapture = (color == BB_WHITE) ? (epSquare >> 8) : (epSquare << 8);
-            // Check if pawns can capture en passant
-            Bitboard pawnsEast = east(pawns);
-            Bitboard pawnsWest = west(pawns);
-            if (testBit(epCapture, state.enPassantSquare)) {
-                if (testBit(pawnsEast, state.enPassantSquare)) {
-                    moves.push_back({state.enPassantSquare, state.enPassantSquare + ((color == BB_WHITE) ? 8 : -8), true, false, BB_NONE});
-                }
-                if (testBit(pawnsWest, state.enPassantSquare)) {
-                    moves.push_back({state.enPassantSquare, state.enPassantSquare + ((color == BB_WHITE) ? 8 : -8), true, false, BB_NONE});
+            Bitboard epBB = 1ULL << state.enPassantSquare;
+            Bitboard attackers = (north(east(epBB)) | north(west(epBB))) & pawns;
+            for (int from = 0; from < 64; ++from) {
+                if (testBit(attackers, from)) {
+                    moves.push_back({from, state.enPassantSquare, true, false, BB_NONE});
                 }
             }
         }
@@ -345,9 +344,13 @@ void generateKingMoves(const BitboardState& state, BitboardColor color, Bitboard
         }
         return false;
     };
+    // Castling also requires the king and rook to actually be on their home
+    // squares: rights bits alone can be stale in hand-built states, and the
+    // old code would emit a castling move for a king that wasn't on e1/e8.
     if (color == BB_WHITE) {
+        bool kingHome = testBit(state.white[BB_KING], 4);
         // Kingside: e1 (4) to g1 (6), rook h1 (7)
-        if ((state.castlingRights & 1) &&
+        if ((state.castlingRights & 1) && kingHome && testBit(state.white[BB_ROOK], 7) &&
             !testBit(state.occupancyAll, 5) && !testBit(state.occupancyAll, 6)) {
             // Check squares e1, f1, g1 not attacked
             if (!isSquareAttacked(4) && !isSquareAttacked(5) && !isSquareAttacked(6)) {
@@ -355,7 +358,7 @@ void generateKingMoves(const BitboardState& state, BitboardColor color, Bitboard
             }
         }
         // Queenside: e1 (4) to c1 (2), rook a1 (0)
-        if ((state.castlingRights & 2) &&
+        if ((state.castlingRights & 2) && kingHome && testBit(state.white[BB_ROOK], 0) &&
             !testBit(state.occupancyAll, 3) && !testBit(state.occupancyAll, 2) && !testBit(state.occupancyAll, 1)) {
             // Check squares e1, d1, c1 not attacked
             if (!isSquareAttacked(4) && !isSquareAttacked(3) && !isSquareAttacked(2)) {
@@ -363,8 +366,9 @@ void generateKingMoves(const BitboardState& state, BitboardColor color, Bitboard
             }
         }
     } else {
+        bool kingHome = testBit(state.black[BB_KING], 60);
         // Kingside: e8 (60) to g8 (62), rook h8 (63)
-        if ((state.castlingRights & 4) &&
+        if ((state.castlingRights & 4) && kingHome && testBit(state.black[BB_ROOK], 63) &&
             !testBit(state.occupancyAll, 61) && !testBit(state.occupancyAll, 62)) {
             // Check squares e8, f8, g8 not attacked
             if (!isSquareAttacked(60) && !isSquareAttacked(61) && !isSquareAttacked(62)) {
@@ -372,7 +376,7 @@ void generateKingMoves(const BitboardState& state, BitboardColor color, Bitboard
             }
         }
         // Queenside: e8 (60) to c8 (58), rook a8 (56)
-        if ((state.castlingRights & 8) &&
+        if ((state.castlingRights & 8) && kingHome && testBit(state.black[BB_ROOK], 56) &&
             !testBit(state.occupancyAll, 59) && !testBit(state.occupancyAll, 58) && !testBit(state.occupancyAll, 57)) {
             // Check squares e8, d8, c8 not attacked
             if (!isSquareAttacked(60) && !isSquareAttacked(59) && !isSquareAttacked(58)) {
