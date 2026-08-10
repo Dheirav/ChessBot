@@ -305,7 +305,34 @@ net effect is a one-centipawn asymmetry favouring black that has nothing to do
 with tempo. Make it an honest `int` applied to the side to move, or delete it —
 prefer an honest int and let the match say whether it earns its place.
 
-**4.2 Make "defended" mean defended** (§2.3)
+**4.2 King safety is asymmetric in a symmetric position**
+*Not in the backlog — found by 0.2 on its first line of output.*
+
+The reference file's first entry is the starting position, which is mirror
+symmetric, so every white-perspective term must be exactly 0:
+
+```
+rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1,-2,0,0,-4,0,...
+                                       total ^   ^  ^   ^ kingSafety
+                                        material ^  ^ mobility
+```
+
+`kingSafety` is **−4**. Material, mobility, PST and centre control are all
+correctly 0, so this is specific to the king-safety term rather than a general
+orientation error. Whatever it measures, it charges black four centipawns for a
+position identical to white's.
+
+It also demonstrates §2.2 exactly: the total is `-4 + 1 (game phase) + 0.01
+(tempo) = -2.99`, truncated toward zero to **−2**. Fix 4.1 first and this line
+becomes −3, which is still wrong but wrong for only one reason.
+
+*While fixing:* add a **mirror-symmetry check** to `tests/evalref.cpp` — for
+each position, flip colours and ranks and assert every term negates exactly.
+It is the strongest cheap invariant an evaluation has, it needs no reference
+file, and it would have caught this the day the term was written. Add it as
+part of this fix rather than before it, since it fails today.
+
+**4.3 Make "defended" mean defended** (§2.3)
 The undefended-pieces term counts a piece as defended if any friendly piece
 stands on an adjacent square — that measures pawn-chain-ness, not protection.
 `attackedBy[own][sq]`, already built by `forEachAttackedSquare` for the threat
