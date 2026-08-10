@@ -15,8 +15,14 @@
 static const int QS_PIECE_VALUES[7] = { 0, 20000, 100, 320, 330, 500, 900 };
 
 // Score used for checkmate (positive = white mates black, negative = black mates white).
-// Stalemate is scored 0.
+// Actual mate scores are MATE_SCORE - ply so that nearer mates score higher,
+// which makes the engine converge on the fastest mate instead of shuffling
+// between equally "mating" lines forever. Stalemate is scored 0.
 static constexpr int MATE_SCORE = 30000;
+
+static int mateScore(bool whiteToMove, int ply) {
+    return whiteToMove ? -(MATE_SCORE - ply) : (MATE_SCORE - ply);
+}
 
 // Generates the tactical moves (captures, en passant, promotions) for quiescence search
 static MoveList generateCaptures(const Board& board, PieceColor side) {
@@ -33,7 +39,7 @@ static MoveList generateCaptures(const Board& board, PieceColor side) {
 
 // Quiescence search: avoids the horizon effect by searching captures and promotions
 // at the leaves of the main search. Uses the same white-perspective scoring as minimax.
-static int quiescence(Board& board, int alpha, int beta,
+static int quiescence(Board& board, int ply, int alpha, int beta,
                       const std::atomic<bool>& shouldStop) {
     if (shouldStop.load()) {
         return 0;
@@ -65,7 +71,7 @@ static int quiescence(Board& board, int alpha, int beta,
     // No captures (or evasions) available. In check with no evasions this is
     // checkmate; otherwise the stand-pat value above already folded into alpha/beta.
     if (moves.empty()) {
-        return inCheck ? (whiteToMove ? -MATE_SCORE : MATE_SCORE) : (whiteToMove ? alpha : beta);
+        return inCheck ? mateScore(whiteToMove, ply) : (whiteToMove ? alpha : beta);
     }
 
     // Order captures by MVV-LVA (most valuable victim, least valuable attacker)
@@ -90,7 +96,7 @@ static int quiescence(Board& board, int alpha, int beta,
         }
 
         UndoInfo undo = board.makeMove(move);
-        int score = quiescence(board, alpha, beta, shouldStop);
+        int score = quiescence(board, ply + 1, alpha, beta, shouldStop);
         board.unmakeMove(undo);
 
         if (shouldStop.load()) {
@@ -114,15 +120,20 @@ static int quiescence(Board& board, int alpha, int beta,
 }
 
 // Minimax with alpha-beta pruning and stop condition
-static int minimax(Board& board, int depth, int alpha, int beta, 
+static int minimax(Board& board, int depth, int ply, int alpha, int beta,
                   const std::atomic<bool>& shouldStop) {
     // Check if we should stop searching
     if (shouldStop.load()) {
         return 0; // Return neutral score when stopped
     }
-    
+
+    // Fifty-move rule: draw regardless of material
+    if (board.halfmoveClock >= 100) {
+        return 0;
+    }
+
     if (depth == 0) {
-        return quiescence(board, alpha, beta, shouldStop);
+        return quiescence(board, ply, alpha, beta, shouldStop);
     }
 
     // The side to move is always board.activeColor. Because evaluate() is
@@ -132,7 +143,7 @@ static int minimax(Board& board, int depth, int alpha, int beta,
     MoveList moves = generateLegalMoves(board, side);
     if (moves.empty()) {
         if (LegalMoveValidator::isInCheck(board, side)) {
-            return whiteToMove ? -MATE_SCORE : MATE_SCORE;
+            return mateScore(whiteToMove, ply);
         }
         return 0;
     }
@@ -144,7 +155,7 @@ static int minimax(Board& board, int depth, int alpha, int beta,
         }
         
         UndoInfo undo = board.makeMove(move);
-        int eval = minimax(board, depth - 1, alpha, beta, shouldStop);
+        int eval = minimax(board, depth - 1, ply + 1, alpha, beta, shouldStop);
         board.unmakeMove(undo);
 
         if (whiteToMove) {
@@ -160,26 +171,39 @@ static int minimax(Board& board, int depth, int alpha, int beta,
     return bestEval;
 }
 
-// Minimax with transposition table support
-static int minimaxWithTT(Board& board, int depth, int alpha, int beta, 
-                        const std::atomic<bool>& shouldStop, TranspositionTable& tt) {
+// Minimax with transposition table support. `pathHashes` holds the zobrist
+// keys of the positions on the current search path (root to parent) and is
+// used to score in-search repetitions as draws.
+static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
+                        const std::atomic<bool>& shouldStop, TranspositionTable& tt,
+                        std::vector<uint64_t>& pathHashes) {
     // Check if we should stop searching
     if (shouldStop.load()) {
         return 0; // Return neutral score when stopped
     }
-    
+
     uint64_t hash = board.getHash();
+
+    // Draw detection. Both checks run before the TT probe: a repetition
+    // score is path-dependent, and a cached score must not override it.
+    if (board.halfmoveClock >= 100) {
+        return 0; // Fifty-move rule
+    }
+    if (ply > 0 && std::find(pathHashes.begin(), pathHashes.end(), hash) != pathHashes.end()) {
+        return 0; // Repetition within the search line: treat as a draw
+    }
+
     int originalAlpha = alpha;
     Move ttMove;
     int ttScore;
-    
+
     // Probe transposition table
-    if (tt.probe(hash, depth, alpha, beta, ttScore, ttMove)) {
+    if (tt.probe(hash, depth, ply, alpha, beta, ttScore, ttMove)) {
         return ttScore;
     }
-    
+
     if (depth == 0) {
-        int score = quiescence(board, alpha, beta, shouldStop);
+        int score = quiescence(board, ply, alpha, beta, shouldStop);
         // Quiescence is fail-hard: a result clipped to the window is only a
         // bound, not an exact score. Never store anything from a stopped
         // search — it returns fake neutral values.
@@ -192,7 +216,7 @@ static int minimaxWithTT(Board& board, int depth, int alpha, int beta,
             } else {
                 nodeType = TTEntry::EXACT;
             }
-            tt.store(hash, 0, score, Move(), nodeType);
+            tt.store(hash, 0, ply, score, Move(), nodeType);
         }
         return score;
     }
@@ -206,11 +230,11 @@ static int minimaxWithTT(Board& board, int depth, int alpha, int beta,
     if (moves.empty()) {
         int score;
         if (LegalMoveValidator::isInCheck(board, side)) {
-            score = whiteToMove ? -MATE_SCORE : MATE_SCORE;
+            score = mateScore(whiteToMove, ply);
         } else {
             score = 0;
         }
-        tt.store(hash, depth, score, Move(), TTEntry::EXACT);
+        tt.store(hash, depth, ply, score, Move(), TTEntry::EXACT);
         return score;
     }
     
@@ -227,15 +251,17 @@ static int minimaxWithTT(Board& board, int depth, int alpha, int beta,
 
     int bestEval = whiteToMove ? std::numeric_limits<int>::min() : std::numeric_limits<int>::max();
     Move bestMove;
-    
+
+    pathHashes.push_back(hash);
+
     for (const Move& move : moves) {
         // Check stop condition before each move
         if (shouldStop.load()) {
             break;
         }
-        
+
         UndoInfo undo = board.makeMove(move);
-        int eval = minimaxWithTT(board, depth - 1, alpha, beta, shouldStop, tt);
+        int eval = minimaxWithTT(board, depth - 1, ply + 1, alpha, beta, shouldStop, tt, pathHashes);
         board.unmakeMove(undo);
         
         if (whiteToMove) {
@@ -265,6 +291,8 @@ static int minimaxWithTT(Board& board, int depth, int alpha, int beta,
         }
     }
     
+    pathHashes.pop_back();
+
     // A stopped search leaves bestEval partial (possibly still ±INT limits
     // from an unfinished loop) and its children returned fake neutral scores.
     // Storing that would poison the table for every later search, since the
@@ -283,9 +311,9 @@ static int minimaxWithTT(Board& board, int depth, int alpha, int beta,
     } else {
         nodeType = TTEntry::EXACT;
     }
-    
-    tt.store(hash, depth, bestEval, bestMove, nodeType);
-    
+
+    tt.store(hash, depth, ply, bestEval, bestMove, nodeType);
+
     return bestEval;
 }
 
@@ -319,7 +347,7 @@ Move findBestMoveWithStop(Board& board, int depth, const std::atomic<bool>& shou
         }
         
         UndoInfo undo = board.makeMove(move);
-        int eval = minimax(board, depth - 1, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), shouldStop);
+        int eval = minimax(board, depth - 1, 1, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), shouldStop);
         board.unmakeMove(undo);
         
         if (!shouldStop.load()) {
@@ -357,7 +385,7 @@ Move findBestMoveWithTT(Board& board, int depth, const std::atomic<bool>& should
     uint64_t hash = board.getHash();
     Move ttMove;
     int ttScore;
-    if (tt.probe(hash, depth, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), ttScore, ttMove)) {
+    if (tt.probe(hash, depth, 0, std::numeric_limits<int>::min(), std::numeric_limits<int>::max(), ttScore, ttMove)) {
         // Verify the TT move is legal
         auto it = std::find(moves.begin(), moves.end(), ttMove);
         if (it != moves.end()) {
@@ -376,6 +404,9 @@ Move findBestMoveWithTT(Board& board, int depth, const std::atomic<bool>& should
     int alpha = std::numeric_limits<int>::min();
     int beta = std::numeric_limits<int>::max();
 
+    std::vector<uint64_t> pathHashes;
+    pathHashes.push_back(hash);
+
     for (size_t i = 0; i < moves.size(); ++i) {
         const Move& move = moves[i];
         // Check stop condition before evaluating each move
@@ -387,16 +418,16 @@ Move findBestMoveWithTT(Board& board, int depth, const std::atomic<bool>& should
         UndoInfo undo = board.makeMove(move);
         int eval;
         if (i == 0) {
-            eval = minimaxWithTT(board, depth - 1, alpha, beta, shouldStop, tt);
+            eval = minimaxWithTT(board, depth - 1, 1, alpha, beta, shouldStop, tt, pathHashes);
         } else if (whiteToMove) {
-            eval = minimaxWithTT(board, depth - 1, alpha, alpha + 1, shouldStop, tt);
+            eval = minimaxWithTT(board, depth - 1, 1, alpha, alpha + 1, shouldStop, tt, pathHashes);
             if (!shouldStop.load() && eval > alpha && eval < beta) {
-                eval = minimaxWithTT(board, depth - 1, alpha, beta, shouldStop, tt);
+                eval = minimaxWithTT(board, depth - 1, 1, alpha, beta, shouldStop, tt, pathHashes);
             }
         } else {
-            eval = minimaxWithTT(board, depth - 1, beta - 1, beta, shouldStop, tt);
+            eval = minimaxWithTT(board, depth - 1, 1, beta - 1, beta, shouldStop, tt, pathHashes);
             if (!shouldStop.load() && eval < beta && eval > alpha) {
-                eval = minimaxWithTT(board, depth - 1, alpha, beta, shouldStop, tt);
+                eval = minimaxWithTT(board, depth - 1, 1, alpha, beta, shouldStop, tt, pathHashes);
             }
         }
         board.unmakeMove(undo);
@@ -457,7 +488,7 @@ Move findBestMoveIterativeDeepening(Board& board, int maxDepth,
         uint64_t hash = board.getHash();
         Move ttMove;
         int ttScore;
-        if (tt.probe(hash, currentDepth, std::numeric_limits<int>::min(), 
+        if (tt.probe(hash, currentDepth, 0, std::numeric_limits<int>::min(),
                     std::numeric_limits<int>::max(), ttScore, ttMove)) {
             // Verify the TT move is legal and use it for ordering
             auto it = std::find(moves.begin(), moves.end(), ttMove);
@@ -481,6 +512,9 @@ Move findBestMoveIterativeDeepening(Board& board, int maxDepth,
         int alpha = std::numeric_limits<int>::min();
         int beta = std::numeric_limits<int>::max();
 
+        std::vector<uint64_t> pathHashes;
+        pathHashes.push_back(hash);
+
         for (size_t i = 0; i < moves.size(); ++i) {
             const Move& move = moves[i];
             // Check stop condition before evaluating each move
@@ -493,16 +527,16 @@ Move findBestMoveIterativeDeepening(Board& board, int maxDepth,
             UndoInfo undo = board.makeMove(move);
             int eval;
             if (i == 0) {
-                eval = minimaxWithTT(board, currentDepth - 1, alpha, beta, shouldStop, tt);
+                eval = minimaxWithTT(board, currentDepth - 1, 1, alpha, beta, shouldStop, tt, pathHashes);
             } else if (whiteToMove) {
-                eval = minimaxWithTT(board, currentDepth - 1, alpha, alpha + 1, shouldStop, tt);
+                eval = minimaxWithTT(board, currentDepth - 1, 1, alpha, alpha + 1, shouldStop, tt, pathHashes);
                 if (!shouldStop.load() && eval > alpha && eval < beta) {
-                    eval = minimaxWithTT(board, currentDepth - 1, alpha, beta, shouldStop, tt);
+                    eval = minimaxWithTT(board, currentDepth - 1, 1, alpha, beta, shouldStop, tt, pathHashes);
                 }
             } else {
-                eval = minimaxWithTT(board, currentDepth - 1, beta - 1, beta, shouldStop, tt);
+                eval = minimaxWithTT(board, currentDepth - 1, 1, beta - 1, beta, shouldStop, tt, pathHashes);
                 if (!shouldStop.load() && eval < beta && eval > alpha) {
-                    eval = minimaxWithTT(board, currentDepth - 1, alpha, beta, shouldStop, tt);
+                    eval = minimaxWithTT(board, currentDepth - 1, 1, alpha, beta, shouldStop, tt, pathHashes);
                 }
             }
             board.unmakeMove(undo);

@@ -249,27 +249,32 @@ void GameManager::undoLastMove() {
         std::cout << "Nothing to undo!" << std::endl;
         return;
     }
-    
+
     // Stop the engine so a stale move isn't applied to the undone position
     stopEngineAndDiscardPending();
-    
-    // Save current state to redo stack
-    redoStack.push_back(board.getFEN());
-    
-    // Restore previous state
-    std::string previousFEN = undoStack.back();
-    undoStack.pop_back();
-    
-    board.setFromFEN(previousFEN);
-    
-    // Remove last moves from history
-    if (!moveHistory.empty()) {
-        moveHistory.pop_back();
-    }
-    if (!gameHistory.empty()) {
-        gameHistory.pop_back();
-    }
-    
+
+    // Undo plies until it is the human's turn again. A single-ply undo would
+    // leave the engine on move, and it would immediately replay - making
+    // undo useless for taking back the human's own move.
+    do {
+        Move lastMove = moveHistory.empty() ? Move() : moveHistory.back();
+        redoStack.push_back({board.getFEN(), lastMove});
+
+        board.setFromFEN(undoStack.back());
+        undoStack.pop_back();
+
+        if (!moveHistory.empty()) {
+            moveHistory.pop_back();
+        }
+        if (!gameHistory.empty()) {
+            gameHistory.pop_back();
+        }
+    } while (!undoStack.empty() && board.activeColor != humanSide);
+
+    // Leave any terminal state (undo can revive a finished game) and let
+    // updateGameState recompute from the restored position.
+    currentState = GameState::WAITING_FOR_PLAYER;
+    gameResult.clear();
     updateGameState();
     std::cout << "Move undone" << std::endl;
 }
@@ -279,20 +284,29 @@ void GameManager::redoLastMove() {
         std::cout << "Nothing to redo!" << std::endl;
         return;
     }
-    
+
     // Stop the engine so a stale move isn't applied to the redone position
     stopEngineAndDiscardPending();
-    
-    // Save current state to undo stack
-    saveStateForUndo();
-    
-    // Restore redo state
-    std::string redoFEN = redoStack.back();
-    redoStack.pop_back();
-    
-    board.setFromFEN(redoFEN);
+
+    // Redo plies until it is the human's turn again (mirror of undo),
+    // restoring the move/FEN histories that undo removed.
+    do {
+        saveStateForUndo();
+
+        RedoEntry entry = redoStack.back();
+        redoStack.pop_back();
+
+        board.setFromFEN(entry.fen);
+        if (entry.move.from != -1) {
+            moveHistory.push_back(entry.move);
+        }
+        gameHistory.push_back(entry.fen);
+    } while (!redoStack.empty() && board.activeColor != humanSide);
+
+    currentState = GameState::WAITING_FOR_PLAYER;
+    gameResult.clear();
     updateGameState();
-    
+
     std::cout << "Move redone" << std::endl;
 }
 
@@ -349,13 +363,77 @@ void GameManager::updateGameState() {
         
         return;
     }
-    
+
+    // Draw detection: fifty-move rule, threefold repetition, insufficient material
+    if (board.halfmoveClock >= 100) {
+        currentState = GameState::GAME_OVER_DRAW;
+        gameResult = "Draw by fifty-move rule";
+        std::cout << gameResult << std::endl;
+        return;
+    }
+
+    if (isThreefoldRepetition()) {
+        currentState = GameState::GAME_OVER_DRAW;
+        gameResult = "Draw by threefold repetition";
+        std::cout << gameResult << std::endl;
+        return;
+    }
+
+    if (isInsufficientMaterial()) {
+        currentState = GameState::GAME_OVER_DRAW;
+        gameResult = "Draw by insufficient material";
+        std::cout << gameResult << std::endl;
+        return;
+    }
+
     // Game continues
     if (board.activeColor == humanSide) {
         currentState = GameState::WAITING_FOR_PLAYER;
     } else {
         currentState = GameState::WAITING_FOR_ENGINE;
     }
+}
+
+// Position key for repetition detection: the first four FEN fields (piece
+// placement, side to move, castling rights, en passant target). Move
+// counters must be ignored - they differ on every repetition.
+static std::string repetitionKey(const std::string& fen) {
+    size_t pos = 0;
+    for (int field = 0; field < 4 && pos != std::string::npos; ++field) {
+        pos = fen.find(' ', pos + 1);
+    }
+    return (pos == std::string::npos) ? fen : fen.substr(0, pos);
+}
+
+bool GameManager::isThreefoldRepetition() const {
+    std::string currentKey = repetitionKey(board.getFEN());
+    int count = 0;
+    for (const std::string& fen : gameHistory) {
+        if (repetitionKey(fen) == currentKey) {
+            count++;
+        }
+    }
+    return count >= 3;
+}
+
+bool GameManager::isInsufficientMaterial() const {
+    int minorCount = 0;
+    for (int i = 0; i < 64; ++i) {
+        switch (board.squares[i].type()) {
+            case PAWN:
+            case ROOK:
+            case QUEEN:
+                return false; // Mating material exists
+            case KNIGHT:
+            case BISHOP:
+                minorCount++;
+                break;
+            default:
+                break;
+        }
+    }
+    // King vs king, or king + single minor vs king: no forced mate possible
+    return minorCount <= 1;
 }
 
 void GameManager::logEvaluation() {

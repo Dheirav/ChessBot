@@ -6,11 +6,11 @@ TranspositionTable::TranspositionTable(size_t sizeMB) {
     resize(sizeMB);
 }
 
-bool TranspositionTable::probe(uint64_t hash, int depth, int alpha, int beta, 
+bool TranspositionTable::probe(uint64_t hash, int depth, int ply, int alpha, int beta,
                               int& score, Move& bestMove) {
     size_t index = getIndex(hash);
     const TTEntry& entry = table[index];
-    
+
     if (!entry.isValid(hash)) {
         misses++;
         return false;
@@ -21,25 +21,35 @@ bool TranspositionTable::probe(uint64_t hash, int depth, int alpha, int beta,
     if (entry.bestMove.from != -1) {
         bestMove = entry.bestMove;
     }
-    // Check if we can use the score
-    if (entry.canUseScore(depth, alpha, beta)) {
-        score = entry.score;
-        return true;
+    // Check if we can use the score (bound checks run on the root-relative
+    // score, so mate scores are converted before comparing to the window)
+    if (entry.depth >= depth) {
+        int adjusted = scoreFromTT(entry.score, ply);
+        bool usable = false;
+        switch (entry.nodeType) {
+            case TTEntry::EXACT:       usable = true; break;
+            case TTEntry::LOWER_BOUND: usable = adjusted >= beta; break;
+            case TTEntry::UPPER_BOUND: usable = adjusted <= alpha; break;
+        }
+        if (usable) {
+            score = adjusted;
+            return true;
+        }
     }
     // Hash hit but can't use score (wrong depth/bounds)
     return false;
 }
 
-void TranspositionTable::store(uint64_t hash, int depth, int score, Move bestMove, 
+void TranspositionTable::store(uint64_t hash, int depth, int ply, int score, Move bestMove,
                               TTEntry::NodeType nodeType) {
     size_t index = getIndex(hash);
     TTEntry& entry = table[index];
-    
+
     // Create new entry
     TTEntry newEntry;
     newEntry.hash = hash;
     newEntry.depth = depth;
-    newEntry.score = score;
+    newEntry.score = scoreToTT(score, ply);
     newEntry.bestMove = bestMove;
     newEntry.nodeType = nodeType;
     

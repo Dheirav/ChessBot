@@ -23,22 +23,25 @@ struct TTEntry {
     bool isValid(uint64_t searchHash) const {
         return hash == searchHash && depth >= 0;
     }
-    
-    // Check if we can use this score for the current search
-    bool canUseScore(int searchDepth, int alpha, int beta) const {
-        if (depth < searchDepth) return false;
-        
-        switch (nodeType) {
-            case EXACT:
-                return true;
-            case LOWER_BOUND:
-                return score >= beta;
-            case UPPER_BOUND:
-                return score <= alpha;
-        }
-        return false;
-    }
 };
+
+// Scores with absolute value above this are mate scores (MATE_SCORE - ply).
+// Mate scores are stored in the table relative to the entry's node (distance
+// to mate from that position) and converted back to root-relative on probe,
+// so a mate found via one path transfers correctly to a different ply.
+constexpr int TT_MATE_THRESHOLD = 29000;
+
+inline int scoreToTT(int score, int ply) {
+    if (score > TT_MATE_THRESHOLD) return score + ply;
+    if (score < -TT_MATE_THRESHOLD) return score - ply;
+    return score;
+}
+
+inline int scoreFromTT(int score, int ply) {
+    if (score > TT_MATE_THRESHOLD) return score - ply;
+    if (score < -TT_MATE_THRESHOLD) return score + ply;
+    return score;
+}
 
 /**
  * Transposition Table
@@ -60,11 +63,14 @@ private:
 public:
     explicit TranspositionTable(size_t sizeMB = DEFAULT_SIZE_MB);
     
-    // Probe the table for a position
-    bool probe(uint64_t hash, int depth, int alpha, int beta, int& score, Move& bestMove);
-    
-    // Store a position in the table
-    void store(uint64_t hash, int depth, int score, Move bestMove, 
+    // Probe the table for a position. `ply` is the distance from the search
+    // root, used to convert stored mate scores back to root-relative.
+    bool probe(uint64_t hash, int depth, int ply, int alpha, int beta,
+               int& score, Move& bestMove);
+
+    // Store a position in the table. `ply` converts root-relative mate
+    // scores to node-relative before storing.
+    void store(uint64_t hash, int depth, int ply, int score, Move bestMove,
                TTEntry::NodeType nodeType);
     
     // Table management

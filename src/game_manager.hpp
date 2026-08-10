@@ -45,9 +45,14 @@ private:
     std::vector<Move> moveHistory;
     std::ofstream evaluationLog;
     
-    // Undo/Redo management
+    // Undo/Redo management. Redo entries carry the move that produced the
+    // position so redoing can restore moveHistory/gameHistory correctly.
+    struct RedoEntry {
+        std::string fen;
+        Move move;
+    };
     std::vector<std::string> undoStack;
-    std::vector<std::string> redoStack;
+    std::vector<RedoEntry> redoStack;
     
     // Game result
     std::string gameResult;
@@ -116,6 +121,8 @@ public:
     
 private:
     void updateGameState();
+    bool isThreefoldRepetition() const;
+    bool isInsufficientMaterial() const;
     void logEvaluation();
     void onEngineMove(const Move& move);
     bool isGameOver() const;
