@@ -601,8 +601,61 @@ EvalDetails evaluate_details(const Board& board) {
     return e;
 }
 
-// Simple evaluate function that returns just the total score
+// --- Evaluation cache ---
+//
+// Evaluation is the largest single item in the profile (34.1% of search time,
+// BACKLOG.md section 7), and measured over the bench positions at depth 6,
+// 46.1% of evaluate() calls are for a position that has already been evaluated
+// — 1,077,632 calls covering 580,993 distinct positions. Those repeats are free
+// to serve from a table.
+//
+// The key is the zobrist hash. evaluate_details() reads board.squares[] and
+// nothing else — no side to move, castling rights, en passant target or move
+// clocks — so the hash covers strictly more state than the evaluation depends
+// on. That direction is the safe one: two positions sharing a hash have the
+// same pieces and therefore the same evaluation, while two positions differing
+// only in, say, en passant target hash differently and merely miss the cache.
+//
+// Entries never need invalidating. The evaluation of a position is a pure
+// function of that position, so an entry stays correct across moves, searches
+// and whole games.
+namespace {
+
+struct EvalCacheEntry {
+    uint64_t lock = 0;   // hash XOR score, for torn-read detection
+    int32_t score = 0;
+};
+
+// 512K entries, 8 MB. Direct-mapped: a collision simply overwrites, which costs
+// a recomputation and never a wrong answer.
+constexpr size_t EVAL_CACHE_ENTRIES = 1u << 19;
+EvalCacheEntry g_evalCache[EVAL_CACHE_ENTRIES];
+
+// The GUI thread can call evaluatePosition() while the search thread is
+// running, so reads and writes here race. Rather than lock the hot path, the
+// entry stores hash XOR score: a torn read pairs one entry's lock with
+// another's score, the verification fails, and the caller recomputes. Wrong
+// answers are impossible; the only cost of a race is a cache miss.
+inline uint64_t encodeLock(uint64_t hash, int32_t score) {
+    return hash ^ (uint64_t)(uint32_t)score;
+}
+
+}  // namespace
+
 int evaluate(const Board& board) {
-    EvalDetails details = evaluate_details(board);
-    return details.total;
+    const uint64_t hash = board.getHash();
+    EvalCacheEntry& entry = g_evalCache[hash & (EVAL_CACHE_ENTRIES - 1)];
+
+    const uint64_t lock = entry.lock;
+    const int32_t cached = entry.score;
+    if (encodeLock(lock, cached) == hash) {
+        // lock == hash ^ score, so lock ^ score == hash confirms both halves
+        // belong together and describe this position.
+        return cached;
+    }
+
+    const int score = evaluate_details(board).total;
+    entry.score = (int32_t)score;
+    entry.lock = encodeLock(hash, (int32_t)score);
+    return score;
 }

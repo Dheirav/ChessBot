@@ -180,6 +180,50 @@ static int compare(const std::string& produced) {
     return 0;
 }
 
+// evaluate() memoizes into a hash-keyed cache; evaluate_details() always
+// computes. Everything above compares evaluate_details() against the reference,
+// so none of it would notice the cache returning a wrong answer.
+//
+// This walks the same positions twice: the first pass fills the cache, the
+// second is served from it, and both must equal a freshly computed total. A key
+// collision, a torn read, or a stale entry surviving a position change all show
+// up here.
+static int checkEvalCache() {
+    rngSeed(SEED);
+    long checked = 0, mismatches = 0;
+
+    for (int game = 0; game < 40; ++game) {
+        Board board;
+        for (int ply = 0; ply < MAX_PLIES; ++ply) {
+            MoveList moves = generateLegalMoves(board, board.activeColor);
+            if (moves.empty() || board.halfmoveClock >= 100) break;
+
+            int expected = evaluate_details(board).total;
+            int first = evaluate(board);   // populates the cache
+            int second = evaluate(board);  // served from the cache
+            ++checked;
+            if (first != expected || second != expected) {
+                if (++mismatches <= 5) {
+                    std::cerr << "eval cache mismatch at " << board.getFEN() << "\n"
+                              << "  evaluate_details: " << expected
+                              << "  evaluate (cold): " << first
+                              << "  evaluate (warm): " << second << "\n";
+                }
+            }
+            board.makeMove(moves[rngNext() % moves.size()]);
+        }
+    }
+
+    if (mismatches) {
+        std::cerr << "FAILED: evaluate() disagreed with evaluate_details() on "
+                  << mismatches << " of " << checked << " positions\n";
+        return 1;
+    }
+    std::cout << "PASSED: eval cache agrees with a fresh computation across "
+              << checked << " positions\n";
+    return 0;
+}
+
 int main(int argc, char** argv) {
     // Without this every lookup table is empty and move generation silently
     // returns no moves — which looks like "every game ended immediately"
@@ -203,5 +247,7 @@ int main(int argc, char** argv) {
 
     std::ostringstream produced;
     generate(produced);
-    return compare(produced.str());
+    int rc = compare(produced.str());
+    if (checkEvalCache() != 0) rc = 1;
+    return rc;
 }
