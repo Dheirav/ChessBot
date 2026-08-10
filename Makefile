@@ -37,7 +37,7 @@ $(EXEC): $(OBJ)
 ENGINE_SRC = $(wildcard src/engine/*.cpp)
 # game_manager has no GUI dependency, so game-state tests link without SFML too.
 GM_SRC = src/game_manager.cpp
-TESTS = tests/perft tests/match tests/gamestate tests/evalref
+TESTS = tests/perft tests/match tests/gamestate tests/evalref tests/bench
 
 # perft guards move generation: leaf counts must match published references.
 tests/perft: tests/perft.cpp $(ENGINE_SRC)
@@ -53,6 +53,10 @@ tests/gamestate: tests/gamestate.cpp $(ENGINE_SRC) $(GM_SRC)
 
 # evalref guards every evaluation term against unintended change.
 tests/evalref: tests/evalref.cpp $(ENGINE_SRC)
+	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
+
+# bench produces the search's node-count signature.
+tests/bench: tests/bench.cpp $(ENGINE_SRC)
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
 
 tests: $(TESTS)
@@ -80,6 +84,13 @@ test-evalref: tests/evalref
 evalref-regen: tests/evalref
 	./tests/evalref --regen
 
+# Print the search node-count signature. Compare before and after any change
+# that is meant to leave search behaviour alone.
+#   make bench BENCH_DEPTH=8
+BENCH_DEPTH ?=
+bench: tests/bench
+	./tests/bench $(BENCH_DEPTH)
+
 # Clean up build files
 clean:
 	rm -f $(OBJ) $(DEP) $(EXEC) $(TESTS)
@@ -90,4 +101,4 @@ remake:
 	$(MAKE) all
 
 # Mark these targets as not actual files
-.PHONY: all clean remake tests test-perft test-match test-gamestate test-evalref evalref-regen
+.PHONY: all clean remake tests test-perft test-match test-gamestate test-evalref evalref-regen bench

@@ -375,6 +375,35 @@ that happened to mask it.
 
 ## 7. Baseline measurements (2026-08-10)
 
+### Bench signature — the search's identity check
+
+`make bench` (12 positions, depth 6, fresh 64 MB table per position). Verified
+deterministic across runs. Any change that claims to leave search behaviour
+alone must reproduce **total = 2 056 371** and every best move below exactly.
+
+```
+position           nodes  best
+startpos           32714  g1f3
+open-ital         100209  g8f6
+open-sicil         83402  b8c6
+kiwipete         1141100  e2a6
+midgame-1         241066  d1c2
+midgame-2         269735  c1c2
+tactical          137091  c5c4
+promo-race         14193  b4f4
+rook-endg          17264  e2d3
+pawn-endg           5620  f2f3
+queen-endg            60  d1d8
+zugzwang           13917  e1e5
+
+total            2056371     12 424 ms     165 516 nps
+```
+
+Established after the Phase 0 deletions (PLAN.md 0.1, 0.4–0.7), which were
+behaviour-preserving, and before the negamax conversion (0.9), which must not
+change it.
+
+
 Keep these to compare against. Five-position benchmark, depth 5, iterative
 deepening, 256 MB TT:
 

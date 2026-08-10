@@ -25,6 +25,7 @@ static int mateScore(bool whiteToMove, int ply) {
 }
 
 SearchOptions g_searchOptions;
+uint64_t g_searchNodes = 0;
 
 // Null-move pruning assumes that passing is worse than any real move. That is
 // false in zugzwang, which in practice means king-and-pawn endings, so the
@@ -56,6 +57,7 @@ static MoveList generateCaptures(const Board& board, PieceColor side) {
 // at the leaves of the main search. Uses the same white-perspective scoring as minimax.
 static int quiescence(Board& board, int ply, int alpha, int beta,
                       const std::atomic<bool>& shouldStop) {
+    ++g_searchNodes;
     if (shouldStop.load()) {
         return 0;
     }
@@ -140,6 +142,7 @@ static int quiescence(Board& board, int ply, int alpha, int beta,
 static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
                         const std::atomic<bool>& shouldStop, TranspositionTable& tt,
                         std::vector<uint64_t>& pathHashes) {
+    ++g_searchNodes;
     // Check if we should stop searching
     if (shouldStop.load()) {
         return 0; // Return neutral score when stopped
@@ -344,6 +347,7 @@ Move findBestMoveIterativeDeepening(Board& board, int maxDepth,
                                    TranspositionTable& tt) {
     // Clear move ordering data for new search
     g_moveOrderer.clear();
+    g_searchNodes = 0;
     
     MoveList moves = generateLegalMoves(board, board.activeColor);
     if (moves.empty()) return Move();
