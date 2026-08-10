@@ -77,8 +77,7 @@ Several implementation details are aimed at making the engine faster and more pr
 - The engine can be interrupted mid-search, which keeps the interface responsive even when the search is still running.
 
 ## Configuration
-The project reads an optional config file named `chessbot.conf` from the repository root. It can override a few engine settings, for example:
-
+onl
 ```ini
 searchDepth = 5
 transpositionTableSizeMB = 256

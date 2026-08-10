@@ -158,12 +158,18 @@ static double eloToScore(double elo) {
     return 1.0 / (1.0 + std::pow(10.0, -elo / 400.0));
 }
 
-// Generalized SPRT under a normal approximation to the per-game score. Returns
-// 0 until every outcome has been seen at least once, since the variance
-// estimate is meaningless before then.
+// Generalized SPRT under a normal approximation to the per-game score.
+//
+// The only degenerate case is zero variance — every game so far having had the
+// identical result — and the variance test below catches it directly. An
+// earlier version also bailed whenever any one of wins/draws/losses was still
+// zero, which was wrong in exactly the case this test is most useful for: an
+// engine that never loses keeps losses at 0 indefinitely, so the LLR would sit
+// at 0.00 forever and a decisive match would never stop early. A sample like
+// 3 wins / 1 draw / 0 losses has perfectly good variance and should be scored.
 static double computeLLR(int wins, int draws, int losses, double elo0, double elo1) {
-    if (wins == 0 || draws == 0 || losses == 0) return 0.0;
     double n = wins + draws + losses;
+    if (n <= 0) return 0.0;
     double w = wins / n, d = draws / n;
     double score = w + d / 2.0;
     // Second moment of the per-game score: wins contribute 1, draws 0.25.
