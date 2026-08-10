@@ -37,7 +37,7 @@ $(EXEC): $(OBJ)
 ENGINE_SRC = $(wildcard src/engine/*.cpp)
 # game_manager has no GUI dependency, so game-state tests link without SFML too.
 GM_SRC = src/game_manager.cpp
-TESTS = tests/perft tests/match tests/gamestate
+TESTS = tests/perft tests/match tests/gamestate tests/evalref
 
 # perft guards move generation: leaf counts must match published references.
 tests/perft: tests/perft.cpp $(ENGINE_SRC)
@@ -49,6 +49,10 @@ tests/match: tests/match.cpp $(ENGINE_SRC)
 
 # gamestate guards that a finished game actually stops accepting moves.
 tests/gamestate: tests/gamestate.cpp $(ENGINE_SRC) $(GM_SRC)
+	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
+
+# evalref guards every evaluation term against unintended change.
+tests/evalref: tests/evalref.cpp $(ENGINE_SRC)
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
 
 tests: $(TESTS)
@@ -67,6 +71,15 @@ test-match: tests/match
 test-gamestate: tests/gamestate
 	./tests/gamestate
 
+# Compare every evaluation term against the stored reference.
+test-evalref: tests/evalref
+	./tests/evalref
+
+# Rewrite the evaluation reference. Only after reviewing the reported term
+# changes and deciding they are intended.
+evalref-regen: tests/evalref
+	./tests/evalref --regen
+
 # Clean up build files
 clean:
 	rm -f $(OBJ) $(DEP) $(EXEC) $(TESTS)
@@ -77,4 +90,4 @@ remake:
 	$(MAKE) all
 
 # Mark these targets as not actual files
-.PHONY: all clean remake tests test-perft test-match test-gamestate
+.PHONY: all clean remake tests test-perft test-match test-gamestate test-evalref evalref-regen
