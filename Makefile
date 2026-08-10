@@ -84,12 +84,19 @@ test-evalref: tests/evalref
 evalref-regen: tests/evalref
 	./tests/evalref --regen
 
-# Print the search node-count signature. Compare before and after any change
-# that is meant to leave search behaviour alone.
+# Print the search node-count signature at any depth.
 #   make bench BENCH_DEPTH=8
 BENCH_DEPTH ?=
 bench: tests/bench
 	./tests/bench $(BENCH_DEPTH)
+
+# Compare the search against the stored signature. Fails if the tree changed.
+test-bench: tests/bench
+	./tests/bench --check
+
+# Rewrite the stored signature, once the new numbers have been reviewed.
+bench-regen: tests/bench
+	./tests/bench --regen
 
 # Clean up build files
 clean:
@@ -101,4 +108,4 @@ remake:
 	$(MAKE) all
 
 # Mark these targets as not actual files
-.PHONY: all clean remake tests test-perft test-match test-gamestate test-evalref evalref-regen bench
+.PHONY: all clean remake tests test-perft test-match test-gamestate test-evalref evalref-regen bench test-bench bench-regen

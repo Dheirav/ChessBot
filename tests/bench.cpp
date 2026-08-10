@@ -11,8 +11,14 @@
 // makes an otherwise unverifiable refactor (the negamax conversion, PLAN.md
 // 0.9) checkable by identity instead of by playing games.
 //
-//   make bench              default depth
-//   ./tests/bench <depth>   any other depth
+//   make bench              print the signature at the default depth
+//   make test-bench         compare against tests/data/bench.txt, fail on drift
+//   make bench-regen        rewrite the stored signature
+//   ./tests/bench <depth>   print at any other depth
+//
+// A search change that is meant to alter behaviour will fail test-bench. That
+// is the intent: the failure is the prompt to look at the new numbers, decide
+// they are what you meant, and regenerate — the same contract as evalref.
 //
 // Determinism: one thread, no clock-dependent decisions in the search, a fresh
 // table per position and move-ordering state cleared by the search itself. If
@@ -29,6 +35,11 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <fstream>
+#include <iostream>
+#include <sstream>
+#include <string>
 
 // Twelve positions spanning the phases the search behaves differently in:
 // quiet openings, tactical middlegames, and endgames where null-move pruning
@@ -51,32 +62,25 @@ static const int NUM_POSITIONS = (int)(sizeof(POSITIONS) / sizeof(POSITIONS[0]))
 
 static const int DEFAULT_DEPTH = 6;
 static const size_t TT_SIZE_MB = 64;
+static const char* SIG_PATH = "tests/data/bench.txt";
 
-int main(int argc, char** argv) {
-    initMoveLookupTables();
-
-    int depth = (argc > 1) ? std::atoi(argv[1]) : DEFAULT_DEPTH;
-    if (depth < 1) {
-        std::printf("usage: %s [depth]\n", argv[0]);
-        return 1;
-    }
-
-    // The search prints per-depth progress by default; that is noise here.
-    g_searchOptions.quiet = true;
-
+// The signature: everything that must not drift. Deliberately excludes elapsed
+// time and nps, which vary by machine and by load.
+static std::string signature(int depth, long long* elapsedOut, int* failuresOut) {
+    std::ostringstream sig;
     std::atomic<bool> stop{false};
     uint64_t totalNodes = 0;
     int failures = 0;
 
-    std::printf("bench depth %d, %d MB table\n\n", depth, (int)TT_SIZE_MB);
-    std::printf("%-11s %12s  %s\n", "position", "nodes", "best");
+    sig << "bench depth " << depth << ", " << TT_SIZE_MB << " MB table\n\n";
+    sig << "position           nodes  best\n";
 
     auto start = std::chrono::steady_clock::now();
 
     for (int i = 0; i < NUM_POSITIONS; ++i) {
         Board board;
         if (!board.setFromFEN(POSITIONS[i].fen)) {
-            std::printf("%-11s FEN PARSE FAILED\n", POSITIONS[i].name);
+            sig << POSITIONS[i].name << " FEN PARSE FAILED\n";
             ++failures;
             continue;
         }
@@ -89,23 +93,91 @@ int main(int argc, char** argv) {
         Move best = findBestMoveIterativeDeepening(board, depth, stop, tt);
         totalNodes += g_searchNodes;
 
-        std::printf("%-11s %12llu  %s\n", POSITIONS[i].name,
-                    (unsigned long long)g_searchNodes, best.toString().c_str());
+        char line[128];
+        std::snprintf(line, sizeof(line), "%-11s %12llu  %s\n", POSITIONS[i].name,
+                      (unsigned long long)g_searchNodes, best.toString().c_str());
+        sig << line;
     }
 
-    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+    char total[128];
+    std::snprintf(total, sizeof(total), "\n%-11s %12llu\n", "total",
+                  (unsigned long long)totalNodes);
+    sig << total;
+
+    *elapsedOut = (long long)std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - start).count();
+    *failuresOut = failures;
+    return sig.str();
+}
 
-    std::printf("\n%-11s %12llu\n", "total", (unsigned long long)totalNodes);
-    std::printf("%-11s %12lld ms\n", "time", (long long)elapsed);
-    if (elapsed > 0) {
-        std::printf("%-11s %12llu\n", "nps",
-                    (unsigned long long)(totalNodes * 1000ULL / (uint64_t)elapsed));
+int main(int argc, char** argv) {
+    initMoveLookupTables();
+
+    bool check = (argc > 1 && std::strcmp(argv[1], "--check") == 0);
+    bool regen = (argc > 1 && std::strcmp(argv[1], "--regen") == 0);
+    int depth = DEFAULT_DEPTH;
+    if (!check && !regen && argc > 1) depth = std::atoi(argv[1]);
+    if (depth < 1) {
+        std::printf("usage: %s [depth | --check | --regen]\n", argv[0]);
+        return 1;
     }
+
+    // The search prints per-depth progress by default; that is noise here.
+    // The transposition table announces every resize on stdout, which would
+    // interleave with the signature, so it is built while stdout is quiet.
+    g_searchOptions.quiet = true;
+    std::streambuf* saved = std::cout.rdbuf();
+    std::ostringstream swallowed;
+    std::cout.rdbuf(swallowed.rdbuf());
+
+    long long elapsed = 0;
+    int failures = 0;
+    std::string sig = signature(depth, &elapsed, &failures);
+
+    std::cout.rdbuf(saved);
 
     if (failures) {
+        std::fputs(sig.c_str(), stdout);
         std::printf("\nFAILED: %d position(s) did not parse\n", failures);
         return 1;
     }
+
+    if (regen) {
+        std::ofstream out(SIG_PATH, std::ios::binary);
+        if (!out) {
+            std::printf("cannot write %s (run from the repository root)\n", SIG_PATH);
+            return 1;
+        }
+        out << sig;
+        std::fputs(sig.c_str(), stdout);
+        std::printf("\nwrote %s\n", SIG_PATH);
+        return 0;
+    }
+
+    if (check) {
+        std::ifstream in(SIG_PATH, std::ios::binary);
+        if (!in) {
+            std::printf("FAILED: no signature at %s\n"
+                        "        Run 'make bench-regen' on a build you trust.\n",
+                        SIG_PATH);
+            return 1;
+        }
+        std::stringstream buf;
+        buf << in.rdbuf();
+        if (buf.str() != sig) {
+            std::printf("FAILED: the search tree changed.\n\n"
+                        "--- expected (%s)\n%s\n"
+                        "--- got\n%s\n"
+                        "If this change was intended, check the new numbers are what you\n"
+                        "meant and run 'make bench-regen'.\n",
+                        SIG_PATH, buf.str().c_str(), sig.c_str());
+            return 1;
+        }
+        std::printf("PASSED: search unchanged (%lld ms)\n", elapsed);
+        return 0;
+    }
+
+    std::fputs(sig.c_str(), stdout);
+    std::printf("%-11s %12lld ms\n", "time", elapsed);
     return 0;
 }

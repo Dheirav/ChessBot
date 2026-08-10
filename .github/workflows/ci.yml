@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Only the GUI binary needs SFML; every test target links without it.
+      - name: Install SFML
+        run: sudo apt-get update && sudo apt-get install -y libsfml-dev
+
+      - name: Build application
+        run: make -j$(nproc)
+
+      - name: Build tests
+        run: make -j$(nproc) tests
+
+      # Move generation against published perft counts. Exact — a single wrong
+      # or missing move shows up as a mismatched leaf count.
+      - name: perft
+        run: make test-perft
+
+      # Terminal detection: a finished game refuses moves, and terminal state
+      # is not sticky across a new game.
+      - name: game state
+        run: make test-gamestate
+
+      # Every evaluation term against a stored reference over 23k positions.
+      - name: evaluation regression
+        run: make test-evalref
+
+      # The search's node-count signature. Fails when the tree changes, which
+      # is the point: an intentional change is reviewed and regenerated.
+      - name: search bench
+        run: make test-bench
+
+      # Not a strength measurement — just a check that the engine plays a legal
+      # game end to end. Real matches are far too long for CI.
+      - name: match smoke test
+        run: ./tests/match 2 4 20260810
