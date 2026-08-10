@@ -1,14 +1,17 @@
-Build your project
-Open a terminal in your project directory and run:
+# Source Notes
+
+The project is a desktop chess application rather than a reusable library. Build and run it from the repository root:
+
+```bash
 make
-
-This will compile your code and produce an executable named chessbot.
-
-3. Run your program
 ./chessbot
+```
 
-4. Clean build files (optional)
+The main entry point is [src/main.cpp](../src/main.cpp), which initializes the GUI, creates the engine, and starts the game loop. The engine logic lives under [src/engine](engine), and the SFML UI lives under [src/gui](gui).
 
+Useful maintenance commands:
+
+```bash
 make clean
-
-To remove compiled files and the executable:
+make remake
+```
