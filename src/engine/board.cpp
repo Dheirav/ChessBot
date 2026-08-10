@@ -23,7 +23,7 @@ Board Board::copyForSearch() const {
     std::memcpy(copy.squares, squares, sizeof(squares));
     copy.activeColor = activeColor;
     copy.castlingRights = castlingRights;
-    copy.enPassantTarget = enPassantTarget;
+    copy.enPassantSquare = enPassantSquare;
     copy.halfmoveClock = halfmoveClock;
     copy.fullmoveNumber = fullmoveNumber;
     copy.currentHash = currentHash;
@@ -75,8 +75,8 @@ std::string Board::getFEN() const {
     }
     // Add other FEN fields
     fen << ' ' << (activeColor == COLOR_WHITE ? 'w' : 'b');
-    fen << ' ' << (castlingRights.empty() ? "-" : castlingRights);
-    fen << ' ' << (enPassantTarget.empty() ? "-" : enPassantTarget);
+    fen << ' ' << castlingRightsToString(castlingRights);
+    fen << ' ' << enPassantSquareToString(enPassantSquare);
     fen << ' ' << halfmoveClock;
     fen << ' ' << fullmoveNumber;
     return fen.str();
@@ -89,7 +89,7 @@ UndoInfo Board::makeMove(const Move& move) {
     u.to = move.to;
     u.movedPiece = squares[move.from];
     u.castlingBefore = castlingRights;
-    u.enPassantBefore = enPassantTarget;
+    u.enPassantBefore = enPassantSquare;
     u.halfmoveBefore = halfmoveClock;
     u.fullmoveBefore = fullmoveNumber;
     u.castlingRookFrom = -1;
@@ -169,57 +169,36 @@ UndoInfo Board::makeMove(const Move& move) {
 
     // Update castling rights if the king or a rook moves
     if (u.movedPiece.type() == KING) {
-        if (u.movedPiece.color() == COLOR_WHITE) {
-            castlingRights.erase(std::remove(castlingRights.begin(), castlingRights.end(), 'K'), castlingRights.end());
-            castlingRights.erase(std::remove(castlingRights.begin(), castlingRights.end(), 'Q'), castlingRights.end());
-        } else {
-            castlingRights.erase(std::remove(castlingRights.begin(), castlingRights.end(), 'k'), castlingRights.end());
-            castlingRights.erase(std::remove(castlingRights.begin(), castlingRights.end(), 'q'), castlingRights.end());
-        }
+        if (u.movedPiece.color() == COLOR_WHITE) castlingRights &= ~(CASTLE_WK | CASTLE_WQ);
+        else                                     castlingRights &= ~(CASTLE_BK | CASTLE_BQ);
     } else if (u.movedPiece.type() == ROOK) {
-        if (u.movedPiece.color() == COLOR_WHITE) {
-            if (move.from == get1DIndex(0, 7)) // a1
-                castlingRights.erase(std::remove(castlingRights.begin(), castlingRights.end(), 'Q'), castlingRights.end());
-            if (move.from == get1DIndex(7, 7)) // h1
-                castlingRights.erase(std::remove(castlingRights.begin(), castlingRights.end(), 'K'), castlingRights.end());
-        } else {
-            if (move.from == get1DIndex(0, 0)) // a8
-                castlingRights.erase(std::remove(castlingRights.begin(), castlingRights.end(), 'q'), castlingRights.end());
-            if (move.from == get1DIndex(7, 0)) // h8
-                castlingRights.erase(std::remove(castlingRights.begin(), castlingRights.end(), 'k'), castlingRights.end());
-        }
+        if (move.from == get1DIndex(0, 7)) castlingRights &= ~CASTLE_WQ; // a1
+        if (move.from == get1DIndex(7, 7)) castlingRights &= ~CASTLE_WK; // h1
+        if (move.from == get1DIndex(0, 0)) castlingRights &= ~CASTLE_BQ; // a8
+        if (move.from == get1DIndex(7, 0)) castlingRights &= ~CASTLE_BK; // h8
     }
 
     // Revoke castling rights when a rook is captured on its home square
     if (captured.type() == ROOK) {
-        if (capturedSq == get1DIndex(0, 7)) // a1 rook captured
-            castlingRights.erase(std::remove(castlingRights.begin(), castlingRights.end(), 'Q'), castlingRights.end());
-        if (capturedSq == get1DIndex(7, 7)) // h1 rook captured
-            castlingRights.erase(std::remove(castlingRights.begin(), castlingRights.end(), 'K'), castlingRights.end());
-        if (capturedSq == get1DIndex(0, 0)) // a8 rook captured
-            castlingRights.erase(std::remove(castlingRights.begin(), castlingRights.end(), 'q'), castlingRights.end());
-        if (capturedSq == get1DIndex(7, 0)) // h8 rook captured
-            castlingRights.erase(std::remove(castlingRights.begin(), castlingRights.end(), 'k'), castlingRights.end());
+        if (capturedSq == get1DIndex(0, 7)) castlingRights &= ~CASTLE_WQ; // a1
+        if (capturedSq == get1DIndex(7, 7)) castlingRights &= ~CASTLE_WK; // h1
+        if (capturedSq == get1DIndex(0, 0)) castlingRights &= ~CASTLE_BQ; // a8
+        if (capturedSq == get1DIndex(7, 0)) castlingRights &= ~CASTLE_BK; // h8
     }
 
     // Update en passant target square
-    std::string newEp;
+    int newEp = -1;
     if (u.movedPiece.type() == PAWN) {
         int rankDiff = abs((move.to / 8) - (move.from / 8));
         if (rankDiff == 2) {
-            int targetSquare = (move.from + move.to) / 2; // Square between from and to
-            int file = targetSquare % 8;
-            int rank = targetSquare / 8;
-            // Convert to chess notation (a1-h8)
-            newEp = static_cast<char>('a' + file);
-            newEp += static_cast<char>('1' + (7 - rank));
+            newEp = (move.from + move.to) / 2; // square between from and to
         }
     }
 
     // Update hash for castling rights and en passant changes
     h ^= ZobristHash::getCastlingHash(u.castlingBefore) ^ ZobristHash::getCastlingHash(castlingRights);
     h ^= ZobristHash::getEnPassantHash(u.enPassantBefore) ^ ZobristHash::getEnPassantHash(newEp);
-    enPassantTarget = newEp;
+    enPassantSquare = newEp;
 
     // Update halfmove clock and fullmove number
     if (u.movedPiece.type() == PAWN || captured.type() != NONE || move.flag == PROMOTION) {
@@ -243,14 +222,14 @@ UndoInfo Board::makeMove(const Move& move) {
 NullUndo Board::makeNullMove() {
     NullUndo u;
     u.hashBefore = currentHash;
-    u.enPassantBefore = enPassantTarget;
+    u.enPassantBefore = enPassantSquare;
     u.halfmoveBefore = halfmoveClock;
 
     uint64_t h = currentHash;
     // Passing the turn clears any en passant right, exactly as a normal move
     // that is not a double pawn push does.
-    h ^= ZobristHash::getEnPassantHash(enPassantTarget) ^ ZobristHash::getEnPassantHash("-");
-    enPassantTarget = "-";
+    h ^= ZobristHash::getEnPassantHash(enPassantSquare) ^ ZobristHash::getEnPassantHash(-1);
+    enPassantSquare = -1;
     activeColor = (activeColor == COLOR_WHITE) ? COLOR_BLACK : COLOR_WHITE;
     h ^= ZobristHash::getSideToMoveHash();
     ++halfmoveClock;
@@ -260,7 +239,7 @@ NullUndo Board::makeNullMove() {
 
 void Board::unmakeNullMove(const NullUndo& u) {
     activeColor = (activeColor == COLOR_WHITE) ? COLOR_BLACK : COLOR_WHITE;
-    enPassantTarget = u.enPassantBefore;
+    enPassantSquare = u.enPassantBefore;
     halfmoveClock = u.halfmoveBefore;
     currentHash = u.hashBefore;
 }
@@ -291,7 +270,7 @@ void Board::unmakeMove(const UndoInfo& u) {
     // Restore game state
     activeColor = (activeColor == COLOR_WHITE) ? COLOR_BLACK : COLOR_WHITE;
     castlingRights = u.castlingBefore;
-    enPassantTarget = u.enPassantBefore;
+    enPassantSquare = u.enPassantBefore;
     halfmoveClock = u.halfmoveBefore;
     fullmoveNumber = u.fullmoveBefore;
 
@@ -471,7 +450,7 @@ uint64_t Board::computeHash() const {
     hash ^= ZobristHash::getCastlingHash(castlingRights);
     
     // Hash en passant target
-    hash ^= ZobristHash::getEnPassantHash(enPassantTarget);
+    hash ^= ZobristHash::getEnPassantHash(enPassantSquare);
     
     return hash;
 }

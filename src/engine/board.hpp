@@ -8,6 +8,51 @@
 #include <vector>
 #include <cstdint>
 
+// Castling rights as a 4-bit mask. The bit values are chosen to match the
+// zobrist table's index directly, so the mask needs no conversion to be hashed.
+enum CastlingRight : uint8_t {
+    CASTLE_WK = 1,  // white kingside  'K'
+    CASTLE_WQ = 2,  // white queenside 'Q'
+    CASTLE_BK = 4,  // black kingside  'k'
+    CASTLE_BQ = 8,  // black queenside 'q'
+};
+
+// FEN spellings, used only at the FEN and PGN boundaries.
+inline uint8_t castlingRightsFromString(const std::string& s) {
+    uint8_t mask = 0;
+    if (s.find('K') != std::string::npos) mask |= CASTLE_WK;
+    if (s.find('Q') != std::string::npos) mask |= CASTLE_WQ;
+    if (s.find('k') != std::string::npos) mask |= CASTLE_BK;
+    if (s.find('q') != std::string::npos) mask |= CASTLE_BQ;
+    return mask;
+}
+
+inline std::string castlingRightsToString(uint8_t mask) {
+    std::string s;
+    if (mask & CASTLE_WK) s += 'K';
+    if (mask & CASTLE_WQ) s += 'Q';
+    if (mask & CASTLE_BK) s += 'k';
+    if (mask & CASTLE_BQ) s += 'q';
+    return s.empty() ? "-" : s;
+}
+
+// En passant target as a board index, or -1 for none.
+inline int enPassantSquareFromString(const std::string& s) {
+    if (s.size() != 2 || s == "-") return -1;
+    int file = s[0] - 'a';
+    int rank = s[1] - '1';
+    if (file < 0 || file > 7 || rank < 0 || rank > 7) return -1;
+    return (7 - rank) * 8 + file;   // FEN rank 1..8 maps to board y 7..0
+}
+
+inline std::string enPassantSquareToString(int square) {
+    if (square < 0 || square > 63) return "-";
+    std::string s;
+    s += (char)('a' + (square % 8));
+    s += (char)('1' + (7 - (square / 8)));
+    return s;
+}
+
 // Data required to reverse a move made via makeMove (see unmakeMove)
 struct UndoInfo {
     uint64_t hashBefore = 0;
@@ -18,8 +63,8 @@ struct UndoInfo {
     int capturedSquare = -1;      // square the captured piece was removed from (for en passant this differs from 'to')
     int castlingRookFrom = -1;
     int castlingRookTo = -1;
-    std::string castlingBefore;
-    std::string enPassantBefore;
+    uint8_t castlingBefore = 0;
+    int enPassantBefore = -1;
     int halfmoveBefore = 0;
     int fullmoveBefore = 0;
 };
@@ -29,7 +74,7 @@ struct UndoInfo {
 // needs far less state than UndoInfo.
 struct NullUndo {
     uint64_t hashBefore = 0;
-    std::string enPassantBefore;
+    int enPassantBefore = -1;
     int halfmoveBefore = 0;
 };
 
@@ -37,10 +82,13 @@ class Board {
 public:
     Piece squares[BOARD_SIZE *BOARD_SIZE];
 
-    // FEN state fields
+    // FEN state fields. Castling rights and the en passant target were
+    // std::string ("KQkq", "e3"); every makeMove copied both into UndoInfo and
+    // re-derived a hash index by scanning characters. They are a bitmask and a
+    // square index now, which is also what makes UndoInfo a small POD.
     PieceColor activeColor;
-    std::string castlingRights;
-    std::string enPassantTarget;
+    uint8_t castlingRights;
+    int enPassantSquare;
     int halfmoveClock;
     int fullmoveNumber;
 

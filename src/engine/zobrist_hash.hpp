@@ -24,10 +24,11 @@ public:
     // Get hash values
     static uint64_t getPieceSquareHash(int square, int pieceType, int color);
     static uint64_t getSideToMoveHash();
-    static uint64_t getCastlingHash(const std::string& castlingRights);
-    static uint64_t getEnPassantHash(const std::string& enPassantTarget);
+    // The mask from board.hpp is already the table index; see CastlingRight.
+    static uint64_t getCastlingHash(uint8_t castlingRights);
+    // Square index, or -1 for none. Only the file affects the hash.
+    static uint64_t getEnPassantHash(int enPassantSquare);
     
 private:
     static uint64_t randomUInt64();
-    static int castlingRightsToIndex(const std::string& rights);
 };

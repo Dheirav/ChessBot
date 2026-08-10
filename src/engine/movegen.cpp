@@ -5,15 +5,9 @@
 #include <cctype>
 #include <iostream>
 
-// Helper for en passant target index
-// FEN rank 1-8 maps to board y 7-0 (board y=0 is FEN rank 8).
+// The en passant target is stored as a board index directly; -1 means none.
 static int getEnPassantIdx(const Board& board) {
-    if (board.enPassantTarget != "-" && board.enPassantTarget.length() == 2) {
-        int file = board.enPassantTarget[0] - 'a';
-        int rank = board.enPassantTarget[1] - '1';
-        return Board::get1DIndex(file, 7 - rank);
-    }
-    return -1;
+    return board.enPassantSquare;
 }
 
 
@@ -241,8 +235,8 @@ void generatePseudoLegalMoves(const Board& board, PieceColor sideToMove, bool in
                 if (includeCastling && sq == Board::get1DIndex(4, rank)) {
                     // oppColor already declared above
                     // King-side castling
-                    if ((sideToMove == COLOR_WHITE && board.castlingRights.find('K') != std::string::npos) ||
-                        (sideToMove == COLOR_BLACK && board.castlingRights.find('k') != std::string::npos)) {
+                    if (board.castlingRights &
+                        ((sideToMove == COLOR_WHITE) ? CASTLE_WK : CASTLE_BK)) {
                         if (board.squares[Board::get1DIndex(5, rank)].type() == NONE &&
                             board.squares[Board::get1DIndex(6, rank)].type() == NONE) {
                             if (board.squares[Board::get1DIndex(4, rank)].type() == KING &&
@@ -258,8 +252,8 @@ void generatePseudoLegalMoves(const Board& board, PieceColor sideToMove, bool in
                         }
                     }
                     // Queen-side castling
-                    if ((sideToMove == COLOR_WHITE && board.castlingRights.find('Q') != std::string::npos) ||
-                        (sideToMove == COLOR_BLACK && board.castlingRights.find('q') != std::string::npos)) {
+                    if (board.castlingRights &
+                        ((sideToMove == COLOR_WHITE) ? CASTLE_WQ : CASTLE_BQ)) {
                         if (board.squares[Board::get1DIndex(1, rank)].type() == NONE &&
                             board.squares[Board::get1DIndex(2, rank)].type() == NONE &&
                             board.squares[Board::get1DIndex(3, rank)].type() == NONE) {

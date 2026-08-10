@@ -95,8 +95,8 @@ bool parseFEN(const std::string& fen, Board& board, FENInfo& info) {
     info.fullmoveNumber = fullmoveNumber;
 
     board.activeColor = (activeColor == 'w' ? COLOR_WHITE : COLOR_BLACK);
-    board.castlingRights = castling;
-    board.enPassantTarget = enPassant;
+    board.castlingRights = castlingRightsFromString(castling);
+    board.enPassantSquare = enPassantSquareFromString(enPassant);
     board.halfmoveClock = info.halfmoveClock;
     board.fullmoveNumber = info.fullmoveNumber;
 

@@ -56,34 +56,17 @@ uint64_t ZobristHash::getSideToMoveHash() {
     return sideToMoveHash;
 }
 
-uint64_t ZobristHash::getCastlingHash(const std::string& castlingRights) {
+uint64_t ZobristHash::getCastlingHash(uint8_t castlingRights) {
     if (!initialized) initialize();
-    return castlingRightsHashes[castlingRightsToIndex(castlingRights)];
+    // CastlingRight's bit values are the table index, so no conversion is
+    // needed — this used to scan a string on every makeMove.
+    return castlingRightsHashes[castlingRights & 0x0F];
 }
 
-uint64_t ZobristHash::getEnPassantHash(const std::string& enPassantTarget) {
+uint64_t ZobristHash::getEnPassantHash(int enPassantSquare) {
     if (!initialized) initialize();
-    
-    if (enPassantTarget == "-" || enPassantTarget.empty()) {
-        return 0;
-    }
-    
-    // Extract file from en passant target (e.g., "e3" -> file 4)
-    int file = enPassantTarget[0] - 'a';
-    if (file >= 0 && file < 8) {
-        return enPassantFileHashes[file];
-    }
-    
-    return 0;
+    if (enPassantSquare < 0 || enPassantSquare > 63) return 0;
+    return enPassantFileHashes[enPassantSquare % 8];
 }
 
-int ZobristHash::castlingRightsToIndex(const std::string& rights) {
-    int index = 0;
-    
-    if (rights.find('K') != std::string::npos) index |= 1;  // White kingside
-    if (rights.find('Q') != std::string::npos) index |= 2;  // White queenside
-    if (rights.find('k') != std::string::npos) index |= 4;  // Black kingside
-    if (rights.find('q') != std::string::npos) index |= 8;  // Black queenside
-    
-    return index;
-}
+
