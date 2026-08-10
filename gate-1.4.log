@@ -1,0 +1,10 @@
+Loaded move lookup tables from disk.
+heuristics-on @d8  vs  heuristics-on @d5
+150 game pairs (up to 300 games) | seed 20260810
+SPRT: H0 = +0 Elo, H1 = +20 Elo, alpha = beta = 0.05
+Each opening is played twice with colours swapped.
+
+Transposition table resized to 32MB (838848 entries)
+Transposition table resized to 32MB (838848 entries)
+  pair   1 A=white: A wins   (W-D-L 1-0-0 | LLR +0.00 [-2.94,2.94])
+  pair   1 A=black: draw     (W-D-L 1-1-0 | LLR +0.22 [-2.94,2.94])

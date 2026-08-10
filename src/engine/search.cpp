@@ -91,8 +91,10 @@ static bool hasNonPawnMaterial(const Board& board, PieceColor side) {
     return false;
 }
 
-// Generates the tactical moves (captures, en passant, promotions) for quiescence search
-static MoveList generateCaptures(const Board& board, PieceColor side) {
+// Generates the tactical moves (captures, en passant, promotions) for quiescence
+// search. Takes a mutable board so the legality filter runs in place rather
+// than on a copy — this runs at every quiescence node.
+static MoveList generateCaptures(Board& board, PieceColor side) {
     MoveList all = generateLegalMoves(board, side);
     MoveList tactical;
     tactical.reserve(all.size());

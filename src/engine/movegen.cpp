@@ -284,9 +284,15 @@ void generatePseudoLegalMoves(const Board& board, PieceColor sideToMove, bool in
 
 }
 
-MoveList generateLegalMoves(const Board& board, PieceColor sideToMove, bool includeCastling) {
-    MoveList moves;
-    generatePseudoLegalMoves(board, sideToMove, includeCastling, moves);
+// The legality filter, shared by both entry points below. `board` is mutated
+// and restored: every candidate move is made, the king square tested, and the
+// move unmade. unmakeMove restores the position exactly — the search relies on
+// that invariant at every node it visits — so on return the board is
+// bit-identical to what came in.
+static void filterLegal(Board& board, PieceColor sideToMove,
+                        const MoveList& candidates, MoveList& out) {
+    out.clear();
+    out.reserve(candidates.size());
 
     int kingSq = -1;
     for (int i = 0; i < 64; ++i) {
@@ -296,38 +302,55 @@ MoveList generateLegalMoves(const Board& board, PieceColor sideToMove, bool incl
         }
     }
 
-    // --- Filter out illegal moves that leave king in check ---
-    // This used to copy the entire board for every candidate move - about 35
-    // copies per call, and this function runs at every search node. One
-    // scratch copy plus makeMove/unmakeMove does identical work, since
-    // unmakeMove restores the position exactly (the search already relies on
-    // that invariant for every node it visits).
-    Board scratch = board.copyForSearch();
-    MoveList legalMoves;
     const PieceColor oppColor = (sideToMove == COLOR_WHITE) ? COLOR_BLACK : COLOR_WHITE;
-    for (const Move& m : moves) {
-        UndoInfo undo = scratch.makeMove(m);
-        int newKingSq = -1;
-        // Check if the move is a king move by looking at the piece type at the source square in the original board
-        if (board.squares[m.from].type() == KING) {
-            newKingSq = m.to;
-        } else {
-            newKingSq = kingSq;
-            // If the king was captured (shouldn't happen), skip
-            if (scratch.squares[newKingSq].type() != KING || scratch.squares[newKingSq].color() != sideToMove) {
-                // Try to find the king (shouldn't be needed)
-                for (int i = 0; i < 64; ++i) {
-                    if (scratch.squares[i].type() == KING && scratch.squares[i].color() == sideToMove) {
-                        newKingSq = i;
-                        break;
-                    }
+    for (const Move& m : candidates) {
+        const bool kingMove = (board.squares[m.from].type() == KING);
+        UndoInfo undo = board.makeMove(m);
+
+        int newKingSq = kingMove ? m.to : kingSq;
+        // Defensive: if the king is not where it was expected, find it. This
+        // should never fire — a king can never be captured in a legal search.
+        if (newKingSq < 0 || board.squares[newKingSq].type() != KING ||
+            board.squares[newKingSq].color() != sideToMove) {
+            newKingSq = -1;
+            for (int i = 0; i < 64; ++i) {
+                if (board.squares[i].type() == KING && board.squares[i].color() == sideToMove) {
+                    newKingSq = i;
+                    break;
                 }
             }
         }
-        if (!isSquareAttacked(scratch, newKingSq, oppColor)) {
-            legalMoves.push_back(m);
+
+        if (newKingSq >= 0 && !isSquareAttacked(board, newKingSq, oppColor)) {
+            out.push_back(m);
         }
-        scratch.unmakeMove(undo);
+        board.unmakeMove(undo);
     }
-    return legalMoves;
+}
+
+// Pseudo-legal scratch buffer. generateLegalMoves does not recurse, so a single
+// buffer per thread is safe, and reusing it keeps its capacity — which stops
+// the per-node heap allocation that generating into a fresh MoveList caused.
+static thread_local MoveList pseudoScratch;
+
+void generateLegalMoves(Board& board, PieceColor sideToMove, bool includeCastling,
+                        MoveList& out) {
+    generatePseudoLegalMoves(board, sideToMove, includeCastling, pseudoScratch);
+    filterLegal(board, sideToMove, pseudoScratch, out);
+}
+
+MoveList generateLegalMoves(Board& board, PieceColor sideToMove, bool includeCastling) {
+    MoveList legal;
+    generateLegalMoves(board, sideToMove, includeCastling, legal);
+    return legal;
+}
+
+// const overload, for callers that do not own a mutable board (the GUI, the
+// evaluation's in-check mobility path). It pays for one board copy; the
+// mutable overload above, which the search uses at every node, does not.
+MoveList generateLegalMoves(const Board& board, PieceColor sideToMove, bool includeCastling) {
+    Board scratch = board.copyForSearch();
+    MoveList legal;
+    generateLegalMoves(scratch, sideToMove, includeCastling, legal);
+    return legal;
 }
