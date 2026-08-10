@@ -194,6 +194,7 @@ static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
     }
 
     int originalAlpha = alpha;
+    int originalBeta = beta;
     Move ttMove;
     int ttScore;
 
@@ -302,11 +303,14 @@ static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
         return bestEval;
     }
 
-    // Store in transposition table
+    // Store in transposition table. Bound classification must compare
+    // against the ORIGINAL window: the black branch shrinks `beta` down to
+    // bestEval, so comparing against the shrunk beta misfiled every black
+    // PV node as LOWER_BOUND.
     TTEntry::NodeType nodeType;
     if (bestEval <= originalAlpha) {
         nodeType = TTEntry::UPPER_BOUND;
-    } else if (bestEval >= beta) {
+    } else if (bestEval >= originalBeta) {
         nodeType = TTEntry::LOWER_BOUND;
     } else {
         nodeType = TTEntry::EXACT;

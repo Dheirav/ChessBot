@@ -1,23 +1,29 @@
 #include <iostream>
 #include <memory>
 
+#include "config.hpp"
 #include "game_manager.hpp"
 #include "gui_manager.hpp"
 #include "engine/chessbot_engine.hpp"
 
 int main() {
     std::cout << "=== ChessBot ===" << std::endl;
-    
+
+    // Load optional settings from chessbot.conf (defaults if absent)
+    Settings settings = loadSettings();
+
     // Create and initialize GUI manager
     GUIManager guiManager;
     if (!guiManager.initialize()) {
         std::cerr << "Failed to initialize GUI!" << std::endl;
         return 1;
     }
-    
+
     // Create chess engine
     auto engine = std::make_unique<ChessBotEngine>();
-    
+    engine->setSearchDepth(settings.searchDepth);
+    engine->resizeTranspositionTable(settings.transpositionTableSizeMB);
+
     // Create game manager with the engine
     GameManager gameManager(std::move(engine));
     

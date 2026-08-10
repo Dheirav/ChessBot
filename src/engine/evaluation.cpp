@@ -167,7 +167,6 @@ EvalDetails evaluate_details(const Board& board) {
     int whiteBishopPair = 0, blackBishopPair = 0;
     int whiteKingFile = -1, blackKingFile = -1;
     int whiteKingRank = -1, blackKingRank = -1;
-    int pawnFiles[8] = {0};
     int whiteOutposts = 0, blackOutposts = 0;
     int whiteTrapped = 0, blackTrapped = 0;
     int whiteCoord = 0, blackCoord = 0;
@@ -196,7 +195,6 @@ EvalDetails evaluate_details(const Board& board) {
             whiteMaterial += pieceValues[p.type()];
             if (p.type() == PAWN) {
                 whitePawns++;
-                pawnFiles[file]++;
                 if (file > 0 && board.squares[i-1].type() == PAWN && board.squares[i-1].color() == COLOR_WHITE) whiteConnectedPawns++;
                 if (file < 7 && board.squares[i+1].type() == PAWN && board.squares[i+1].color() == COLOR_WHITE) whiteConnectedPawns++;
                 bool passed = true;
@@ -277,7 +275,6 @@ EvalDetails evaluate_details(const Board& board) {
             blackMaterial += pieceValues[p.type()];
             if (p.type() == PAWN) {
                 blackPawns++;
-                pawnFiles[file]--;
                 if (file > 0 && board.squares[i-1].type() == PAWN && board.squares[i-1].color() == COLOR_BLACK) blackConnectedPawns++;
                 if (file < 7 && board.squares[i+1].type() == PAWN && board.squares[i+1].color() == COLOR_BLACK) blackConnectedPawns++;
                 bool passed = true;
@@ -310,7 +307,7 @@ EvalDetails evaluate_details(const Board& board) {
                     int f2 = file + df;
                     if (f2 < 0 || f2 > 7) continue;
                     for (int r = rank - 1; r >= 0; --r) {
-                        int idx = r * 8 + file;
+                        int idx = r * 8 + f2;
                         if (board.squares[idx].type() == PAWN && board.squares[idx].color() == COLOR_BLACK) backward = false;
                     }
                 }
@@ -419,27 +416,13 @@ EvalDetails evaluate_details(const Board& board) {
         }
     }
 
-    // Rooks on open/semi-open files and 7th rank
-    for (int f = 0; f < 8; ++f) {
-        bool openFile = (pawnFiles[f] == 0);
-        bool semiOpenWhite = (pawnFiles[f] >= 0);
-        bool semiOpenBlack = (pawnFiles[f] <= 0);
-        for (int r = 0; r < 8; ++r) {
-            int idx = r * 8 + f;
-            const Piece& p = board.squares[idx];
-            if (p.type() == ROOK) {
-                if (p.color() == COLOR_WHITE) {
-                    if (openFile) rooksOpenFileBonus += 10;
-                    else if (semiOpenWhite) rooksSemiOpenFileBonus += 5;
-                    if (r == 1) rooks7thRankBonus += 10;
-                } else {
-                    if (openFile) rooksOpenFileBonus -= 10;
-                    else if (semiOpenBlack) rooksSemiOpenFileBonus -= 5;
-                    if (r == 6) rooks7thRankBonus -= 10;
-                }
-            }
-        }
-    }
+    // Rooks on open/semi-open files and 7th rank, from the per-rook counters
+    // computed in the piece scan. (The previous version used a single net
+    // pawn count per file, which scored a file with one pawn of each color
+    // as fully open.)
+    rooksOpenFileBonus = 10 * (whiteRooksOpenFile - blackRooksOpenFile);
+    rooksSemiOpenFileBonus = 5 * (whiteRooksSemiOpenFile - blackRooksSemiOpenFile);
+    rooks7thRankBonus = 10 * (whiteRooks7th - blackRooks7th);
 
     // Outposts
     for (int i = 0; i < 64; ++i) {

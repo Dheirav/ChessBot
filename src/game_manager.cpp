@@ -196,8 +196,16 @@ void GameManager::stopEngineAndDiscardPending() {
 
 void GameManager::onEngineMove(const Move& move) {
     if (move.from == -1 || move.to == -1) {
-        // Engine couldn't find a move - game over
+        // Engine returned no move. If the position is genuinely over,
+        // updateGameState() detects it; otherwise this was an engine error,
+        // and leaving the state at WAITING_FOR_ENGINE would make the update
+        // loop re-request (and re-fail) forever.
         updateGameState();
+        if (currentState == GameState::WAITING_FOR_ENGINE) {
+            currentState = GameState::GAME_OVER_RESIGNATION;
+            gameResult = "Engine resigned (internal error: no move produced)";
+            std::cerr << gameResult << std::endl;
+        }
         return;
     }
     
@@ -313,7 +321,10 @@ void GameManager::redoLastMove() {
 void GameManager::resignGame() {
     stopEngineAndDiscardPending();
     currentState = GameState::GAME_OVER_RESIGNATION;
-    gameResult = (board.activeColor == humanSide) ? "Human resigned" : "Engine resigned";
+    // Resigning is a user action (the R key), so it is always the human
+    // resigning - attributing it to whoever was on move let the user "win"
+    // by pressing R while the engine was thinking.
+    gameResult = "Human resigned";
     std::cout << gameResult << std::endl;
 }
 
