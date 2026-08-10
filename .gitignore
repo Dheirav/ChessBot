@@ -3,10 +3,13 @@
 *.d
 chessbot
 
-# Test binaries (built by `make tests`)
-tests/perft
-tests/match
-tests/gamestate
+# Test binaries (built by `make tests`). Listed as a pattern rather than by
+# name: the by-name version silently failed to cover four binaries added later,
+# and `git add -A` committed them. Sources and fixtures are re-included below.
+tests/*
+!tests/*.cpp
+!tests/*.py
+!tests/data/
 
 # Move lookup tables are cached next to whichever binary generated them
 lookup_data/
@@ -14,9 +17,6 @@ tests/src/
 
 # Profiling and logs
 gmon.out
-evaluation_log_*.txt
-
-# Evaluation dumps produced by GameManager::logEvaluation()
 evaluation_log_*.txt
 
 # Match gate logs (tee output, often still being written)
