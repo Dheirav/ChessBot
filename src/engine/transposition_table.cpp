@@ -98,9 +98,11 @@ bool TranspositionTable::shouldReplace(const TTEntry& existing, const TTEntry& n
         return true;
     }
     
-    // Replace if same position (hash collision is very unlikely)
+    // Same position: keep the deeper result; at equal depth prefer the newer
+    // entry (fresher bounds and best move). This stops a depth-0 quiescence
+    // store from evicting a deep search result for the same position.
     if (existing.hash == newEntry.hash) {
-        return true;
+        return newEntry.depth >= existing.depth;
     }
     
     // Replace if new entry has greater depth

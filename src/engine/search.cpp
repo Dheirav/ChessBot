@@ -180,7 +180,20 @@ static int minimaxWithTT(Board& board, int depth, int alpha, int beta,
     
     if (depth == 0) {
         int score = quiescence(board, alpha, beta, shouldStop);
-        tt.store(hash, 0, score, Move(), TTEntry::EXACT);
+        // Quiescence is fail-hard: a result clipped to the window is only a
+        // bound, not an exact score. Never store anything from a stopped
+        // search — it returns fake neutral values.
+        if (!shouldStop.load()) {
+            TTEntry::NodeType nodeType;
+            if (score <= alpha) {
+                nodeType = TTEntry::UPPER_BOUND;
+            } else if (score >= beta) {
+                nodeType = TTEntry::LOWER_BOUND;
+            } else {
+                nodeType = TTEntry::EXACT;
+            }
+            tt.store(hash, 0, score, Move(), nodeType);
+        }
         return score;
     }
 
@@ -252,6 +265,15 @@ static int minimaxWithTT(Board& board, int depth, int alpha, int beta,
         }
     }
     
+    // A stopped search leaves bestEval partial (possibly still ±INT limits
+    // from an unfinished loop) and its children returned fake neutral scores.
+    // Storing that would poison the table for every later search, since the
+    // TT persists across moves. Return without storing; callers that see
+    // shouldStop discard this value anyway.
+    if (shouldStop.load()) {
+        return bestEval;
+    }
+
     // Store in transposition table
     TTEntry::NodeType nodeType;
     if (bestEval <= originalAlpha) {

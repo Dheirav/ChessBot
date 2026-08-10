@@ -60,12 +60,14 @@ void Input::handleEvent(const sf::Event& event, Board& board) {
             }
         }
         
-        // Clicked outside promotion dialog - cancel promotion
+        // Clicked outside promotion dialog - cancel promotion.
+        // The board was never modified during the drag (the pawn is still on
+        // its original square), so only the UI state needs to be cleared.
         promotionActive = false;
         promotionMoves.clear();
-        // Reset the piece to original position
-        board.squares[promotionFromSquare] = Piece(promotionColor, PAWN);
-        board.squares[promotionToSquare] = Piece();
+        selectedSquare = -1;
+        highlightedSquares.clear();
+        legalMoves.clear();
         return;
     }
     
@@ -75,11 +77,16 @@ void Input::handleEvent(const sf::Event& event, Board& board) {
     }
 
     if (event.type == sf::Event::MouseButtonPressed && event.mouseButton.button == sf::Mouse::Left) {
-        int x = event.mouseButton.x / TILE_SIZE;
-        int y = event.mouseButton.y / TILE_SIZE;
+        // Bounds-check pixel coordinates before touching board.squares: the
+        // window is resizable, and negative coords truncate toward zero.
+        int px = event.mouseButton.x;
+        int py = event.mouseButton.y;
+        int x = px / TILE_SIZE;
+        int y = py / TILE_SIZE;
+        if (px >= 0 && py >= 0 && x < BOARD_SIZE && y < BOARD_SIZE) {
         int idx = board.get1DIndex(x, y);
         const Piece& piece = board.squares[idx];
-        if (x >= 0 && x < BOARD_SIZE && y >= 0 && y < BOARD_SIZE && piece.type() != NONE) {
+        if (piece.type() != NONE) {
             if (piece.color() == board.activeColor) {
                 if (selectedSquare != idx) {
                     selectedSquare = idx;
@@ -106,25 +113,40 @@ void Input::handleEvent(const sf::Event& event, Board& board) {
                 // Clicked on opponent's piece or empty square: do nothing, keep highlight
             }
         } else {
-            // Clicked outside the board or on empty square: do nothing, keep highlight
+            // Clicked on empty square: do nothing, keep highlight
+        }
+        } else {
+            // Clicked outside the board: do nothing, keep highlight
         }
     }
     // Start dragging if a piece is selected and mouse is pressed again on it
     if (event.type == sf::Event::MouseButtonPressed && event.mouseButton.button == sf::Mouse::Left && selectedSquare != -1) {
-        int x = event.mouseButton.x / TILE_SIZE;
-        int y = event.mouseButton.y / TILE_SIZE;
-        int idx = board.get1DIndex(x, y);
-        if (idx == selectedSquare) {
-            dragging = true;
-            dragStartX = x;
-            dragStartY = y;
-            draggedPiece = board.squares[idx];
+        int px = event.mouseButton.x;
+        int py = event.mouseButton.y;
+        int x = px / TILE_SIZE;
+        int y = py / TILE_SIZE;
+        if (px >= 0 && py >= 0 && x < BOARD_SIZE && y < BOARD_SIZE) {
+            int idx = board.get1DIndex(x, y);
+            if (idx == selectedSquare) {
+                dragging = true;
+                dragStartX = x;
+                dragStartY = y;
+                draggedPiece = board.squares[idx];
+            }
         }
     }
     // Handle drop
     if (event.type == sf::Event::MouseButtonReleased && event.mouseButton.button == sf::Mouse::Left && dragging) {
-        int x = event.mouseButton.x / TILE_SIZE;
-        int y = event.mouseButton.y / TILE_SIZE;
+        int px = event.mouseButton.x;
+        int py = event.mouseButton.y;
+        int x = px / TILE_SIZE;
+        int y = py / TILE_SIZE;
+        // Releases outside the window can arrive during a mouse grab; a drop
+        // off the board just cancels the drag (the board was never modified).
+        if (px < 0 || py < 0 || x >= BOARD_SIZE || y >= BOARD_SIZE) {
+            dragging = false;
+            return;
+        }
         int from = Board::get1DIndex(dragStartX, dragStartY);
         int to = Board::get1DIndex(x, y);
         if (from != to) {
