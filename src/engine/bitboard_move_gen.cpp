@@ -1,387 +1,345 @@
 #include "bitboard_move_gen.hpp"
-#include "magic_bitboards.hpp"
-#include <cassert>
-#include <bitset>
+#include "bitboard_attacks.hpp"
+#include "board.hpp"   // CastlingRight
 
-// Helper: shift bitboard north/south/east/west (a1 = bit 0, h1 = bit 7).
-// East (+1) must drop the H-file before shifting or H-file pieces wrap to
-// the A-file of the next rank; west (-1) must drop the A-file.
-constexpr Bitboard north(Bitboard b) { return b << 8; }
-constexpr Bitboard south(Bitboard b) { return b >> 8; }
-constexpr Bitboard east(Bitboard b)  { return (b & 0x7f7f7f7f7f7f7f7fULL) << 1; }
-constexpr Bitboard west(Bitboard b)  { return (b & 0xfefefefefefefefeULL) >> 1; }
+namespace {
 
-// Helper: mask for rank 2, 7, 8, 1
-constexpr Bitboard rank1 = 0x00000000000000FFULL;
-constexpr Bitboard rank2 = 0x000000000000FF00ULL;
-constexpr Bitboard rank7 = 0x00FF000000000000ULL;
-constexpr Bitboard rank8 = 0xFF00000000000000ULL;
+// Files and ranks in this module's orientation: a8 is bit 0, so y = 0 is the
+// eighth rank and white advances toward *lower* indices.
+constexpr Bitboard FILE_A = 0x0101010101010101ULL;  // x == 0
+constexpr Bitboard FILE_H = 0x8080808080808080ULL;  // x == 7
+constexpr Bitboard RANK_8 = 0x00000000000000FFULL;  // y == 0, white promotes here
+constexpr Bitboard RANK_7 = 0x000000000000FF00ULL;  // y == 1, black pawns start
+constexpr Bitboard RANK_2 = 0x00FF000000000000ULL;  // y == 6, white pawns start
+constexpr Bitboard RANK_1 = 0xFF00000000000000ULL;  // y == 7, black promotes here
 
-void generatePawnMoves(const BitboardState& state, BitboardColor color, BitboardMoveList& moves) {
-    Bitboard pawns = (color == BB_WHITE) ? state.white[BB_PAWN] : state.black[BB_PAWN];
-    Bitboard enemy = (color == BB_WHITE) ? state.occupancyBlack : state.occupancyWhite;
-    Bitboard empty = ~state.occupancyAll;
+// Home squares, needed for castling and for revoking rights when a rook moves
+// or is captured.
+constexpr int SQ_A8 = 0,  SQ_E8 = 4,  SQ_H8 = 7;
+constexpr int SQ_A1 = 56, SQ_E1 = 60, SQ_H1 = 63;
 
-    if (color == BB_WHITE) {
-        // Single pushes
-        Bitboard singlePush = north(pawns) & empty;
-        Bitboard promotionPush = singlePush & rank8;
-        Bitboard quietPush = singlePush & ~rank8;
-        // Double pushes: pawns still on rank 2 whose single-push square AND
-        // double-push square are both empty. (Masking quietPush - a set of
-        // destinations on rank 3+ - with rank2 was always empty, so double
-        // pushes were never generated.)
-        Bitboard doublePush = north(north(pawns & rank2) & empty) & empty;
-        // Captures
-        Bitboard eastCap = north(east(pawns)) & enemy;
-        Bitboard westCap = north(west(pawns)) & enemy;
-        Bitboard promoEastCap = eastCap & rank8;
-        Bitboard promoWestCap = westCap & rank8;
-        Bitboard normalEastCap = eastCap & ~rank8;
-        Bitboard normalWestCap = westCap & ~rank8;
-        // Generate moves
-        // Quiet single pushes
-        for (int to = 0; to < 64; ++to) {
-            if (testBit(quietPush, to)) {
-                moves.push_back({to - 8, to, false, false, BB_NONE});
-            }
-        }
-        // Double pushes
-        for (int to = 0; to < 64; ++to) {
-            if (testBit(doublePush, to)) {
-                moves.push_back({to - 16, to, false, false, BB_NONE});
-            }
-        }
-        // Promotions (quiet)
-        for (int to = 0; to < 64; ++to) {
-            if (testBit(promotionPush, to)) {
-                for (BitboardPieceType pt : {BB_QUEEN, BB_ROOK, BB_BISHOP, BB_KNIGHT}) {
-                    moves.push_back({to - 8, to, false, true, pt});
-                }
-            }
-        }
-        // Captures
-        for (int to = 0; to < 64; ++to) {
-            if (testBit(normalEastCap, to)) {
-                moves.push_back({to - 9, to, true, false, BB_NONE});
-            }
-            if (testBit(normalWestCap, to)) {
-                moves.push_back({to - 7, to, true, false, BB_NONE});
-            }
-        }
-        // Promotion captures
-        for (int to = 0; to < 64; ++to) {
-            if (testBit(promoEastCap, to)) {
-                for (BitboardPieceType pt : {BB_QUEEN, BB_ROOK, BB_BISHOP, BB_KNIGHT}) {
-                    moves.push_back({to - 9, to, true, true, pt});
-                }
-            }
-            if (testBit(promoWestCap, to)) {
-                for (BitboardPieceType pt : {BB_QUEEN, BB_ROOK, BB_BISHOP, BB_KNIGHT}) {
-                    moves.push_back({to - 7, to, true, true, pt});
-                }
-            }
-        }
-        // En passant: any white pawn that attacks the EP target square may
-        // capture onto it. The attackers sit one rank below the target on
-        // an adjacent file. (The old code tested a shifted board against
-        // itself - never true - and pushed a move from the EP square to a
-        // rank-7 square, neither of which was the capturing pawn.)
-        if (state.enPassantSquare >= 0 && state.enPassantSquare < 64) {
-            Bitboard epBB = 1ULL << state.enPassantSquare;
-            Bitboard attackers = (south(east(epBB)) | south(west(epBB))) & pawns;
-            for (int from = 0; from < 64; ++from) {
-                if (testBit(attackers, from)) {
-                    moves.push_back({from, state.enPassantSquare, true, false, BB_NONE});
-                }
-            }
-        }
-    } else {
-        // Black pawns
-        Bitboard singlePush = south(pawns) & empty;
-        Bitboard promotionPush = singlePush & rank1;
-        Bitboard quietPush = singlePush & ~rank1;
-        // Double pushes (see the white-side comment)
-        Bitboard doublePush = south(south(pawns & rank7) & empty) & empty;
-        // Captures
-        Bitboard eastCap = south(east(pawns)) & enemy;
-        Bitboard westCap = south(west(pawns)) & enemy;
-        Bitboard promoEastCap = eastCap & rank1;
-        Bitboard promoWestCap = westCap & rank1;
-        Bitboard normalEastCap = eastCap & ~rank1;
-        Bitboard normalWestCap = westCap & ~rank1;
-        // Generate moves
-        // Quiet single pushes
-        for (int to = 0; to < 64; ++to) {
-            if (testBit(quietPush, to)) {
-                moves.push_back({to + 8, to, false, false, BB_NONE});
-            }
-        }
-        // Double pushes
-        for (int to = 0; to < 64; ++to) {
-            if (testBit(doublePush, to)) {
-                moves.push_back({to + 16, to, false, false, BB_NONE});
-            }
-        }
-        // Promotions (quiet)
-        for (int to = 0; to < 64; ++to) {
-            if (testBit(promotionPush, to)) {
-                for (BitboardPieceType pt : {BB_QUEEN, BB_ROOK, BB_BISHOP, BB_KNIGHT}) {
-                    moves.push_back({to + 8, to, false, true, pt});
-                }
-            }
-        }
-        // Captures. eastCap = south(east(pawns)) puts the destination at
-        // from - 7, so the origin is to + 7 (and to + 9 for westCap); the
-        // previous offsets were swapped, generating every black capture
-        // from the wrong square.
-        for (int to = 0; to < 64; ++to) {
-            if (testBit(normalEastCap, to)) {
-                moves.push_back({to + 7, to, true, false, BB_NONE});
-            }
-            if (testBit(normalWestCap, to)) {
-                moves.push_back({to + 9, to, true, false, BB_NONE});
-            }
-        }
-        // Promotion captures
-        for (int to = 0; to < 64; ++to) {
-            if (testBit(promoEastCap, to)) {
-                for (BitboardPieceType pt : {BB_QUEEN, BB_ROOK, BB_BISHOP, BB_KNIGHT}) {
-                    moves.push_back({to + 7, to, true, true, pt});
-                }
-            }
-            if (testBit(promoWestCap, to)) {
-                for (BitboardPieceType pt : {BB_QUEEN, BB_ROOK, BB_BISHOP, BB_KNIGHT}) {
-                    moves.push_back({to + 9, to, true, true, pt});
-                }
-            }
-        }
-        // En passant: black attackers sit one rank above the target square
-        // (see the white-side comment)
-        if (state.enPassantSquare >= 0 && state.enPassantSquare < 64) {
-            Bitboard epBB = 1ULL << state.enPassantSquare;
-            Bitboard attackers = (north(east(epBB)) | north(west(epBB))) & pawns;
-            for (int from = 0; from < 64; ++from) {
-                if (testBit(attackers, from)) {
-                    moves.push_back({from, state.enPassantSquare, true, false, BB_NONE});
-                }
-            }
+// Iterate the set bits of a bitboard. This is the whole point of the
+// representation: pop the lowest set bit and clear it, visiting only the
+// squares that are occupied. The previous version of this file scanned all 64
+// squares testing one bit at a time — for pawns, about seven times per
+// generation — which does the work of a mailbox loop while paying for a
+// bitboard.
+inline int popLsb(Bitboard& b) {
+    const int sq = lsb(b);
+    b &= b - 1;
+    return sq;
+}
+
+inline void addMove(BitboardMoveList& out, int from, int to,
+                    BitboardMoveFlag flag, BitboardPieceType moved,
+                    BitboardPieceType captured,
+                    BitboardPieceType promo = BB_NONE) {
+    BitboardMove m;
+    m.from = (uint8_t)from;
+    m.to = (uint8_t)to;
+    m.flag = flag;
+    m.moved = moved;
+    m.captured = captured;
+    m.promotionType = promo;
+    m.isCapture = (captured != BB_NONE) || flag == BBM_EN_PASSANT;
+    out.push_back(m);
+}
+
+BitboardPieceType pieceAt(const BitboardState& state, BitboardColor color, int sq) {
+    const Bitboard bit = 1ULL << sq;
+    const auto& side = (color == BB_WHITE) ? state.white : state.black;
+    for (int t = 0; t < 6; ++t)
+        if (side[t] & bit) return (BitboardPieceType)t;
+    return BB_NONE;
+}
+
+// A promotion is four moves, not one. Forgetting the under-promotions is a
+// classic way to fail perft by a small margin in positions where they matter.
+void addPromotions(BitboardMoveList& out, int from, int to,
+                   BitboardPieceType captured) {
+    for (BitboardPieceType promo : {BB_QUEEN, BB_ROOK, BB_BISHOP, BB_KNIGHT})
+        addMove(out, from, to, BBM_PROMOTION, BB_PAWN, captured, promo);
+}
+
+void generatePawns(const BitboardState& state, BitboardColor color,
+                   BitboardMoveList& out) {
+    const bool white = (color == BB_WHITE);
+    const Bitboard pawns = white ? state.white[BB_PAWN] : state.black[BB_PAWN];
+    const Bitboard them  = white ? state.occupancyBlack : state.occupancyWhite;
+    const Bitboard empty = ~state.occupancyAll;
+    const Bitboard promoRank = white ? RANK_8 : RANK_1;
+    const Bitboard startRank = white ? RANK_2 : RANK_7;
+
+    // Forward is -8 for white, +8 for black. The captures are -9/-7 and +7/+9,
+    // guarded by file masks so a capture cannot wrap around the board edge.
+    auto push  = [&](Bitboard b) { return white ? (b >> 8) : (b << 8); };
+    const int  fwd = white ? -8 : 8;
+
+    Bitboard single = push(pawns) & empty;
+    Bitboard dbl    = push(push(pawns & startRank) & empty) & empty;
+
+    Bitboard quiet = single & ~promoRank;
+    while (quiet) {
+        const int to = popLsb(quiet);
+        addMove(out, to - fwd, to, BBM_NORMAL, BB_PAWN, BB_NONE);
+    }
+
+    Bitboard promo = single & promoRank;
+    while (promo) {
+        const int to = popLsb(promo);
+        addPromotions(out, to - fwd, to, BB_NONE);
+    }
+
+    while (dbl) {
+        const int to = popLsb(dbl);
+        addMove(out, to - 2 * fwd, to, BBM_DOUBLE_PUSH, BB_PAWN, BB_NONE);
+    }
+
+    // Captures. Left/right are in board-x terms: one shifts toward file a, the
+    // other toward file h, and each drops the file it would wrap off.
+    const Bitboard capLeft  = white ? ((pawns & ~FILE_A) >> 9) : ((pawns & ~FILE_A) << 7);
+    const Bitboard capRight = white ? ((pawns & ~FILE_H) >> 7) : ((pawns & ~FILE_H) << 9);
+    const int deltaLeft  = white ? -9 : 7;
+    const int deltaRight = white ? -7 : 9;
+
+    for (int side = 0; side < 2; ++side) {
+        Bitboard caps = (side == 0 ? capLeft : capRight) & them;
+        const int delta = (side == 0) ? deltaLeft : deltaRight;
+        while (caps) {
+            const int to = popLsb(caps);
+            const int from = to - delta;
+            const BitboardPieceType victim =
+                pieceAt(state, white ? BB_BLACK : BB_WHITE, to);
+            if ((1ULL << to) & promoRank) addPromotions(out, from, to, victim);
+            else addMove(out, from, to, BBM_CAPTURE, BB_PAWN, victim);
         }
     }
+
+    // En passant. The captured pawn is beside the mover, not on the
+    // destination square, which is why this needs its own flag rather than
+    // being a capture with an implied victim.
+    if (state.enPassantSquare >= 0) {
+        const int to = state.enPassantSquare;
+        const int tx = to % 8;
+        // A capturing pawn sits one file either side of the target, on the rank
+        // it would be moving from. Written as index arithmetic rather than
+        // shifts because the two directions have different file guards and
+        // getting one wrong produces a pawn that captures around the board edge
+        // — a bug that only shows up in perft, and only sometimes.
+        const int fromToward_h = white ? to + 9 : to - 7;  // capturer on file tx+1
+        const int fromToward_a = white ? to + 7 : to - 9;  // capturer on file tx-1
+        if (tx < 7 && fromToward_h >= 0 && fromToward_h < 64 &&
+            (pawns & (1ULL << fromToward_h)))
+            addMove(out, fromToward_h, to, BBM_EN_PASSANT, BB_PAWN, BB_PAWN);
+        if (tx > 0 && fromToward_a >= 0 && fromToward_a < 64 &&
+            (pawns & (1ULL << fromToward_a)))
+            addMove(out, fromToward_a, to, BBM_EN_PASSANT, BB_PAWN, BB_PAWN);
+    }
 }
-// Knight move generation (stub)
-void generateKnightMoves(const BitboardState& state, BitboardColor color, BitboardMoveList& moves) {
-    Bitboard knights = (color == BB_WHITE) ? state.white[BB_KNIGHT] : state.black[BB_KNIGHT];
-    Bitboard own = (color == BB_WHITE) ? state.occupancyWhite : state.occupancyBlack;
-    Bitboard enemy = (color == BB_WHITE) ? state.occupancyBlack : state.occupancyWhite;
-    constexpr int offsets[8] = {17, 15, 10, 6, -17, -15, -10, -6};
-    for (int sq = 0; sq < 64; ++sq) {
-        if (testBit(knights, sq)) {
-            int rank = sq / 8;
-            int file = sq % 8;
-            for (int i = 0; i < 8; ++i) {
-                int to = sq + offsets[i];
-                if (to < 0 || to >= 64) continue;
-                int toRank = to / 8;
-                int toFile = to % 8;
-                // Knight moves must be within 2 ranks/files
-                if (abs(toRank - rank) + abs(toFile - file) == 3 && abs(toRank - rank) <= 2 && abs(toFile - file) <= 2) {
-                    if (!testBit(own, to)) {
-                        bool isCapture = testBit(enemy, to);
-                        moves.push_back({sq, to, isCapture, false, BB_NONE});
-                    }
-                }
-            }
+
+void generatePieceMoves(const BitboardState& state, BitboardColor color,
+                        BitboardPieceType type, BitboardMoveList& out) {
+    const auto& ours = (color == BB_WHITE) ? state.white : state.black;
+    const Bitboard own = (color == BB_WHITE) ? state.occupancyWhite : state.occupancyBlack;
+    const BitboardColor them = (color == BB_WHITE) ? BB_BLACK : BB_WHITE;
+
+    Bitboard pieces = ours[type];
+    while (pieces) {
+        const int from = popLsb(pieces);
+        Bitboard targets = 0;
+        switch (type) {
+            case BB_KNIGHT: targets = knightAttacks(from); break;
+            case BB_BISHOP: targets = bishopAttacks(from, state.occupancyAll); break;
+            case BB_ROOK:   targets = rookAttacks(from, state.occupancyAll); break;
+            case BB_QUEEN:  targets = queenAttacks(from, state.occupancyAll); break;
+            case BB_KING:   targets = kingAttacks(from); break;
+            default: break;
+        }
+        targets &= ~own;   // cannot capture our own pieces
+
+        while (targets) {
+            const int to = popLsb(targets);
+            const BitboardPieceType victim = pieceAt(state, them, to);
+            addMove(out, from, to, victim == BB_NONE ? BBM_NORMAL : BBM_CAPTURE,
+                    type, victim);
         }
     }
 }
 
-// Bishop move generation (stub)
-void generateBishopMoves(const BitboardState& state, BitboardColor color, BitboardMoveList& moves) {
-    Bitboard bishops = (color == BB_WHITE) ? state.white[BB_BISHOP] : state.black[BB_BISHOP];
-    Bitboard own = (color == BB_WHITE) ? state.occupancyWhite : state.occupancyBlack;
-    Bitboard enemy = (color == BB_WHITE) ? state.occupancyBlack : state.occupancyWhite;
-    Bitboard occupancy = state.occupancyAll;
-    for (int sq = 0; sq < 64; ++sq) {
-        if (testBit(bishops, sq)) {
-            uint64_t attacks = getBishopAttacks(sq, occupancy) & ~own;
-            for (int to = 0; to < 64; ++to) {
-                if (testBit(attacks, to)) {
-                    bool isCapture = testBit(enemy, to);
-                    moves.push_back({sq, to, isCapture, false, BB_NONE});
-                }
-            }
+// Castling is generated here rather than with the other king moves because its
+// legality is positional, not just occupancy: the king may not start in check,
+// pass through an attacked square, or land on one.
+void generateCastling(const BitboardState& state, BitboardColor color,
+                      BitboardMoveList& out) {
+    const bool white = (color == BB_WHITE);
+    const BitboardColor them = white ? BB_BLACK : BB_WHITE;
+    const int kingFrom = white ? SQ_E1 : SQ_E8;
+
+    const Bitboard kingBB = white ? state.white[BB_KING] : state.black[BB_KING];
+    if (!(kingBB & (1ULL << kingFrom))) return;      // king not at home
+    if (isSquareAttackedBB(state, kingFrom, them)) return;  // may not castle out of check
+
+    const uint8_t kingSideBit  = white ? CASTLE_WK : CASTLE_BK;
+    const uint8_t queenSideBit = white ? CASTLE_WQ : CASTLE_BQ;
+    const int rookKingSide  = white ? SQ_H1 : SQ_H8;
+    const int rookQueenSide = white ? SQ_A1 : SQ_A8;
+    const Bitboard rooks = white ? state.white[BB_ROOK] : state.black[BB_ROOK];
+
+    if ((state.castlingRights & kingSideBit) && (rooks & (1ULL << rookKingSide))) {
+        const int f = kingFrom + 1, g = kingFrom + 2;
+        if (!(state.occupancyAll & ((1ULL << f) | (1ULL << g))) &&
+            !isSquareAttackedBB(state, f, them) &&
+            !isSquareAttackedBB(state, g, them)) {
+            addMove(out, kingFrom, g, BBM_CASTLE, BB_KING, BB_NONE);
+        }
+    }
+    if ((state.castlingRights & queenSideBit) && (rooks & (1ULL << rookQueenSide))) {
+        const int d = kingFrom - 1, c = kingFrom - 2, b = kingFrom - 3;
+        if (!(state.occupancyAll & ((1ULL << d) | (1ULL << c) | (1ULL << b))) &&
+            !isSquareAttackedBB(state, d, them) &&
+            !isSquareAttackedBB(state, c, them)) {
+            addMove(out, kingFrom, c, BBM_CASTLE, BB_KING, BB_NONE);
         }
     }
 }
 
-// Rook move generation (stub)
-void generateRookMoves(const BitboardState& state, BitboardColor color, BitboardMoveList& moves) {
-    Bitboard rooks = (color == BB_WHITE) ? state.white[BB_ROOK] : state.black[BB_ROOK];
-    Bitboard own = (color == BB_WHITE) ? state.occupancyWhite : state.occupancyBlack;
-    Bitboard enemy = (color == BB_WHITE) ? state.occupancyBlack : state.occupancyWhite;
-    Bitboard occupancy = state.occupancyAll;
-    Bitboard temp = rooks;
-    while (temp) {
-        int sq = lsb(temp);
-        uint64_t attacks = getRookAttacks(sq, occupancy) & ~own;
-        for (int to = 0; to < 64; ++to) {
-            if (testBit(attacks, to)) {
-                bool isCapture = testBit(enemy, to);
-                moves.push_back({sq, to, isCapture, false, BB_NONE});
-            }
+// Rights are revoked by the squares a move touches, which covers king moves,
+// rook moves and rook captures in one rule.
+uint8_t castlingRightsAfter(uint8_t rights, int from, int to) {
+    auto touch = [&](int sq) {
+        switch (sq) {
+            case SQ_E1: rights &= ~(CASTLE_WK | CASTLE_WQ); break;
+            case SQ_E8: rights &= ~(CASTLE_BK | CASTLE_BQ); break;
+            case SQ_H1: rights &= ~CASTLE_WK; break;
+            case SQ_A1: rights &= ~CASTLE_WQ; break;
+            case SQ_H8: rights &= ~CASTLE_BK; break;
+            case SQ_A8: rights &= ~CASTLE_BQ; break;
+            default: break;
         }
-        clearBit(temp, sq);
-    }
-}
-
-// Queen move generation (stub)
-void generateQueenMoves(const BitboardState& state, BitboardColor color, BitboardMoveList& moves) {
-    Bitboard queens = (color == BB_WHITE) ? state.white[BB_QUEEN] : state.black[BB_QUEEN];
-    Bitboard own = (color == BB_WHITE) ? state.occupancyWhite : state.occupancyBlack;
-    Bitboard enemy = (color == BB_WHITE) ? state.occupancyBlack : state.occupancyWhite;
-    Bitboard occupancy = state.occupancyAll;
-    for (int sq = 0; sq < 64; ++sq) {
-        if (testBit(queens, sq)) {
-            uint64_t attacks = (getRookAttacks(sq, occupancy) | getBishopAttacks(sq, occupancy)) & ~own;
-            for (int to = 0; to < 64; ++to) {
-                if (testBit(attacks, to)) {
-                    bool isCapture = testBit(enemy, to);
-                    moves.push_back({sq, to, isCapture, false, BB_NONE});
-                }
-            }
-        }
-    }
-}
-
-// King move generation (stub)
-void generateKingMoves(const BitboardState& state, BitboardColor color, BitboardMoveList& moves) {
-    Bitboard king = (color == BB_WHITE) ? state.white[BB_KING] : state.black[BB_KING];
-    Bitboard own = (color == BB_WHITE) ? state.occupancyWhite : state.occupancyBlack;
-    Bitboard enemy = (color == BB_WHITE) ? state.occupancyBlack : state.occupancyWhite;
-
-    // King moves: 8 directions
-    constexpr int directions[8] = {8, -8, 1, -1, 9, -9, 7, -7};
-    for (int sq = 0; sq < 64; ++sq) {
-        if (testBit(king, sq)) {
-            int rank = sq / 8;
-            int file = sq % 8;
-            for (int d = 0; d < 8; ++d) {
-                int to = sq + directions[d];
-                int toRank = to / 8;
-                int toFile = to % 8;
-                // Stay on board and not wrap around
-                if (to >= 0 && to < 64 && abs(toRank - rank) <= 1 && abs(toFile - file) <= 1) {
-                    if (!testBit(own, to)) {
-                        bool isCapture = testBit(enemy, to);
-                        moves.push_back({sq, to, isCapture, false, BB_NONE});
-                    }
-                }
-            }
-        }
-    }
-    // Castling logic
-    auto isSquareAttacked = [&](int sq) {
-        // Check if square is attacked by any enemy piece
-        Bitboard occ = state.occupancyAll;
-        // Pawn attacks
-        Bitboard pawnAttacks = 0ULL;
-        if (color == BB_WHITE) {
-            pawnAttacks |= south(east(state.black[BB_PAWN]));
-            pawnAttacks |= south(west(state.black[BB_PAWN]));
-        } else {
-            pawnAttacks |= north(east(state.white[BB_PAWN]));
-            pawnAttacks |= north(west(state.white[BB_PAWN]));
-        }
-        if (testBit(pawnAttacks, sq)) return true;
-        // Knight attacks
-        constexpr int knightOffsets[8] = {17, 15, 10, 6, -17, -15, -10, -6};
-        Bitboard knights = (color == BB_WHITE) ? state.black[BB_KNIGHT] : state.white[BB_KNIGHT];
-        for (int ksq = 0; ksq < 64; ++ksq) {
-            if (testBit(knights, ksq)) {
-                for (int i = 0; i < 8; ++i) {
-                    int to = ksq + knightOffsets[i];
-                    int toRank = to / 8, toFile = to % 8;
-                    int kRank = ksq / 8, kFile = ksq % 8;
-                    if (to >= 0 && to < 64 && abs(toRank - kRank) + abs(toFile - kFile) == 3 && abs(toRank - kRank) <= 2 && abs(toFile - kFile) <= 2) {
-                        if (to == sq) return true;
-                    }
-                }
-            }
-        }
-        // Bishop/Queen attacks
-        Bitboard bishops = (color == BB_WHITE) ? state.black[BB_BISHOP] : state.white[BB_BISHOP];
-        Bitboard queens = (color == BB_WHITE) ? state.black[BB_QUEEN] : state.white[BB_QUEEN];
-        Bitboard bq = bishops | queens;
-        for (int bqSq = 0; bqSq < 64; ++bqSq) {
-            if (testBit(bq, bqSq)) {
-                uint64_t attacks = getBishopAttacks(bqSq, occ);
-                if (testBit(attacks, sq)) return true;
-            }
-        }
-        // Rook/Queen attacks
-        Bitboard rooks = (color == BB_WHITE) ? state.black[BB_ROOK] : state.white[BB_ROOK];
-        Bitboard rq = rooks | queens;
-        for (int rqSq = 0; rqSq < 64; ++rqSq) {
-            if (testBit(rq, rqSq)) {
-                uint64_t attacks = getRookAttacks(rqSq, occ);
-                if (testBit(attacks, sq)) return true;
-            }
-        }
-        // King attacks
-        Bitboard enemyKing = (color == BB_WHITE) ? state.black[BB_KING] : state.white[BB_KING];
-        for (int ksq = 0; ksq < 64; ++ksq) {
-            if (testBit(enemyKing, ksq)) {
-                int kRank = ksq / 8, kFile = ksq % 8;
-                for (int d = 0; d < 8; ++d) {
-                    int to = ksq + directions[d];
-                    int toRank = to / 8, toFile = to % 8;
-                    if (to >= 0 && to < 64 && abs(toRank - kRank) <= 1 && abs(toFile - kFile) <= 1) {
-                        if (to == sq) return true;
-                    }
-                }
-            }
-        }
-        return false;
     };
-    // Castling also requires the king and rook to actually be on their home
-    // squares: rights bits alone can be stale in hand-built states, and the
-    // old code would emit a castling move for a king that wasn't on e1/e8.
-    if (color == BB_WHITE) {
-        bool kingHome = testBit(state.white[BB_KING], 4);
-        // Kingside: e1 (4) to g1 (6), rook h1 (7)
-        if ((state.castlingRights & 1) && kingHome && testBit(state.white[BB_ROOK], 7) &&
-            !testBit(state.occupancyAll, 5) && !testBit(state.occupancyAll, 6)) {
-            // Check squares e1, f1, g1 not attacked
-            if (!isSquareAttacked(4) && !isSquareAttacked(5) && !isSquareAttacked(6)) {
-                moves.push_back({4, 6, false, false, BB_NONE});
-            }
-        }
-        // Queenside: e1 (4) to c1 (2), rook a1 (0)
-        if ((state.castlingRights & 2) && kingHome && testBit(state.white[BB_ROOK], 0) &&
-            !testBit(state.occupancyAll, 3) && !testBit(state.occupancyAll, 2) && !testBit(state.occupancyAll, 1)) {
-            // Check squares e1, d1, c1 not attacked
-            if (!isSquareAttacked(4) && !isSquareAttacked(3) && !isSquareAttacked(2)) {
-                moves.push_back({4, 2, false, false, BB_NONE});
-            }
-        }
-    } else {
-        bool kingHome = testBit(state.black[BB_KING], 60);
-        // Kingside: e8 (60) to g8 (62), rook h8 (63)
-        if ((state.castlingRights & 4) && kingHome && testBit(state.black[BB_ROOK], 63) &&
-            !testBit(state.occupancyAll, 61) && !testBit(state.occupancyAll, 62)) {
-            // Check squares e8, f8, g8 not attacked
-            if (!isSquareAttacked(60) && !isSquareAttacked(61) && !isSquareAttacked(62)) {
-                moves.push_back({60, 62, false, false, BB_NONE});
-            }
-        }
-        // Queenside: e8 (60) to c8 (58), rook a8 (56)
-        if ((state.castlingRights & 8) && kingHome && testBit(state.black[BB_ROOK], 56) &&
-            !testBit(state.occupancyAll, 59) && !testBit(state.occupancyAll, 58) && !testBit(state.occupancyAll, 57)) {
-            // Check squares e8, d8, c8 not attacked
-            if (!isSquareAttacked(60) && !isSquareAttacked(59) && !isSquareAttacked(58)) {
-                moves.push_back({60, 58, false, false, BB_NONE});
-            }
-        }
+    touch(from);
+    touch(to);
+    return rights;
+}
+
+inline void movePiece(BitboardState& state, BitboardColor color,
+                      BitboardPieceType type, int from, int to) {
+    auto& side = (color == BB_WHITE) ? state.white : state.black;
+    auto& occ  = (color == BB_WHITE) ? state.occupancyWhite : state.occupancyBlack;
+    const Bitboard mask = (1ULL << from) | (1ULL << to);
+    side[type] ^= mask;
+    occ ^= mask;
+}
+
+inline void togglePiece(BitboardState& state, BitboardColor color,
+                        BitboardPieceType type, int sq) {
+    auto& side = (color == BB_WHITE) ? state.white : state.black;
+    auto& occ  = (color == BB_WHITE) ? state.occupancyWhite : state.occupancyBlack;
+    side[type] ^= 1ULL << sq;
+    occ ^= 1ULL << sq;
+}
+
+}  // namespace
+
+void generateBitboardPseudoLegal(const BitboardState& state, BitboardColor color,
+                                 BitboardMoveList& moves) {
+    moves.clear();
+    generatePawns(state, color, moves);
+    generatePieceMoves(state, color, BB_KNIGHT, moves);
+    generatePieceMoves(state, color, BB_BISHOP, moves);
+    generatePieceMoves(state, color, BB_ROOK, moves);
+    generatePieceMoves(state, color, BB_QUEEN, moves);
+    generatePieceMoves(state, color, BB_KING, moves);
+    generateCastling(state, color, moves);
+}
+
+void generateBitboardLegal(BitboardState& state, BitboardColor color,
+                           BitboardMoveList& moves) {
+    BitboardMoveList pseudo;
+    generateBitboardPseudoLegal(state, color, pseudo);
+
+    moves.clear();
+    moves.reserve(pseudo.size());
+    for (const BitboardMove& m : pseudo) {
+        BitboardUndo undo = makeBitboardMove(state, m);
+        const int ksq = kingSquare(state, color);
+        const BitboardColor them = (color == BB_WHITE) ? BB_BLACK : BB_WHITE;
+        if (ksq < 0 || !isSquareAttackedBB(state, ksq, them)) moves.push_back(m);
+        unmakeBitboardMove(state, undo);
     }
+}
+
+BitboardUndo makeBitboardMove(BitboardState& state, const BitboardMove& move) {
+    BitboardUndo undo;
+    undo.move = move;
+    undo.castlingBefore = state.castlingRights;
+    undo.enPassantBefore = state.enPassantSquare;
+
+    const BitboardColor us = state.sideToMove;
+    const BitboardColor them = (us == BB_WHITE) ? BB_BLACK : BB_WHITE;
+
+    // Remove the captured piece first. En passant takes it from a different
+    // square than the destination.
+    if (move.flag == BBM_EN_PASSANT) {
+        const int capturedSq = (move.from / 8) * 8 + (move.to % 8);
+        togglePiece(state, them, BB_PAWN, capturedSq);
+    } else if (move.captured != BB_NONE) {
+        togglePiece(state, them, move.captured, move.to);
+    }
+
+    if (move.flag == BBM_PROMOTION) {
+        togglePiece(state, us, BB_PAWN, move.from);
+        togglePiece(state, us, move.promotionType, move.to);
+    } else {
+        movePiece(state, us, move.moved, move.from, move.to);
+    }
+
+    if (move.flag == BBM_CASTLE) {
+        // The king has already moved; the rook follows. Which rook is decided
+        // by the direction the king went.
+        const bool kingSide = (move.to > move.from);
+        const int rookFrom = kingSide ? move.from + 3 : move.from - 4;
+        const int rookTo   = kingSide ? move.from + 1 : move.from - 1;
+        movePiece(state, us, BB_ROOK, rookFrom, rookTo);
+    }
+
+    state.castlingRights = castlingRightsAfter(state.castlingRights, move.from, move.to);
+    state.enPassantSquare = (move.flag == BBM_DOUBLE_PUSH)
+                          ? (move.from + move.to) / 2
+                          : -1;
+    state.sideToMove = them;
+    state.occupancyAll = state.occupancyWhite | state.occupancyBlack;
+    return undo;
+}
+
+void unmakeBitboardMove(BitboardState& state, const BitboardUndo& undo) {
+    const BitboardMove& move = undo.move;
+    const BitboardColor us = (state.sideToMove == BB_WHITE) ? BB_BLACK : BB_WHITE;
+    const BitboardColor them = state.sideToMove;
+
+    if (move.flag == BBM_CASTLE) {
+        const bool kingSide = (move.to > move.from);
+        const int rookFrom = kingSide ? move.from + 3 : move.from - 4;
+        const int rookTo   = kingSide ? move.from + 1 : move.from - 1;
+        movePiece(state, us, BB_ROOK, rookTo, rookFrom);
+    }
+
+    if (move.flag == BBM_PROMOTION) {
+        togglePiece(state, us, move.promotionType, move.to);
+        togglePiece(state, us, BB_PAWN, move.from);
+    } else {
+        movePiece(state, us, move.moved, move.to, move.from);
+    }
+
+    if (move.flag == BBM_EN_PASSANT) {
+        const int capturedSq = (move.from / 8) * 8 + (move.to % 8);
+        togglePiece(state, them, BB_PAWN, capturedSq);
+    } else if (move.captured != BB_NONE) {
+        togglePiece(state, them, move.captured, move.to);
+    }
+
+    state.castlingRights = undo.castlingBefore;
+    state.enPassantSquare = undo.enPassantBefore;
+    state.sideToMove = us;
+    state.occupancyAll = state.occupancyWhite | state.occupancyBlack;
 }

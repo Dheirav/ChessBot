@@ -46,7 +46,7 @@ bool testBit(Bitboard b, int sq) {
 }
 
 void printBitboard(Bitboard b) {
-    for (int rank = 7; rank >= 0; --rank) {
+    for (int rank = 0; rank <= 7; ++rank) {   // rank 0 is the eighth rank
         for (int file = 0; file < 8; ++file) {
             int sq = rank * 8 + file;
             std::cout << (testBit(b, sq) ? "1 " : ". ");
@@ -63,15 +63,25 @@ void printBitboardState(const BitboardState& state) {
     // ...add more for other piece types as needed
 }
 
-// FEN parsing for bitboards
+// FEN parsing for bitboards.
+//
+// Square indexing matches Board: index = y * 8 + x with y = 0 the eighth rank,
+// so a8 is bit 0 and h1 is bit 63, and white moves toward *lower* indices.
+// That is the opposite of the usual a1 = 0 convention, and is deliberate: this
+// module exists to serve the mailbox engine, and two orientations in one
+// codebase is how a bitboard module ends up silently generating wrong moves.
+// FEN is written from rank 8 down, which is the same direction, so parsing is
+// now a straight walk from 0.
 void setBitboardFromFEN(BitboardState& state, const std::string& fen) {
     state.clear();
-    int sq = 56; // a8
+    int sq = 0; // a8
     std::string::size_type i = 0;
     while (i < fen.size() && fen[i] != ' ') {
         char c = fen[i];
         if (c == '/') {
-            sq -= 16; // next rank
+            // Nothing to do: ranks are consecutive in this layout (rank 8 is
+            // squares 0-7, rank 7 is 8-15, and so on), so the rank separator
+            // needs no index adjustment.
         } else if (c >= '1' && c <= '8') {
             sq += (c - '0');
         } else {
@@ -128,7 +138,7 @@ void setBitboardFromFEN(BitboardState& state, const std::string& fen) {
     if (i + 1 < fen.size() && fen[i] >= 'a' && fen[i] <= 'h' &&
         fen[i + 1] >= '1' && fen[i + 1] <= '8') {
         int file = fen[i] - 'a';
-        int rank = fen[i + 1] - '1';
-        state.enPassantSquare = rank * 8 + file;
+        int rank = fen[i + 1] - '1';       // FEN rank 1..8
+        state.enPassantSquare = (7 - rank) * 8 + file;
     }
 }

@@ -15,6 +15,7 @@
 // Run:  make test-bitboard
 
 #include "engine/bitboard_attacks.hpp"
+#include "engine/bitboard_move_gen.hpp"
 #include "engine/board.hpp"
 #include "engine/magic_bitboards.hpp"
 #include "engine/move_lookup.hpp"
@@ -255,10 +256,74 @@ int main() {
     std::printf("  blockersForKing() matches remove-and-test-the-king   %s\n",
                 pinMismatch ? "FAILED" : "ok");
 
+    // ------------------------------------------------------------------
+    // Perft through the bitboard generator.
+    //
+    // A move generator that has not been perft-checked is a guess. These are
+    // the same published reference counts that guard movegen.cpp, so the two
+    // generators are being held to one standard — and any disagreement between
+    // them shows up as a wrong total here.
+    // ------------------------------------------------------------------
+    struct PerftCase { const char* name; const char* fen; int depth; uint64_t expected; };
+    static const PerftCase PERFT[] = {
+        {"startpos",  "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", 4, 197281},
+        {"kiwipete",  "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1", 3, 97862},
+        {"position3", "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1", 4, 43238},
+        {"position4", "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1", 3, 9467},
+    };
+
+    // Recursive perft over the bitboard generator, using its own make/unmake.
+    struct Perft {
+        static uint64_t run(BitboardState& st, int depth) {
+            BitboardMoveList moves;
+            generateBitboardLegal(st, st.sideToMove, moves);
+            if (depth <= 1) return moves.size();
+            uint64_t nodes = 0;
+            for (const BitboardMove& m : moves) {
+                BitboardUndo u = makeBitboardMove(st, m);
+                nodes += run(st, depth - 1);
+                unmakeBitboardMove(st, u);
+            }
+            return nodes;
+        }
+    };
+
+    std::printf("\nPerft through the bitboard generator\n");
+    int perftFailures = 0;
+    for (const PerftCase& c : PERFT) {
+        // Built from the mailbox Board so the two generators are guaranteed to
+        // start from the same position rather than from two FEN parsers.
+        Board board;
+        if (!board.setFromFEN(c.fen)) {
+            std::printf("  %-10s FEN PARSE FAILED\n", c.name);
+            ++perftFailures;
+            continue;
+        }
+        BitboardState st = toBitboardState(board);
+
+        // make/unmake must be exactly reversible, or perft is measuring drift.
+        const BitboardState before = st;
+        uint64_t nodes = Perft::run(st, c.depth);
+        bool restored = (st.white == before.white && st.black == before.black &&
+                         st.occupancyAll == before.occupancyAll &&
+                         st.castlingRights == before.castlingRights &&
+                         st.enPassantSquare == before.enPassantSquare &&
+                         st.sideToMove == before.sideToMove);
+
+        bool ok = (nodes == c.expected) && restored;
+        if (!ok) ++perftFailures;
+        std::printf("  %-10s depth %d: %10llu  expected %10llu  %s%s\n",
+                    c.name, c.depth, (unsigned long long)nodes,
+                    (unsigned long long)c.expected,
+                    nodes == c.expected ? "ok" : "MISMATCH",
+                    restored ? "" : "  (state not restored by unmake!)");
+    }
+    if (perftFailures) ++failures;
+
     if (failures) {
         std::printf("\nFAILED: %d check group(s).\n", failures);
         return 1;
     }
-    std::printf("\nPASSED: bitboard attacks agree with the mailbox engine\n");
+    std::printf("\nPASSED: bitboard module agrees with the mailbox engine\n");
     return 0;
 }
