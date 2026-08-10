@@ -14,14 +14,34 @@
 // Piece values for MVV-LVA ordering in the quiescence search
 static const int QS_PIECE_VALUES[7] = { 0, 20000, 100, 320, 330, 500, 900 };
 
-// Score used for checkmate (positive = white mates black, negative = black mates white).
-// Actual mate scores are MATE_SCORE - ply so that nearer mates score higher,
-// which makes the engine converge on the fastest mate instead of shuffling
+// The search is negamax: every score is from the point of view of the side to
+// move, and a child's score is negated on the way back up. evaluate() is
+// white-perspective, so the single conversion happens in scoreForSideToMove()
+// below and nowhere else.
+//
+// This replaced a white-perspective minimax that branched on whiteToMove at
+// every decision — stand-pat, the move loop, null move, LMR, the alpha-beta
+// update — and so carried two mirrored copies of each. The duplication was not
+// only bulk: it is what produced the TT bound-classification bug fixed earlier
+// (the black branch shrinks beta, so comparing against the shrunk value
+// misfiled every black PV node as a lower bound).
+
+// Score used for checkmate, from the perspective of the side to move: being
+// mated is -(MATE_SCORE - ply). Subtracting ply makes nearer mates score
+// higher, so the engine converges on the fastest mate instead of shuffling
 // between equally "mating" lines forever. Stalemate is scored 0.
 static constexpr int MATE_SCORE = 30000;
 
-static int mateScore(bool whiteToMove, int ply) {
-    return whiteToMove ? -(MATE_SCORE - ply) : (MATE_SCORE - ply);
+// Window infinities. Deliberately not std::numeric_limits<int>::min(): negamax
+// negates the window on every recursion, and -INT_MIN is undefined behaviour.
+// Any value comfortably above the largest representable mate score works;
+// scoreToTT() can push a mate to MATE_SCORE + ply, so this leaves headroom.
+static constexpr int INF = 32000;
+
+// evaluate() is white-perspective; the search is not.
+static int scoreForSideToMove(const Board& board) {
+    int white = evaluate(board);
+    return (board.activeColor == COLOR_WHITE) ? white : -white;
 }
 
 SearchOptions g_searchOptions;
@@ -53,8 +73,8 @@ static MoveList generateCaptures(const Board& board, PieceColor side) {
     return tactical;
 }
 
-// Quiescence search: avoids the horizon effect by searching captures and promotions
-// at the leaves of the main search. Uses the same white-perspective scoring as minimax.
+// Quiescence search: avoids the horizon effect by searching captures and
+// promotions at the leaves of the main search. Negamax, like the main search.
 static int quiescence(Board& board, int ply, int alpha, int beta,
                       const std::atomic<bool>& shouldStop) {
     ++g_searchNodes;
@@ -64,31 +84,22 @@ static int quiescence(Board& board, int ply, int alpha, int beta,
 
     PieceColor side = board.activeColor;
 
-    // The evaluation is always white-perspective, so the side to move maximizes
-    // when it is white and minimizes when it is black.
-    bool whiteToMove = (side == COLOR_WHITE);
-
     // If not in check, the static evaluation is a valid stand-pat cutoff.
     // If in check, we must search every evasion (stand-pat is illegal).
     bool inCheck = LegalMoveValidator::isInCheck(board, side);
 
     if (!inCheck) {
-        int standPat = evaluate(board);
-        if (whiteToMove) {
-            if (standPat >= beta) return beta;
-            if (standPat > alpha) alpha = standPat;
-        } else {
-            if (standPat <= alpha) return alpha;
-            if (standPat < beta) beta = standPat;
-        }
+        int standPat = scoreForSideToMove(board);
+        if (standPat >= beta) return beta;
+        if (standPat > alpha) alpha = standPat;
     }
 
     MoveList moves = inCheck ? generateLegalMoves(board, side) : generateCaptures(board, side);
 
     // No captures (or evasions) available. In check with no evasions this is
-    // checkmate; otherwise the stand-pat value above already folded into alpha/beta.
+    // checkmate; otherwise the stand-pat value above already folded into alpha.
     if (moves.empty()) {
-        return inCheck ? mateScore(whiteToMove, ply) : (whiteToMove ? alpha : beta);
+        return inCheck ? -(MATE_SCORE - ply) : alpha;
     }
 
     // Order captures by MVV-LVA (most valuable victim, least valuable attacker)
@@ -113,27 +124,20 @@ static int quiescence(Board& board, int ply, int alpha, int beta,
         }
 
         UndoInfo undo = board.makeMove(move);
-        int score = quiescence(board, ply + 1, alpha, beta, shouldStop);
+        int score = -quiescence(board, ply + 1, -beta, -alpha, shouldStop);
         board.unmakeMove(undo);
 
         if (shouldStop.load()) {
             break;
         }
 
-        if (whiteToMove) {
-            if (score > alpha) {
-                alpha = score;
-                if (alpha >= beta) return beta;
-            }
-        } else {
-            if (score < beta) {
-                beta = score;
-                if (alpha >= beta) return alpha;
-            }
+        if (score > alpha) {
+            alpha = score;
+            if (alpha >= beta) return beta;
         }
     }
 
-    return whiteToMove ? alpha : beta;
+    return alpha;
 }
 
 // Minimax with transposition table support. `pathHashes` holds the zobrist
@@ -188,10 +192,7 @@ static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
         return score;
     }
 
-    // The side to move is always board.activeColor. Because evaluate() is
-    // white-perspective, white maximizes and black minimizes.
     PieceColor side = board.activeColor;
-    bool whiteToMove = (side == COLOR_WHITE);
     bool inCheck = LegalMoveValidator::isInCheck(board, side);
 
     // --- Null-move pruning ---
@@ -206,28 +207,17 @@ static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
     if (g_searchOptions.nullMove && depth >= 3 && !inCheck && hasNonPawnMaterial(board, side)) {
         const int R = 2;
         NullUndo nu = board.makeNullMove();
-        int nullScore;
-        if (whiteToMove) {
-            nullScore = minimaxWithTT(board, depth - 1 - R, ply + 1, beta - 1, beta, shouldStop, tt, pathHashes);
-        } else {
-            nullScore = minimaxWithTT(board, depth - 1 - R, ply + 1, alpha, alpha + 1, shouldStop, tt, pathHashes);
-        }
+        int nullScore = -minimaxWithTT(board, depth - 1 - R, ply + 1, -beta, -beta + 1,
+                                       shouldStop, tt, pathHashes);
         board.unmakeNullMove(nu);
-        if (!shouldStop.load()) {
-            if (whiteToMove && nullScore >= beta) return beta;
-            if (!whiteToMove && nullScore <= alpha) return alpha;
-        }
+        if (!shouldStop.load() && nullScore >= beta) return beta;
     }
 
     MoveList moves = generateLegalMoves(board, side);
 
     if (moves.empty()) {
-        int score;
-        if (inCheck) {
-            score = mateScore(whiteToMove, ply);
-        } else {
-            score = 0;
-        }
+        // No legal moves: mated if in check, stalemate otherwise.
+        int score = inCheck ? -(MATE_SCORE - ply) : 0;
         tt.store(hash, depth, ply, score, Move(), TTEntry::EXACT);
         return score;
     }
@@ -243,7 +233,7 @@ static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
         }
     }
 
-    int bestEval = whiteToMove ? std::numeric_limits<int>::min() : std::numeric_limits<int>::max();
+    int bestEval = -INF;
     Move bestMove;
 
     pathHashes.push_back(hash);
@@ -269,64 +259,46 @@ static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
         int eval;
         if (reduce) {
             const int R = 1;
-            if (whiteToMove) {
-                eval = minimaxWithTT(board, depth - 1 - R, ply + 1, alpha, alpha + 1, shouldStop, tt, pathHashes);
-                if (!shouldStop.load() && eval > alpha) {
-                    eval = minimaxWithTT(board, depth - 1, ply + 1, alpha, beta, shouldStop, tt, pathHashes);
-                }
-            } else {
-                eval = minimaxWithTT(board, depth - 1 - R, ply + 1, beta - 1, beta, shouldStop, tt, pathHashes);
-                if (!shouldStop.load() && eval < beta) {
-                    eval = minimaxWithTT(board, depth - 1, ply + 1, alpha, beta, shouldStop, tt, pathHashes);
-                }
+            eval = -minimaxWithTT(board, depth - 1 - R, ply + 1, -alpha - 1, -alpha,
+                                  shouldStop, tt, pathHashes);
+            if (!shouldStop.load() && eval > alpha) {
+                eval = -minimaxWithTT(board, depth - 1, ply + 1, -beta, -alpha,
+                                      shouldStop, tt, pathHashes);
             }
         } else {
-            eval = minimaxWithTT(board, depth - 1, ply + 1, alpha, beta, shouldStop, tt, pathHashes);
+            eval = -minimaxWithTT(board, depth - 1, ply + 1, -beta, -alpha,
+                                  shouldStop, tt, pathHashes);
         }
         board.unmakeMove(undo);
 
-        if (whiteToMove) {
-            if (eval > bestEval) {
-                bestEval = eval;
-                bestMove = move;
-            }
-            if (bestEval > alpha) alpha = bestEval;
-            if (beta <= alpha) {
-                // Beta cutoff - update move ordering
-                g_moveOrderer.updateKillerMove(move, depth);
-                g_moveOrderer.updateHistory(move, depth);
-                break;
-            }
-        } else {
-            if (eval < bestEval) {
-                bestEval = eval;
-                bestMove = move;
-            }
-            if (bestEval < beta) beta = bestEval;
-            if (beta <= alpha) {
-                // Beta cutoff - update move ordering
-                g_moveOrderer.updateKillerMove(move, depth);
-                g_moveOrderer.updateHistory(move, depth);
-                break;
-            }
+        if (eval > bestEval) {
+            bestEval = eval;
+            bestMove = move;
+        }
+        if (bestEval > alpha) alpha = bestEval;
+        if (alpha >= beta) {
+            // Beta cutoff - update move ordering
+            g_moveOrderer.updateKillerMove(move, depth);
+            g_moveOrderer.updateHistory(move, depth);
+            break;
         }
     }
     
     pathHashes.pop_back();
 
-    // A stopped search leaves bestEval partial (possibly still ±INT limits
-    // from an unfinished loop) and its children returned fake neutral scores.
-    // Storing that would poison the table for every later search, since the
-    // TT persists across moves. Return without storing; callers that see
+    // A stopped search leaves bestEval partial (possibly still -INF from an
+    // unfinished loop) and its children returned fake neutral scores. Storing
+    // that would poison the table for every later search, since the TT
+    // persists across moves. Return without storing; callers that see
     // shouldStop discard this value anyway.
     if (shouldStop.load()) {
         return bestEval;
     }
 
-    // Store in transposition table. Bound classification must compare
-    // against the ORIGINAL window: the black branch shrinks `beta` down to
-    // bestEval, so comparing against the shrunk beta misfiled every black
-    // PV node as LOWER_BOUND.
+    // Store in transposition table. Bound classification compares against the
+    // ORIGINAL window, not the current one: the loop above raises `alpha` to
+    // bestEval, so comparing against the raised value would file every PV node
+    // as an upper bound.
     TTEntry::NodeType nodeType;
     if (bestEval <= originalAlpha) {
         nodeType = TTEntry::UPPER_BOUND;
@@ -358,8 +330,11 @@ Move findBestMoveIterativeDeepening(Board& board, int maxDepth,
     }
 
     Move bestMove = moves[0];
-    bool whiteToMove = (board.activeColor == COLOR_WHITE);
-    int bestScore = whiteToMove ? std::numeric_limits<int>::min() : std::numeric_limits<int>::max();
+    // Negamax: bestScore is from the root side's point of view throughout, so
+    // it is directly comparable across iterations. Converted back to
+    // white-perspective only for the human-readable log below.
+    const bool whiteToMove = (board.activeColor == COLOR_WHITE);
+    int bestScore = -INF;
     // Whether bestScore holds a real completed-depth result yet. The aspiration
     // window needs a previous score to centre on.
     bool haveScore = false;
@@ -381,8 +356,7 @@ Move findBestMoveIterativeDeepening(Board& board, int maxDepth,
         uint64_t hash = board.getHash();
         Move ttMove;
         int ttScore;
-        if (tt.probe(hash, currentDepth, 0, std::numeric_limits<int>::min(),
-                    std::numeric_limits<int>::max(), ttScore, ttMove)) {
+        if (tt.probe(hash, currentDepth, 0, -INF, INF, ttScore, ttMove)) {
             // Verify the TT move is legal and use it for ordering
             auto it = std::find(moves.begin(), moves.end(), ttMove);
             if (it != moves.end()) {
@@ -394,7 +368,7 @@ Move findBestMoveIterativeDeepening(Board& board, int maxDepth,
         // Order moves using previous iteration knowledge
         g_moveOrderer.orderMoves(moves, board, currentDepth, ttMove);
         
-        int currentBestScore = whiteToMove ? std::numeric_limits<int>::min() : std::numeric_limits<int>::max();
+        int currentBestScore = -INF;
         Move currentBestMove = moves[0];
         bool completedDepth = true;
 
@@ -406,8 +380,8 @@ Move findBestMoveIterativeDeepening(Board& board, int maxDepth,
         // the window: the search then "fails" low or high and must be redone
         // with a wider one, which is why the window grows on each retry instead
         // of jumping straight back to infinity.
-        const int INF_LO = std::numeric_limits<int>::min();
-        const int INF_HI = std::numeric_limits<int>::max();
+        const int INF_LO = -INF;
+        const int INF_HI = INF;
         bool useAspiration = g_searchOptions.aspiration && currentDepth >= 3 &&
                              haveScore && std::abs(bestScore) < 29000;
         int delta = 50;
@@ -417,7 +391,7 @@ Move findBestMoveIterativeDeepening(Board& board, int maxDepth,
         std::vector<uint64_t> pathHashes;
 
         while (true) {
-            currentBestScore = whiteToMove ? INF_LO : INF_HI;
+            currentBestScore = INF_LO;
             currentBestMove = moves[0];
             completedDepth = true;
             pathHashes.clear();
@@ -443,34 +417,27 @@ Move findBestMoveIterativeDeepening(Board& board, int maxDepth,
                 UndoInfo undo = board.makeMove(move);
                 int eval;
                 if (i == 0) {
-                    eval = minimaxWithTT(board, currentDepth - 1, 1, alpha, beta, shouldStop, tt, pathHashes);
-                } else if (whiteToMove) {
-                    eval = minimaxWithTT(board, currentDepth - 1, 1, alpha, alpha + 1, shouldStop, tt, pathHashes);
-                    if (!shouldStop.load() && eval > alpha && eval < beta) {
-                        eval = minimaxWithTT(board, currentDepth - 1, 1, alpha, beta, shouldStop, tt, pathHashes);
-                    }
+                    eval = -minimaxWithTT(board, currentDepth - 1, 1, -beta, -alpha,
+                                          shouldStop, tt, pathHashes);
                 } else {
-                    eval = minimaxWithTT(board, currentDepth - 1, 1, beta - 1, beta, shouldStop, tt, pathHashes);
-                    if (!shouldStop.load() && eval < beta && eval > alpha) {
-                        eval = minimaxWithTT(board, currentDepth - 1, 1, alpha, beta, shouldStop, tt, pathHashes);
+                    // Principal variation search: later root moves get a cheap
+                    // null-window probe first, and only a move that beats alpha
+                    // is re-searched with the full window.
+                    eval = -minimaxWithTT(board, currentDepth - 1, 1, -alpha - 1, -alpha,
+                                          shouldStop, tt, pathHashes);
+                    if (!shouldStop.load() && eval > alpha && eval < beta) {
+                        eval = -minimaxWithTT(board, currentDepth - 1, 1, -beta, -alpha,
+                                              shouldStop, tt, pathHashes);
                     }
                 }
                 board.unmakeMove(undo);
 
                 if (!shouldStop.load()) {
-                    if (whiteToMove) {
-                        if (eval > currentBestScore) {
-                            currentBestScore = eval;
-                            currentBestMove = move;
-                        }
-                        if (eval > alpha) alpha = eval;
-                    } else {
-                        if (eval < currentBestScore) {
-                            currentBestScore = eval;
-                            currentBestMove = move;
-                        }
-                        if (eval < beta) beta = eval;
+                    if (eval > currentBestScore) {
+                        currentBestScore = eval;
+                        currentBestMove = move;
                     }
+                    if (eval > alpha) alpha = eval;
                 }
             }
 
@@ -503,7 +470,8 @@ Move findBestMoveIterativeDeepening(Board& board, int maxDepth,
             auto depthDuration = std::chrono::duration_cast<std::chrono::milliseconds>(depthEnd - depthStart);
             if (!g_searchOptions.quiet) {
                 std::cout << "Depth " << currentDepth << " complete in " << depthDuration.count()
-                         << "ms. Best move: " << bestMove.toString() << " (score: " << bestScore << ")" << std::endl;
+                         << "ms. Best move: " << bestMove.toString()
+                         << " (score: " << (whiteToMove ? bestScore : -bestScore) << ")" << std::endl;
             }
         } else {
             if (!g_searchOptions.quiet) std::cout << "Depth " << currentDepth << " incomplete, using previous result" << std::endl;
@@ -523,7 +491,8 @@ Move findBestMoveIterativeDeepening(Board& board, int maxDepth,
     auto totalDuration = std::chrono::duration_cast<std::chrono::milliseconds>(searchEnd - searchStart);
     if (!g_searchOptions.quiet) {
         std::cout << "Iterative deepening search completed in " << totalDuration.count()
-                 << "ms. Final best move: " << bestMove.toString() << " (score: " << bestScore << ")" << std::endl;
+                 << "ms. Final best move: " << bestMove.toString()
+                 << " (score: " << (whiteToMove ? bestScore : -bestScore) << ")" << std::endl;
     }
     
     return bestMove;
