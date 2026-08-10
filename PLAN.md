@@ -354,6 +354,10 @@ term, is exactly the right predicate. Nearly free at runtime.
 The backlog's measured ceilings are the whole point of this ordering. Current
 split at depth 5: evaluation 34.1%, legality filter 19.4%, `makeMove` 10.4%.
 
+**Status: 5.1, 5.2 and 5.3 are DONE** — 1.45× together, all verified by the
+bench signature staying at 2 056 371. Remaining: 5.4 (lazy eval, needs a match)
+and 5.5 (pin-aware movegen). See `BACKLOG.md §7` for the measurements.
+
 **5.1 Cache the static eval in the TT entry** (§4.3) — repeated visits skip
 evaluation entirely. No change to search results, so `test-evalref` and
 `test-perft` fully cover it. Best ratio of payoff to risk in this phase.
@@ -377,7 +381,9 @@ when already far outside the alpha-beta window. *Changes results*, so it needs
 a match, not just `evalref`.
 
 **5.5 Pin-aware legal move generation** (§4.1, ceiling 1.24× ideal / ~1.15×
-real) — last, deliberately. It is the most notorious source of engine bugs
+real — note this ceiling was measured against the *old* profile; with the
+legality filter now a larger share of a faster search, re-measure before
+committing to it) — last, deliberately. It is the most notorious source of engine bugs
 (en-passant discovered check along a rank, pinned pawns capturing en passant,
 king moves that stay on a slider's ray). Only attempt with `test-perft` and
 perft divide (0.3) in place, and only after Phases 1–4 have banked their much

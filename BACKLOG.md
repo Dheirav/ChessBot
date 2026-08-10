@@ -403,6 +403,29 @@ Established after the Phase 0 deletions (PLAN.md 0.1, 0.4–0.7), which were
 behaviour-preserving, and before the negamax conversion (0.9), which must not
 change it.
 
+**The node count has not moved since.** Negamax (0.9), time control (1.1), UCI
+(2.1) and all three Phase 5 performance items reproduced it exactly — the same
+search, doing the same work, faster. Wall clock over the same 12 positions:
+
+| stage | depth 5 | depth 6 | vs Phase 0 |
+|---|---|---|---|
+| after Phase 0 | 5 084 ms | ~12 450 ms | 1.00× |
+| + in-place legality filter (5.2) | 4 972 ms | 12 451 ms | 1.02× |
+| + evaluation cache (5.1) | 4 154 ms | 10 373 ms | 1.22× |
+| + mask/square board state (5.3) | **3 507 ms** | **8 557 ms** | **1.45×** |
+
+Two of those beat their predicted ceilings, for the same reason in both cases:
+the cost was not where the profile's category names suggested.
+
+- **5.1, predicted "cheapest first", measured 1.20×.** 46.1% of `evaluate()`
+  calls are for a position already evaluated (1 077 632 calls, 580 993 distinct
+  positions), so memoizing removes nearly half the largest item in the profile.
+- **5.3, predicted ~1.05× and "low reward", measured ~1.20×.** The expense was
+  never the string *copies* — both fields are short enough to avoid a heap
+  allocation. It was `erase(std::remove(...))` up to four times per `makeMove`
+  to clear castling rights that are now a single AND, plus re-deriving the
+  zobrist index by scanning characters on every hash update.
+
 
 Keep these to compare against. Five-position benchmark, depth 5, iterative
 deepening, 256 MB TT:
