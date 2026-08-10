@@ -3,6 +3,15 @@
 constexpr int TILE_SIZE = 64; // Size of each tile in pixels
 constexpr int BOARD_SIZE = 8;
 
+// The window is the board plus a panel to its right. The board used to be the
+// whole window, which left the engine with nowhere to report anything: no
+// clock, no depth or score, no move list, and no on-screen indication that a
+// game had ended.
+constexpr int BOARD_PIXELS = TILE_SIZE * BOARD_SIZE;   // 512
+constexpr int PANEL_WIDTH  = 280;
+constexpr int WINDOW_WIDTH  = BOARD_PIXELS + PANEL_WIDTH;
+constexpr int WINDOW_HEIGHT = BOARD_PIXELS;
+
 // Board orientation.
 //
 // Board square indices run 0 = a8 .. 63 = h1, so the unflipped view maps

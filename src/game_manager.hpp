@@ -118,6 +118,9 @@ public:
     // Engine control
     void setEngineDepth(int depth) { engine->setSearchDepth(depth); }
     int getEngineDepth() const { return engine->getSearchDepth(); }
+    // The engine's per-move time budget, for the GUI's progress display.
+    // 0 when the engine is searching by depth alone.
+    long getEngineMoveTimeMs() const;
     std::string getEngineName() const { return engine->getEngineName(); }
     
     // Transposition table control (if engine supports it)

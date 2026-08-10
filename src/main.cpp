@@ -7,6 +7,7 @@
 #include "gui_manager.hpp"
 #include "engine/chessbot_engine.hpp"
 #include "engine/uci.hpp"
+#include "gui/hud.hpp"
 
 int main(int argc, char** argv) {
     // UCI mode is a pure stdin/stdout protocol with no window, so it is handled
@@ -27,6 +28,10 @@ int main(int argc, char** argv) {
         std::cerr << "Failed to initialize GUI!" << std::endl;
         return 1;
     }
+
+    // Route the search's per-iteration output to the side panel instead of
+    // stdout, which is where it used to go with nobody watching.
+    hud::installSearchCallback();
 
     // Create chess engine
     auto engine = std::make_unique<ChessBotEngine>();

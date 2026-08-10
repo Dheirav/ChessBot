@@ -503,6 +503,16 @@ void GameManager::saveStateForUndo() {
     }
 }
 
+long GameManager::getEngineMoveTimeMs() const {
+    // Only ChessBotEngine has a clock; the interface deliberately does not, so
+    // that a different engine could be dropped in. Nothing to report if this is
+    // some other implementation.
+    if (auto* bot = dynamic_cast<ChessBotEngine*>(engine.get())) {
+        return bot->getMoveTimeMs();
+    }
+    return 0;
+}
+
 void GameManager::clearTranspositionTable() {
     // Try to cast to ChessBotEngine to access TT methods
     if (auto* chessBotEngine = dynamic_cast<ChessBotEngine*>(engine.get())) {

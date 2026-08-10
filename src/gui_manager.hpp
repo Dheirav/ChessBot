@@ -1,4 +1,5 @@
 #pragma once
+#include <chrono>
 #include <SFML/Graphics.hpp>
 #include <map>
 #include <string>
@@ -12,6 +13,12 @@
  */
 class GUIManager {
 private:
+    // Cumulative thinking time per side, in milliseconds.
+    long whiteClockMs = 0;
+    long blackClockMs = 0;
+    std::chrono::steady_clock::time_point lastTick = std::chrono::steady_clock::now();
+    bool wasThinking = false;
+
     sf::RenderWindow window;
     std::map<std::string, sf::Texture> textures;
     Input input;
@@ -43,6 +50,7 @@ public:
 private:
     bool loadResources();
     void handleMouseInput(const sf::Event& event);
+    void tickClocks();
     void handleKeyboardInput(const sf::Event& event);
     void processCompletedMove();
 };

@@ -12,10 +12,10 @@ public:
     void handleEvent(const sf::Event& event, Board& board);
 
     // Draws the dragged piece following the mouse (call after renderBoard)
-    void drawDraggedPiece(sf::RenderWindow& window, const std::map<std::string, sf::Texture>& textures) const;
+    void drawDraggedPiece(sf::RenderTarget& window, const std::map<std::string, sf::Texture>& textures) const;
 
     // Draws the promotion selection dialog
-    void drawPromotionDialog(sf::RenderWindow& window, const std::map<std::string, sf::Texture>& textures) const;
+    void drawPromotionDialog(sf::RenderTarget& window, const std::map<std::string, sf::Texture>& textures) const;
 
     // Returns true if a piece is currently being dragged
     bool isDragging() const;

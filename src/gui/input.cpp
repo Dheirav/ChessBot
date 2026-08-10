@@ -198,7 +198,7 @@ void Input::handleEvent(const sf::Event& event, Board& board) {
     }
 }
 
-void Input::drawDraggedPiece(sf::RenderWindow& window, const std::map<std::string, sf::Texture>& textures) const {
+void Input::drawDraggedPiece(sf::RenderTarget& window, const std::map<std::string, sf::Texture>& textures) const {
     if (dragging && draggedPiece.type() != NONE) {
         std::string name = pieceToString(draggedPiece);
         if (!name.empty() && textures.count(name)) {
@@ -250,7 +250,7 @@ bool Input::isPromotionActive() const {
     return promotionActive;
 }
 
-void Input::drawPromotionDialog(sf::RenderWindow& window, const std::map<std::string, sf::Texture>& textures) const {
+void Input::drawPromotionDialog(sf::RenderTarget& window, const std::map<std::string, sf::Texture>& textures) const {
     if (!promotionActive) return;
     
     // Draw semi-transparent overlay

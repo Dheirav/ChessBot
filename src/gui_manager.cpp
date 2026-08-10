@@ -1,4 +1,5 @@
 #include "gui_manager.hpp"
+#include "gui/hud.hpp"
 #include "gui/constants.hpp"
 #include <iostream>
 
@@ -11,7 +12,7 @@ GUIManager::~GUIManager() {
 
 bool GUIManager::initialize() {
     // Create window
-    window.create(sf::VideoMode(TILE_SIZE * BOARD_SIZE, TILE_SIZE * BOARD_SIZE), "ChessBot");
+    window.create(sf::VideoMode(WINDOW_WIDTH, WINDOW_HEIGHT), "ChessBot");
     if (!window.isOpen()) {
         std::cerr << "Failed to create window!" << std::endl;
         return false;
@@ -62,7 +63,28 @@ void GUIManager::handleEvents() {
     }
 }
 
+// Accumulate time against whichever side is to move, and keep the search
+// status in step with the engine. Driven from the frame loop rather than from
+// move events, because a clock that only updates when a move is made is not a
+// clock.
+void GUIManager::tickClocks() {
+    const auto now = std::chrono::steady_clock::now();
+    const long dt = (long)std::chrono::duration_cast<std::chrono::milliseconds>(
+        now - lastTick).count();
+    lastTick = now;
+
+    if (!gameManager || gameManager->isGameOver()) return;
+    if (gameManager->getCurrentPlayer() == COLOR_WHITE) whiteClockMs += dt;
+    else                                               blackClockMs += dt;
+
+    const bool thinking = gameManager->isEngineThinking();
+    if (thinking && !wasThinking) hud::beginSearch(gameManager->getEngineMoveTimeMs());
+    if (!thinking && wasThinking) hud::endSearch();
+    wasThinking = thinking;
+}
+
 void GUIManager::update() {
+    tickClocks();
     // Apply any engine move that finished computing (main thread only)
     gameManager->processPendingEngineMove();
     
@@ -107,13 +129,16 @@ void GUIManager::update() {
 
 void GUIManager::render() {
     window.clear();
-    
-    // Render the board
-    renderBoard(window, gameManager->getBoard(), textures, input);
-    
-    // Render dragged piece
+
+    // The last move played, so the board can show what just changed. Null
+    // before either side has moved.
+    const std::vector<Move>& history = gameManager->getMoveHistory();
+    const Move* lastMove = history.empty() ? nullptr : &history.back();
+
+    renderBoard(window, gameManager->getBoard(), textures, input, lastMove);
     input.drawDraggedPiece(window, textures);
-    
+    renderSidePanel(window, *gameManager, whiteClockMs, blackClockMs);
+
     window.display();
 }
 
