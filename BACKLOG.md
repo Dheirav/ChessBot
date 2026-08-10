@@ -15,8 +15,10 @@ Items are ordered within each section by how much they matter.
 
 Null-move pruning, LMR and aspiration windows were added and made the search
 **4.1× faster at the same depth**. But a 200-game self-play match at depth 4
-(`make test-match`) measured them at roughly **−40 Elo versus the same engine
-with all three disabled**. See §7 for the exact result.
+(`make test-match`) put them at **−30 Elo versus the same engine with all three
+disabled, 95% CI [−62, +2]**. The interval grazes zero, so this is not proof of
+a regression — but it is clear evidence they are not *gaining* strength at equal
+depth, and the point estimate is solidly negative. See §7.
 
 This matters more than it looks, because `ChessBotEngine` searches to a **fixed
 depth** (`searchDepth`, default 5) rather than to a time budget. At a fixed
@@ -298,7 +300,24 @@ depth 4 = 197 281, kiwipete depth 3 = 97 862, position 3 depth 4 = 43 238,
 position 4 depth 3 = 9 467.
 
 Self-play match, heuristics on vs off, depth 4, seed 20260810
-(`./tests/match 100 4 20260810`), read at 167 of 200 games:
-**W 27 / D 94 / L 45, score 44.6%, about −37 Elo** for heuristics-on. The
-margin was stable from roughly game 60 onward, so this is signal rather than
-noise. Rerun to completion to confirm the final figure.
+(`./tests/match 100 4 20260810`), completed:
+
+```
+games : 200  (W 35 / D 113 / L 52)
+score : 45.8%
+Elo   : -30   95% CI [-62, +2]
+wall  : 1542 s
+```
+
+The confidence interval includes zero by a hair, so strictly this match does
+not establish a regression at 95% confidence. What it does establish is that
+the heuristics are **not** buying strength at equal depth: 113 of 200 games
+were drawn, and the point estimate sits 30 Elo down.
+
+Resolving it properly needs roughly 800 games (the interval narrows with the
+square root of the sample, so 4× the games halves it to about ±16). At ~7.7 s
+per game that is a little under two hours:
+
+```
+./tests/match 400 4 20260810
+```
