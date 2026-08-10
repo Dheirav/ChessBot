@@ -35,7 +35,9 @@ $(EXEC): $(OBJ)
 # --- Tests ---
 # The engine sources only (no GUI, no main), so test binaries link without SFML.
 ENGINE_SRC = $(wildcard src/engine/*.cpp)
-TESTS = tests/perft tests/match
+# game_manager has no GUI dependency, so game-state tests link without SFML too.
+GM_SRC = src/game_manager.cpp
+TESTS = tests/perft tests/match tests/gamestate
 
 # perft guards move generation: leaf counts must match published references.
 tests/perft: tests/perft.cpp $(ENGINE_SRC)
@@ -43,6 +45,10 @@ tests/perft: tests/perft.cpp $(ENGINE_SRC)
 
 # match plays two search configurations against each other to measure strength.
 tests/match: tests/match.cpp $(ENGINE_SRC)
+	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
+
+# gamestate guards that a finished game actually stops accepting moves.
+tests/gamestate: tests/gamestate.cpp $(ENGINE_SRC) $(GM_SRC)
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
 
 tests: $(TESTS)
@@ -57,6 +63,10 @@ MATCH_ARGS ?= 25 4
 test-match: tests/match
 	./tests/match $(MATCH_ARGS)
 
+# Run the game-over regression test.
+test-gamestate: tests/gamestate
+	./tests/gamestate
+
 # Clean up build files
 clean:
 	rm -f $(OBJ) $(DEP) $(EXEC) $(TESTS)
@@ -67,4 +77,4 @@ remake:
 	$(MAKE) all
 
 # Mark these targets as not actual files
-.PHONY: all clean remake tests test-perft test-match
+.PHONY: all clean remake tests test-perft test-match test-gamestate

@@ -84,7 +84,12 @@ public:
     PieceColor getHumanSide() const { return humanSide; }
     PieceColor getEngineSide() const { return engineSide; }
     PieceColor getCurrentPlayer() const { return board.activeColor; }
-    bool isHumanTurn() const { return board.activeColor == humanSide; }
+    // True once the game has reached a terminal state. Callers that accept
+    // input must consult this: several terminal states (the draws, and
+    // resignation) still have legal moves available, so "is there a legal
+    // move?" is not a substitute for "is the game still running?".
+    bool isGameOver() const;
+    bool isHumanTurn() const { return !isGameOver() && board.activeColor == humanSide; }
     bool isEngineThinking() const { return engine->isThinking(); }
     
     // Move handling
@@ -125,7 +130,6 @@ private:
     bool isInsufficientMaterial() const;
     void logEvaluation();
     void onEngineMove(const Move& move);
-    bool isGameOver() const;
     void saveStateForUndo();
     void discardPendingEngineMove();
     void stopEngineAndDiscardPending();

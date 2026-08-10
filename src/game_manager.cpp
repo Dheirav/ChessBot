@@ -53,10 +53,15 @@ void GameManager::startNewGame() {
     undoStack.clear();
     redoStack.clear();
     gameResult.clear();
-    
+
     // Save initial state
     gameHistory.push_back(board.getFEN());
-    
+
+    // Clear any terminal state before recomputing. updateGameState() returns
+    // early when the game is already over, so leaving a stale GAME_OVER_* here
+    // made every subsequent game start out already finished.
+    currentState = GameState::WAITING_FOR_PLAYER;
+
     // Set initial game state
     updateGameState();
     
@@ -74,10 +79,14 @@ void GameManager::loadGameFromFEN(const std::string& fen) {
         undoStack.clear();
         redoStack.clear();
         gameResult.clear();
-        
+
         gameHistory.push_back(board.getFEN());
+        // Same reason as startNewGame(): a stale terminal state would make
+        // updateGameState() bail out and leave the freshly loaded position
+        // marked as finished.
+        currentState = GameState::WAITING_FOR_PLAYER;
         updateGameState();
-        
+
         std::cout << "Game loaded from FEN: " << fen << std::endl;
     } else {
         std::cerr << "Failed to load FEN: " << fen << std::endl;
@@ -85,11 +94,22 @@ void GameManager::loadGameFromFEN(const std::string& fen) {
 }
 
 bool GameManager::makeHumanMove(const Move& move) {
+    // The game-over check must come first and must be separate from the
+    // legal-move check below. Checkmate and stalemate happen to have no legal
+    // moves, so isValidMove() rejects everything and hides the omission - but
+    // the draws (fifty-move, threefold, insufficient material) and resignation
+    // are terminal *with* legal moves still on the board. Without this guard
+    // the game carries on after it has ended.
+    if (isGameOver()) {
+        std::cout << "Game is over (" << gameResult << ") - move rejected." << std::endl;
+        return false;
+    }
+
     if (!isHumanTurn()) {
         std::cout << "Not human's turn!" << std::endl;
         return false;
     }
-    
+
     if (!isValidMove(move)) {
         std::cout << "Invalid move attempted!" << std::endl;
         return false;

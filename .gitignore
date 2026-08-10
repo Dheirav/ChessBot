@@ -6,6 +6,7 @@ chessbot
 # Test binaries (built by `make tests`)
 tests/perft
 tests/match
+tests/gamestate
 
 # Move lookup tables are cached next to whichever binary generated them
 lookup_data/

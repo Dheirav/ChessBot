@@ -129,8 +129,12 @@ bool GUIManager::loadResources() {
 }
 
 void GUIManager::handleMouseInput(const sf::Event& event) {
-    // Only handle input during human turn
-    if (!gameManager || !gameManager->isHumanTurn()) {
+    // Only handle input during a running game on the human's turn. The
+    // game-over check matters on its own: in checkmate the side to move is
+    // still the human, so without it the pieces stay selectable and draggable
+    // after the game has ended, which reads as "I was mated but could still
+    // play" even though no move ever commits.
+    if (!gameManager || gameManager->isGameOver() || !gameManager->isHumanTurn()) {
         return;
     }
     
