@@ -29,12 +29,36 @@ extern SearchOptions g_searchOptions;
 // behaviour must reproduce the signature exactly.
 extern uint64_t g_searchNodes;
 
+// What the search is allowed to spend.
+//
+// A depth limit alone cannot play a real game: the same depth costs
+// milliseconds in an endgame and seconds in a dense middlegame. A time limit
+// alone cannot be benchmarked: node counts stop being reproducible. Both exist,
+// and whichever binds first ends the search.
+struct SearchLimits {
+    int maxDepth = 64;      // hard ceiling on iterations
+    long moveTimeMs = 0;    // wall-clock budget for this move; 0 = no budget
+
+    SearchLimits() = default;
+    explicit SearchLimits(int depth) : maxDepth(depth) {}
+    SearchLimits(int depth, long ms) : maxDepth(depth), moveTimeMs(ms) {}
+};
+
 // The engine's only search entry point. Iterative deepening over a
 // transposition table, with the heuristics in SearchOptions above.
 //
 // There is deliberately no non-TT variant: a second copy of the search logic
 // drifts from this one, and benchmarking it produces numbers that describe a
 // search the application never runs.
+//
+// With a time budget the search returns the best move from the last *completed*
+// iteration. A partial iteration is never used: its move list is only partly
+// searched, so its "best" move is just the best of an arbitrary prefix.
+Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
+                                   const std::atomic<bool>& shouldStop,
+                                   TranspositionTable& tt);
+
+// Depth-only convenience overload, for tests and for callers with no clock.
 Move findBestMoveIterativeDeepening(Board& board, int maxDepth,
                                    const std::atomic<bool>& shouldStop,
                                    TranspositionTable& tt);

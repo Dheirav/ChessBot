@@ -40,6 +40,11 @@ jobs:
       - name: search bench
         run: make test-bench
 
+      # A search given a clock must return inside it; one that does not hangs
+      # the GUI and forfeits on time.
+      - name: time control
+        run: make test-timecontrol
+
       # Not a strength measurement — just a check that the engine plays a legal
       # game end to end. Real matches are far too long for CI.
       - name: match smoke test

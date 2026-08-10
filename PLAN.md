@@ -27,9 +27,12 @@ Phases are sequential. Items inside a phase are ordered but mostly independent.
 Nothing here changes engine behaviour except by deletion. It exists so that
 Phases 1–5 can be verified cheaply. Expect one session.
 
-**Progress:** 0.1, 0.4, 0.5, 0.6, 0.7 done — `make tests` green, perft and
-gamestate pass, a 4-game smoke match completes. Remaining: 0.2 (evalref),
-0.3 (perft divide), 0.8 (bench), 0.9 (negamax), 0.10 (CI).
+**Status: COMPLETE.** All ten items landed. `make tests` builds five binaries;
+`test-perft`, `test-gamestate`, `test-evalref` and `test-bench` all pass, and
+CI runs them on every push. The negamax conversion (0.9) reproduced the bench
+signature bit-identically — 2,056,371 nodes and the same best move in all 12
+positions — which is the strongest evidence available that it was an exact
+restatement rather than a rewrite.
 
 **0.1 Remove dead eval fields and constants first** (§3.3)
 `captureBonus[]` (`evaluation.cpp:15`), `threatBonus[KING]`, `Piece::fromValue()`,

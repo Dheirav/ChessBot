@@ -37,7 +37,7 @@ $(EXEC): $(OBJ)
 ENGINE_SRC = $(wildcard src/engine/*.cpp)
 # game_manager has no GUI dependency, so game-state tests link without SFML too.
 GM_SRC = src/game_manager.cpp
-TESTS = tests/perft tests/match tests/gamestate tests/evalref tests/bench
+TESTS = tests/perft tests/match tests/gamestate tests/evalref tests/bench tests/timecontrol
 
 # perft guards move generation: leaf counts must match published references.
 tests/perft: tests/perft.cpp $(ENGINE_SRC)
@@ -57,6 +57,10 @@ tests/evalref: tests/evalref.cpp $(ENGINE_SRC)
 
 # bench produces the search's node-count signature.
 tests/bench: tests/bench.cpp $(ENGINE_SRC)
+	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
+
+# timecontrol guards that a search with a budget returns inside it.
+tests/timecontrol: tests/timecontrol.cpp $(ENGINE_SRC)
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
 
 tests: $(TESTS)
@@ -98,6 +102,10 @@ test-bench: tests/bench
 bench-regen: tests/bench
 	./tests/bench --regen
 
+# Check that a time-limited search respects its budget.
+test-timecontrol: tests/timecontrol
+	./tests/timecontrol
+
 # Clean up build files
 clean:
 	rm -f $(OBJ) $(DEP) $(EXEC) $(TESTS)
@@ -108,4 +116,4 @@ remake:
 	$(MAKE) all
 
 # Mark these targets as not actual files
-.PHONY: all clean remake tests test-perft test-match test-gamestate test-evalref evalref-regen bench test-bench bench-regen
+.PHONY: all clean remake tests test-perft test-match test-gamestate test-evalref evalref-regen bench test-bench bench-regen test-timecontrol
