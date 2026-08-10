@@ -40,6 +40,11 @@ jobs:
       - name: search bench
         run: make test-bench
 
+      # Static exchange evaluation, checked against hand-computed positions.
+      # One of the few strength-affecting parts that needs no match to verify.
+      - name: static exchange evaluation
+        run: make test-see
+
       # A search given a clock must return inside it; one that does not hangs
       # the GUI and forfeits on time.
       - name: time control

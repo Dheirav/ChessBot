@@ -277,6 +277,16 @@ rule (skip a capture that cannot raise alpha even with a queen's worth of
 margin). Bounds worst-case node counts and is close to free in strength.
 
 **3.2 Static Exchange Evaluation** (§5.2 — biggest single win available)
+*Status: implemented and unit-tested (`make test-see`, 13 hand-computed
+positions). NOT yet wired into the search — that changes the tree and needs a
+match, so it is queued behind 1.5.*
+
+*Also done, and a prerequisite for every gate below:* search options now have
+names (`setSearchOption`), and the match harness takes `--optA`/`--optB` to set
+them individually. Without that no single feature could be A/B'd, because
+`--ha/--hb` moved all three heuristics at once. Each feature below adds one line
+to `setSearchOption` and becomes testable from the harness and over UCI at once.
+
 Standard swap-off algorithm over the attacker sets. Two uses:
 - **move ordering**: sort captures by SEE instead of pure MVV-LVA;
 - **quiescence pruning**: skip captures with SEE < 0. Quiescence currently
