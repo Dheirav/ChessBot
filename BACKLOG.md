@@ -2,53 +2,114 @@
 
 Findings from a profiling and optimization session on 2026-08-10. Everything
 here was measured or verified against the code, not guessed. Numbers are from
-a depth-5 search with iterative deepening and a 256 MB transposition table
-unless stated otherwise.
+iterative deepening with a 256 MB transposition table unless stated otherwise.
 
 Items are ordered within each section by how much they matter.
 
 ---
 
+## 0. Start here next session
+
+The engine is now **correct** (perft-exact, game-state tested) and **~22×
+faster at depth 5**, with an effective branching factor cut from ~4.5 to ~2.3
+per ply. Depth 10 takes about 15 s per position; before this session it would
+have taken roughly 15 minutes.
+
+The bottleneck is no longer the code. It is that **nothing is configured to
+spend the speedup**, and **the one open question was measured in the wrong
+regime**. In priority order:
+
+1. **Add time control** (§5.1). Not just a feature — it is the measurement
+   apparatus for everything else, and the setting the search heuristics were
+   designed for. Everything below is easier once this exists.
+2. **Raise `ChessBotEngine`'s default depth** from 5 (§1.3). It is currently
+   throwing away almost the entire gain from this session.
+3. **Re-run the strength match at depth 8+, time-equalized** (§1.1). The
+   existing −30 Elo result was measured at depth 4, which is the worst possible
+   depth for these heuristics.
+4. Only then consider tuning heuristics, or anything in §4.
+
+Do **not** start with the "obvious" engine optimizations. Bitboard move
+generation (~1.02× ceiling), pin-aware move generation (1.24×) and replacing
+the `std::string` board fields (~1.05×) are all measured dead ends — see §4.
+
+**Two methodology notes that cost real time this session.** First, run
+benchmarks through `findBestMoveIterativeDeepening` with a TT, the way the app
+does — `findBestMove()` is a different, far slower search (§2.5) and
+benchmarking it produces meaningless numbers. Second, test in the regime you
+care about: three separate wrong conclusions this session came from measuring
+at a convenient depth rather than a representative one.
+
+Where a change can be verified by identity (evaluation, move generation), do
+that rather than playing games — it is faster and conclusive. Where it cannot
+(anything that changes the search tree), only matches will tell you anything.
+
+---
+
 ## 1. Open questions from this session
 
-### 1.1 The search heuristics lose Elo at fixed depth — decide what to do
+### 1.1 Are the search heuristics worth it? Still unanswered
 
-Null-move pruning, LMR and aspiration windows were added and made the search
-**4.1× faster at the same depth**. But a 200-game self-play match at depth 4
-(`make test-match`) put them at **−30 Elo versus the same engine with all three
-disabled, 95% CI [−62, +2]**. The interval grazes zero, so this is not proof of
-a regression — but it is clear evidence they are not *gaining* strength at equal
-depth, and the point estimate is solidly negative. See §7.
+Null-move pruning, LMR and aspiration windows are implemented and enabled.
+A 200-game self-play match at **depth 4** (`make test-match`) put them at
+**−30 Elo, 95% CI [−62, +2]** against the same engine with all three disabled.
 
-This matters more than it looks, because `ChessBotEngine` searches to a **fixed
-depth** (`searchDepth`, default 5) rather than to a time budget. At a fixed
-depth the 4.1× buys nothing the user sees — the engine just moves faster and
-plays slightly worse. The speed only converts into strength if the depth goes up.
+**Do not act on that number.** Depth 4 is close to the worst possible depth for
+these heuristics, because all three scale with tree size:
 
-Three ways forward, roughly in order of expected value:
+| depth | speedup vs heuristics-off |
+|---|---|
+| 4 | 1.31×  ← the match was run here |
+| 6 | 4.09× |
+| 8 | 19.97× |
+| 9 | 31.07× |
 
-- **Tune the heuristics.** The current parameters are deliberately simple and
-  almost certainly too aggressive. LMR reduces every quiet move after the third
-  by a flat `R = 1`; real engines use a formula over depth and move index, skip
-  reduction for killers and checks, and re-search more carefully. Null-move uses
-  a flat `R = 2` with no verification search, which is what causes tactical
-  oversights in the lines it prunes.
-- **Raise the default depth** from 5 to 6 to spend the speedup. Needs measuring
-  first: play depth-6-with-heuristics against depth-5-without and confirm it
-  wins clearly.
-- **Add real time control** (§5.1) so the engine searches to a time budget.
-  That is the setting these heuristics are designed for, and the one where a
-  4.1× speedup pays for itself automatically.
+At depth 4 they pay nearly their full accuracy cost while delivering almost
+none of their benefit. The match answered "do these cost accuracy at equal
+depth?" (mildly, or not measurably). It never answered "are they worth it?",
+which is a question about equal *time*.
 
-Until one of those is done, the toggles in `SearchOptions` (`search.hpp`) let
-you turn any of them off.
+To settle it: add time control (§5.1), give both sides the same budget, and let
+the faster engine search deeper. Failing that, a fixed-depth match at depth 8
+would at least be measured somewhere representative — but note the draw rate
+was already 113/200 at depth 4 and rises with depth, so expect to need many
+more games (roughly 800 for a ±16 Elo interval).
 
-### 1.2 The match harness has no time control
+### 1.2 Correction: aspiration windows are NOT the problem
 
-`tests/match.cpp` plays at fixed depth only. That answers "do the heuristics
-cost accuracy?" but not "are they worth it?", which is the question that
-actually matters. Add a time-per-move mode so both sides get equal wall clock
-and the faster engine gets to search deeper.
+An earlier reading of this file, and advice given during the session, said
+aspiration windows were useless-to-harmful and should be disabled. That was
+based only on depths 5–7. **It is wrong.** Measured contribution of aspiration
+on top of null-move + LMR:
+
+| depth | 6 | 7 | 8 | 9 | 10 |
+|---|---|---|---|---|---|
+| aspiration's effect | −2% | +1% | +8% | **+27%** | **+46%** |
+
+The crossover is around depth 7–8, which makes sense: a narrow window prunes
+proportionally more as the tree grows, while the fail-and-re-search penalty is
+roughly fixed. At depth 9, the no-aspiration build takes 31 722 ms against
+24 888 ms with it. **Keep aspiration enabled.**
+
+This is a good example of the general trap: a heuristic measured outside its
+operating range will lie to you about its value.
+
+### 1.3 The app's default search depth is far too low
+
+`ChessBotEngine`'s constructor sets `searchDepth(5)`. That was a reasonable
+setting for the old engine. It now costs about 1.1 s per move where depth 8
+costs about 2.7 s and depth 9 about 6 s (per position, from §7).
+
+Because the engine searches to a fixed depth rather than a clock, **none of
+this session's speedup reaches the player** until this changes. Raising it is
+the single cheapest strength improvement available. Confirm with a match:
+depth 8 against depth 5 should be a rout.
+
+### 1.4 The match harness has no time control
+
+`tests/match.cpp` plays at fixed depth only, which is why §1.1 is still open.
+Add a time-per-move mode so both sides get equal wall clock. This depends on
+§5.1 existing first.
 
 ---
 
@@ -168,6 +229,15 @@ Either port them to the `tests/` layout added this session, or delete them.
 The eval and movegen work this session took the five-position benchmark from
 **78.8 s to 3.5 s (22.7×)**. What is left, and what each is actually worth:
 
+### 4.0 Bitboard move generation — measured ceiling ~1.02×, not recommended
+
+The question that started this session. Move generation itself is **0.58 µs,
+about 2% of search time**; the rest of `generateLegalMoves()` is the legality
+filter (§4.1). Even an infinitely fast generator caps the whole search at about
+1.02×. Combined with the state of the existing module (§2.1), this is a large,
+high-risk rewrite of the most correctness-critical code in the engine for
+essentially nothing. Delete the module or leave it; do not finish it for speed.
+
 ### 4.1 Pin-aware legal move generation — measured ceiling 1.24×, not recommended
 
 The legality filter (make each move, test the king square) is **19.4% of search
@@ -253,17 +323,53 @@ harness in `tests/match.cpp`.
 
 ---
 
-## 6. Testing gaps
+## 6. Testing
 
+What exists now (`make tests`):
+
+- `make test-perft` — move generation against published reference counts.
+- `make test-gamestate` — terminal detection, that a finished game refuses
+  moves, and that terminal state is not sticky.
+- `make test-match` — engine-vs-engine strength measurement.
+
+Gaps, in order:
+
+- **No evaluation regression test in the repo.** This is the most valuable one
+  missing. The technique used throughout this session: dump every
+  `EvalDetails` field over ~24k positions from seeded random games, store it as
+  a reference, and `cmp` after any change. It made an aggressive rewrite of the
+  entire evaluation provably safe, and it is the only reason that work could be
+  done quickly. Reconstruct it as `tests/evalref.cpp` before touching
+  evaluation again.
+- **`tests/match.cpp` has no time control** — see §1.4.
 - **`tests/perft.cpp` has no divide mode.** When a count disagrees, perft divide
   (per-root-move counts) bisects to the offending move in a few steps. Add it
   the day a count first fails.
-- **No evaluation regression test in the repo.** The byte-identical eval
-  comparison used throughout this session (dump all `EvalDetails` fields over
-  ~24k positions from seeded random games, compare against a stored reference)
-  caught nothing only because it was watched closely. It belongs in `tests/`.
-- **No test runs in CI**, because there is no CI.
+- **No test runs in CI**, because there is no CI. All three tests return
+  non-zero on failure, so they are ready for one.
 - `tests/legacy/` — see §3.4.
+
+### Already fixed this session — do not re-investigate
+
+Reported as "checkmated but could still play". Checkmate detection itself was
+correct; `tests/gamestate.cpp` now covers fool's mate, back rank, scholar's,
+smothered and stalemate. The actual bugs were:
+
+- `makeHumanMove()` did not check `isGameOver()`. Invisible in checkmate and
+  stalemate, because those have no legal moves and `isValidMove()` rejects
+  everything anyway — but the draws and resignation are terminal *with* legal
+  moves, and there the game simply continued.
+- `isHumanTurn()` was `board.activeColor == humanSide`, which stays true after
+  checkmate since the mated side is still to move, so the GUI kept pieces
+  draggable after the game ended.
+- `startNewGame()` and `loadGameFromFEN()` did not clear `currentState`, and
+  `updateGameState()` returns early when the game is already over — so a
+  terminal state was sticky and every game after the first began already
+  finished.
+
+The general shape is worth remembering: the bug was not in the feature being
+reported, it was in the states adjacent to it, hidden behind a different check
+that happened to mask it.
 
 ---
 
@@ -279,6 +385,30 @@ deepening, 256 MB TT:
 | after evaluation rewrite | 16 753 ms | 4.70× |
 | after make/unmake legality filter | 14 063 ms | 5.60× |
 | after null-move + LMR + aspiration | 3 465 ms | **22.7×** |
+
+### Depth scaling — the most useful table here
+
+Four positions (startpos, an opening, a middlegame, an endgame), total ms:
+
+| depth | heuristics-on | nm+lmr, no asp | heuristics-off | speedup |
+|---|---|---|---|---|
+| 4 | 628 | 643 | 824 | 1.31× |
+| 5 | 1 102 | 1 170 | 2 020 | 1.83× |
+| 6 | 2 263 | 2 220 | 9 261 | 4.09× |
+| 7 | 5 154 | 5 225 | 40 632 | 7.88× |
+| 8 | 10 753 | 11 622 | 214 726 | 19.97× |
+| 9 | 24 888 | 31 722 | 773 164 | 31.07× |
+| 10 | 57 840 | 84 636 | *(abandoned, ~45–65 min projected)* | ~50–65× |
+
+**Effective branching factor**, i.e. cost per extra ply, stable from depth 6:
+
+- heuristics-on: **~2.3×**
+- heuristics-off: **~4.5×**
+
+Those are two different exponentials, which is why the speedup keeps widening
+with depth and why any single-depth measurement of these heuristics is
+misleading. Depths 1–4 in the table are dominated by transposition table
+allocation, not search, and should be ignored.
 
 Component costs (single call, `-O2`, midgame position):
 
