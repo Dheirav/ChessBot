@@ -17,9 +17,12 @@
  */
 class ChessBotEngine : public IChessEngine {
 private:
-    // Atomic: written from the GUI thread (setSearchDepth) and read inside
-    // the search thread; a plain int would be a data race.
+    // Atomic: written from the GUI thread (setSearchDepth/setMoveTimeMs) and
+    // read inside the search thread; a plain int would be a data race.
     std::atomic<int> searchDepth;
+    // Wall-clock budget per move, 0 for depth-only. This is normally what ends
+    // the search; searchDepth is a ceiling.
+    std::atomic<int> moveTimeMs;
     std::atomic<bool> thinking;
     std::atomic<bool> stopSearch;
     std::string engineName;
@@ -49,6 +52,9 @@ public:
     
     void setSearchDepth(int depth) override;
     int getSearchDepth() const override;
+
+    void setMoveTimeMs(int ms);
+    int getMoveTimeMs() const;
     
     void findBestMoveAsync(const Board& board, MoveCallback callback) override;
     bool isThinking() const override;

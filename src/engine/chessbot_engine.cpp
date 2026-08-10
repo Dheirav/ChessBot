@@ -3,8 +3,8 @@
 #include "search.hpp"
 #include <iostream>
 
-ChessBotEngine::ChessBotEngine() 
-    : searchDepth(5), thinking(false), stopSearch(false), 
+ChessBotEngine::ChessBotEngine()
+    : searchDepth(8), moveTimeMs(3000), thinking(false), stopSearch(false), 
       engineName("ChessBot with Iterative Deepening"), engineVersion("1.1") {
     // Initialize transposition table with 256MB (increased size for better performance)
     transpositionTable = std::make_unique<TranspositionTable>(256);
@@ -37,7 +37,10 @@ Move ChessBotEngine::findBestMove(const Board& board, int depth) {
     Move bestMove;
     {
         std::lock_guard<std::mutex> ttLock(ttMutex);
-        bestMove = ::findBestMoveIterativeDeepening(searchBoard, depth > 0 ? depth : searchDepth.load(), stopSearch, *transpositionTable);
+        bestMove = ::findBestMoveIterativeDeepening(
+            searchBoard,
+            SearchLimits(depth > 0 ? depth : searchDepth.load(), moveTimeMs.load()),
+            stopSearch, *transpositionTable);
     }
     
     thinking = false;
@@ -58,13 +61,26 @@ std::string ChessBotEngine::getEngineVersion() const {
 }
 
 void ChessBotEngine::setSearchDepth(int depth) {
-    if (depth > 0 && depth <= 10) {  // Reasonable bounds
+    // Upper bound is the killer-move and history table size (MoveOrderer::
+    // MAX_DEPTH), not a judgement about how deep is sensible — the clock
+    // decides that.
+    if (depth > 0 && depth <= 64) {
         searchDepth = depth;
     }
 }
 
 int ChessBotEngine::getSearchDepth() const {
     return searchDepth;
+}
+
+void ChessBotEngine::setMoveTimeMs(int ms) {
+    if (ms >= 0) {
+        moveTimeMs = ms;
+    }
+}
+
+int ChessBotEngine::getMoveTimeMs() const {
+    return moveTimeMs;
 }
 
 void ChessBotEngine::findBestMoveAsync(const Board& board, MoveCallback callback) {
@@ -95,7 +111,9 @@ void ChessBotEngine::findBestMoveAsync(const Board& board, MoveCallback callback
                 // Hold the TT lock for the whole search so that
                 // clear/resize/stats calls from other threads are serialized.
                 std::lock_guard<std::mutex> ttLock(ttMutex);
-                bestMove = ::findBestMoveIterativeDeepening(searchBoard, searchDepth, stopSearch, *transpositionTable);
+                bestMove = ::findBestMoveIterativeDeepening(
+                    searchBoard, SearchLimits(searchDepth.load(), moveTimeMs.load()),
+                    stopSearch, *transpositionTable);
             }
             
             // Deliver the result even when interrupted: iterative deepening

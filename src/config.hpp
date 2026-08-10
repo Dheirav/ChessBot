@@ -10,15 +10,28 @@
 // optional plain-text config file (default "chessbot.conf") can override them.
 //
 // Supported file keys (one per line, `key = value`, # starts a comment):
-//   search_depth                 = <1..10>
+//   move_time_ms                = <integer, 0 disables the clock>
+//   search_depth                = <1..64>
 //   transposition_table_size_mb = <integer>
 //
 // Example chessbot.conf:
 //   # Engine settings
-//   searchDepth = 5
+//   moveTimeMs = 3000
+//   searchDepth = 8
 //   transpositionTableSizeMB = 256
 struct Settings {
-    int searchDepth = 5;
+    // Wall-clock budget per move. This, not searchDepth, is what normally ends
+    // the engine's search: the same depth costs milliseconds in an endgame and
+    // seconds in a dense middlegame, so a fixed depth either wastes time or
+    // runs over. Set to 0 to search purely by depth.
+    int moveTimeMs = 3000;
+
+    // Ceiling on iterations, and the only limit when moveTimeMs is 0. Raised
+    // from 5: depth 5 costs ~1.1s per move where depth 8 costs ~2.7s, so the
+    // old default was discarding almost the whole of the 22x speedup measured
+    // in BACKLOG.md section 7.
+    int searchDepth = 8;
+
     int transpositionTableSizeMB = 256;
 };
 
@@ -33,9 +46,17 @@ inline std::string trim(const std::string& s) {
 
 // Map a config key to a Settings field. Returns true if the key was recognized.
 inline bool applyKey(const std::string& key, const std::string& value, Settings& s) {
+    if (key == "moveTimeMs" || key == "move_time_ms") {
+        int v = std::atoi(value.c_str());
+        if (v >= 0) s.moveTimeMs = v;
+        return true;
+    }
     if (key == "searchDepth" || key == "search_depth") {
         int v = std::atoi(value.c_str());
-        if (v > 0 && v <= 10) s.searchDepth = v;
+        // The old cap of 10 existed because nothing bounded the search but the
+        // depth. With a clock, a high ceiling is how you let a fast position
+        // search deep, so the cap is now just the killer/history table size.
+        if (v > 0 && v <= 64) s.searchDepth = v;
         return true;
     }
     if (key == "transpositionTableSizeMB" || key == "transposition_table_size_mb") {

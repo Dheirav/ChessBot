@@ -22,6 +22,7 @@ int main() {
     // Create chess engine
     auto engine = std::make_unique<ChessBotEngine>();
     engine->setSearchDepth(settings.searchDepth);
+    engine->setMoveTimeMs(settings.moveTimeMs);
     engine->resizeTranspositionTable(settings.transpositionTableSizeMB);
 
     // Create game manager with the engine
