@@ -17,7 +17,9 @@
  */
 class ChessBotEngine : public IChessEngine {
 private:
-    int searchDepth;
+    // Atomic: written from the GUI thread (setSearchDepth) and read inside
+    // the search thread; a plain int would be a data race.
+    std::atomic<int> searchDepth;
     std::atomic<bool> thinking;
     std::atomic<bool> stopSearch;
     std::string engineName;

@@ -3,6 +3,7 @@
 #include <map>
 #include <string>
 #include "engine/board.hpp"
+#include "input.hpp"
 
 // Function declarations
 bool loadPieceTextures(std::map<std::string, sf::Texture>& textures);

@@ -1,3 +1,4 @@
+#include "gui/renderer.hpp"
 #include <SFML/Graphics.hpp>
 #include <map>
 #include <string>

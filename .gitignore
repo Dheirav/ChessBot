@@ -1,0 +1,8 @@
+# Build artifacts
+*.o
+*.d
+chessbot
+
+# Profiling and logs
+gmon.out
+evaluation_log_*.txt

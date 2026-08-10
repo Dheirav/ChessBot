@@ -37,7 +37,7 @@ Move ChessBotEngine::findBestMove(const Board& board, int depth) {
     Move bestMove;
     {
         std::lock_guard<std::mutex> ttLock(ttMutex);
-        bestMove = ::findBestMoveIterativeDeepening(searchBoard, depth > 0 ? depth : searchDepth, stopSearch, *transpositionTable);
+        bestMove = ::findBestMoveIterativeDeepening(searchBoard, depth > 0 ? depth : searchDepth.load(), stopSearch, *transpositionTable);
     }
     
     thinking = false;
