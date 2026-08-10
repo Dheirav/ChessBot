@@ -129,20 +129,26 @@ void GameManager::requestEngineMove() {
     }
     
     std::cout << "Requesting engine move..." << std::endl;
-    
+
+    uint64_t generation;
     {
         std::lock_guard<std::mutex> lock(moveMutex);
         if (hasPendingEngineMove) {
             // Engine already finished but the move hasn't been applied yet.
             return;
         }
+        generation = searchGeneration;
     }
-    
+
     // Request move from engine asynchronously. The callback only stores the
     // result; the actual board mutation happens on the main thread via
-    // processPendingEngineMove().
-    engine->findBestMoveAsync(board, [this](const Move& move) {
+    // processPendingEngineMove(). Results from a search started before the
+    // last position reset are dropped by the generation check.
+    engine->findBestMoveAsync(board, [this, generation](const Move& move) {
         std::lock_guard<std::mutex> lock(moveMutex);
+        if (generation != searchGeneration) {
+            return; // Position changed while searching - stale result
+        }
         pendingEngineMove = move;
         hasPendingEngineMove = true;
     });
@@ -179,6 +185,8 @@ void GameManager::discardPendingEngineMove() {
     std::lock_guard<std::mutex> lock(moveMutex);
     hasPendingEngineMove = false;
     pendingEngineMove = Move();
+    // Invalidate any in-flight search result that hasn't landed yet.
+    searchGeneration++;
 }
 
 void GameManager::stopEngineAndDiscardPending() {

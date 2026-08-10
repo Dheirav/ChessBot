@@ -75,13 +75,17 @@ void ChessBotEngine::findBestMoveAsync(const Board& board, MoveCallback callback
     if (searchThread.joinable()) {
         searchThread.join();
     }
-    
+
+    // Reset the flags on the requesting thread, before the worker exists.
+    // Doing it inside the thread would clobber a stopThinking() issued
+    // between this call returning and the thread getting scheduled, and
+    // would leave isThinking() false while a search request is in flight.
+    stopSearch = false;
+    thinking = true;
+
     // Start new search in background thread
     searchThread = std::thread([this, board, callback]() {
         try {
-            thinking = true;
-            stopSearch = false;
-            
             std::cout << "Engine thinking asynchronously..." << std::endl;
             
             // Perform the search with iterative deepening for better time management
@@ -94,13 +98,16 @@ void ChessBotEngine::findBestMoveAsync(const Board& board, MoveCallback callback
                 bestMove = ::findBestMoveIterativeDeepening(searchBoard, searchDepth, stopSearch, *transpositionTable);
             }
             
-            // Only call callback if we weren't stopped
-            if (!stopSearch.load()) {
-                std::cout << "Engine found move: " << bestMove.toString() << std::endl;
-                callback(bestMove);
-            } else {
-                std::cout << "Engine search was stopped" << std::endl;
+            // Deliver the result even when interrupted: iterative deepening
+            // returns the best move from the last completed depth, so a stop
+            // means "move now" rather than "throw the search away". Callers
+            // that changed the position (undo/new game) discard stale moves
+            // via their own generation check.
+            if (stopSearch.load()) {
+                std::cout << "Engine search interrupted, playing best move so far" << std::endl;
             }
+            std::cout << "Engine found move: " << bestMove.toString() << std::endl;
+            callback(bestMove);
             
         } catch (const std::exception& e) {
             std::cerr << "Engine error: " << e.what() << std::endl;
@@ -117,10 +124,13 @@ bool ChessBotEngine::isThinking() const {
 
 void ChessBotEngine::stopThinking() {
     stopSearch = true;
-    thinking = false;
-    
+    // Do NOT clear `thinking` here: the search thread is still running and
+    // owns that flag (it clears it when it actually exits). Falsifying it
+    // made isThinking() report idle mid-search, which let the GUI's update
+    // loop immediately restart the search it had just interrupted.
+
     std::cout << "Stopping engine search..." << std::endl;
-    
+
     // Note: The search thread will check stopSearch and exit gracefully
     // We don't force-kill the thread, just signal it to stop
 }

@@ -56,6 +56,12 @@ private:
     mutable std::mutex moveMutex;
     Move pendingEngineMove;
     bool hasPendingEngineMove = false;
+    // Bumped (under moveMutex) whenever the position is reset out from under
+    // a running search (undo/redo/new game/resign). The engine callback
+    // captures the generation at request time and its result is dropped on
+    // mismatch, so a search racing against the discard can't sneak a stale
+    // move back in.
+    uint64_t searchGeneration = 0;
     
 public:
     GameManager(std::unique_ptr<IChessEngine> chessEngine);
