@@ -3,6 +3,14 @@
 *.d
 chessbot
 
+# Test binaries (built by `make tests`)
+tests/perft
+tests/match
+
+# Move lookup tables are cached next to whichever binary generated them
+lookup_data/
+tests/src/
+
 # Profiling and logs
 gmon.out
 evaluation_log_*.txt

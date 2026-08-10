@@ -24,6 +24,21 @@ static int mateScore(bool whiteToMove, int ply) {
     return whiteToMove ? -(MATE_SCORE - ply) : (MATE_SCORE - ply);
 }
 
+SearchOptions g_searchOptions;
+
+// Null-move pruning assumes that passing is worse than any real move. That is
+// false in zugzwang, which in practice means king-and-pawn endings, so the
+// heuristic is only applied while the side to move still has a piece.
+static bool hasNonPawnMaterial(const Board& board, PieceColor side) {
+    for (int i = 0; i < 64; ++i) {
+        const Piece& p = board.squares[i];
+        if (p.color() != side) continue;
+        PieceType t = p.type();
+        if (t == KNIGHT || t == BISHOP || t == ROOK || t == QUEEN) return true;
+    }
+    return false;
+}
+
 // Generates the tactical moves (captures, en passant, promotions) for quiescence search
 static MoveList generateCaptures(const Board& board, PieceColor side) {
     MoveList all = generateLegalMoves(board, side);
@@ -226,11 +241,38 @@ static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
     // white-perspective, white maximizes and black minimizes.
     PieceColor side = board.activeColor;
     bool whiteToMove = (side == COLOR_WHITE);
+    bool inCheck = LegalMoveValidator::isInCheck(board, side);
+
+    // --- Null-move pruning ---
+    // Hand the opponent a free move. If the position still fails high even
+    // after that, the real position almost certainly does too, so the entire
+    // subtree can be skipped without searching it. The verification search runs
+    // at reduced depth with a null window, so it is cheap.
+    //
+    // Conditions: enough depth left to pay for the reduced search; not in check
+    // (passing while in check is meaningless); and the side to move still has a
+    // piece, since the "passing cannot help" assumption fails in zugzwang.
+    if (g_searchOptions.nullMove && depth >= 3 && !inCheck && hasNonPawnMaterial(board, side)) {
+        const int R = 2;
+        NullUndo nu = board.makeNullMove();
+        int nullScore;
+        if (whiteToMove) {
+            nullScore = minimaxWithTT(board, depth - 1 - R, ply + 1, beta - 1, beta, shouldStop, tt, pathHashes);
+        } else {
+            nullScore = minimaxWithTT(board, depth - 1 - R, ply + 1, alpha, alpha + 1, shouldStop, tt, pathHashes);
+        }
+        board.unmakeNullMove(nu);
+        if (!shouldStop.load()) {
+            if (whiteToMove && nullScore >= beta) return beta;
+            if (!whiteToMove && nullScore <= alpha) return alpha;
+        }
+    }
+
     MoveList moves = generateLegalMoves(board, side);
-    
+
     if (moves.empty()) {
         int score;
-        if (LegalMoveValidator::isInCheck(board, side)) {
+        if (inCheck) {
             score = mateScore(whiteToMove, ply);
         } else {
             score = 0;
@@ -255,16 +297,43 @@ static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
 
     pathHashes.push_back(hash);
 
+    int moveIndex = 0;
     for (const Move& move : moves) {
         // Check stop condition before each move
         if (shouldStop.load()) {
             break;
         }
+        ++moveIndex;
 
         UndoInfo undo = board.makeMove(move);
-        int eval = minimaxWithTT(board, depth - 1, ply + 1, alpha, beta, shouldStop, tt, pathHashes);
+
+        // --- Late move reductions ---
+        // The list is ordered by TT move, then captures, killers and history,
+        // so a move this far down is unlikely to be best. Search it shallower
+        // with a null window first, and only pay for a full-depth re-search if
+        // it unexpectedly beats the window. Captures and promotions are never
+        // reduced: they are exactly the moves that turn out to matter.
+        bool reduce = g_searchOptions.lmr && depth >= 3 && moveIndex > 3 &&
+                      !inCheck && move.flag == NORMAL;
+        int eval;
+        if (reduce) {
+            const int R = 1;
+            if (whiteToMove) {
+                eval = minimaxWithTT(board, depth - 1 - R, ply + 1, alpha, alpha + 1, shouldStop, tt, pathHashes);
+                if (!shouldStop.load() && eval > alpha) {
+                    eval = minimaxWithTT(board, depth - 1, ply + 1, alpha, beta, shouldStop, tt, pathHashes);
+                }
+            } else {
+                eval = minimaxWithTT(board, depth - 1 - R, ply + 1, beta - 1, beta, shouldStop, tt, pathHashes);
+                if (!shouldStop.load() && eval < beta) {
+                    eval = minimaxWithTT(board, depth - 1, ply + 1, alpha, beta, shouldStop, tt, pathHashes);
+                }
+            }
+        } else {
+            eval = minimaxWithTT(board, depth - 1, ply + 1, alpha, beta, shouldStop, tt, pathHashes);
+        }
         board.unmakeMove(undo);
-        
+
         if (whiteToMove) {
             if (eval > bestEval) {
                 bestEval = eval;
@@ -474,19 +543,22 @@ Move findBestMoveIterativeDeepening(Board& board, int maxDepth,
     Move bestMove = moves[0];
     bool whiteToMove = (board.activeColor == COLOR_WHITE);
     int bestScore = whiteToMove ? std::numeric_limits<int>::min() : std::numeric_limits<int>::max();
-    
+    // Whether bestScore holds a real completed-depth result yet. The aspiration
+    // window needs a previous score to centre on.
+    bool haveScore = false;
+
     auto searchStart = std::chrono::steady_clock::now();
-    std::cout << "Starting iterative deepening search up to depth " << maxDepth << std::endl;
-    
+    if (!g_searchOptions.quiet) std::cout << "Starting iterative deepening search up to depth " << maxDepth << std::endl;
+
     // Iterative deepening loop
     for (int currentDepth = 1; currentDepth <= maxDepth; ++currentDepth) {
         if (shouldStop.load()) {
-            std::cout << "Search stopped at depth " << (currentDepth - 1) << std::endl;
+            if (!g_searchOptions.quiet) std::cout << "Search stopped at depth " << (currentDepth - 1) << std::endl;
             break;
         }
-        
+
         auto depthStart = std::chrono::steady_clock::now();
-        std::cout << "Searching depth " << currentDepth << "..." << std::endl;
+        if (!g_searchOptions.quiet) std::cout << "Searching depth " << currentDepth << "..." << std::endl;
         
         // Try to get best move from transposition table for move ordering
         uint64_t hash = board.getHash();
@@ -509,69 +581,115 @@ Move findBestMoveIterativeDeepening(Board& board, int maxDepth,
         Move currentBestMove = moves[0];
         bool completedDepth = true;
 
-        // Narrowing alpha/beta window across root moves: later moves are pruned
-        // against the current best, and non-first moves get a cheap null-window
-        // search first (principal variation search). Alpha-beta is exact, so the
-        // chosen move is unchanged.
-        int alpha = std::numeric_limits<int>::min();
-        int beta = std::numeric_limits<int>::max();
+        // --- Aspiration window ---
+        // Iterative deepening already knows roughly what the score should be,
+        // and it rarely moves far between iterations. Searching a narrow window
+        // around the previous score makes alpha-beta cut off much sooner
+        // everywhere in the tree. The risk is that the true score falls outside
+        // the window: the search then "fails" low or high and must be redone
+        // with a wider one, which is why the window grows on each retry instead
+        // of jumping straight back to infinity.
+        const int INF_LO = std::numeric_limits<int>::min();
+        const int INF_HI = std::numeric_limits<int>::max();
+        bool useAspiration = g_searchOptions.aspiration && currentDepth >= 3 &&
+                             haveScore && std::abs(bestScore) < 29000;
+        int delta = 50;
+        int windowLo = useAspiration ? bestScore - delta : INF_LO;
+        int windowHi = useAspiration ? bestScore + delta : INF_HI;
 
         std::vector<uint64_t> pathHashes;
-        pathHashes.push_back(hash);
 
-        for (size_t i = 0; i < moves.size(); ++i) {
-            const Move& move = moves[i];
-            // Check stop condition before evaluating each move
-            if (shouldStop.load()) {
-                std::cout << "Search interrupted during depth " << currentDepth << std::endl;
-                completedDepth = false;
-                break;
-            }
+        while (true) {
+            currentBestScore = whiteToMove ? INF_LO : INF_HI;
+            currentBestMove = moves[0];
+            completedDepth = true;
+            pathHashes.clear();
+            pathHashes.push_back(hash);
 
-            UndoInfo undo = board.makeMove(move);
-            int eval;
-            if (i == 0) {
-                eval = minimaxWithTT(board, currentDepth - 1, 1, alpha, beta, shouldStop, tt, pathHashes);
-            } else if (whiteToMove) {
-                eval = minimaxWithTT(board, currentDepth - 1, 1, alpha, alpha + 1, shouldStop, tt, pathHashes);
-                if (!shouldStop.load() && eval > alpha && eval < beta) {
-                    eval = minimaxWithTT(board, currentDepth - 1, 1, alpha, beta, shouldStop, tt, pathHashes);
+            // Narrowing alpha/beta window across root moves: later moves are pruned
+            // against the current best, and non-first moves get a cheap null-window
+            // search first (principal variation search). Alpha-beta is exact, so the
+            // chosen move is unchanged. These are per-attempt copies so that a
+            // widened retry starts from the fresh window.
+            int alpha = windowLo;
+            int beta = windowHi;
+
+            for (size_t i = 0; i < moves.size(); ++i) {
+                const Move& move = moves[i];
+                // Check stop condition before evaluating each move
+                if (shouldStop.load()) {
+                    if (!g_searchOptions.quiet) std::cout << "Search interrupted during depth " << currentDepth << std::endl;
+                    completedDepth = false;
+                    break;
                 }
-            } else {
-                eval = minimaxWithTT(board, currentDepth - 1, 1, beta - 1, beta, shouldStop, tt, pathHashes);
-                if (!shouldStop.load() && eval < beta && eval > alpha) {
-                    eval = minimaxWithTT(board, currentDepth - 1, 1, alpha, beta, shouldStop, tt, pathHashes);
-                }
-            }
-            board.unmakeMove(undo);
 
-            if (!shouldStop.load()) {
-                if (whiteToMove) {
-                    if (eval > currentBestScore) {
-                        currentBestScore = eval;
-                        currentBestMove = move;
+                UndoInfo undo = board.makeMove(move);
+                int eval;
+                if (i == 0) {
+                    eval = minimaxWithTT(board, currentDepth - 1, 1, alpha, beta, shouldStop, tt, pathHashes);
+                } else if (whiteToMove) {
+                    eval = minimaxWithTT(board, currentDepth - 1, 1, alpha, alpha + 1, shouldStop, tt, pathHashes);
+                    if (!shouldStop.load() && eval > alpha && eval < beta) {
+                        eval = minimaxWithTT(board, currentDepth - 1, 1, alpha, beta, shouldStop, tt, pathHashes);
                     }
-                    if (eval > alpha) alpha = eval;
                 } else {
-                    if (eval < currentBestScore) {
-                        currentBestScore = eval;
-                        currentBestMove = move;
+                    eval = minimaxWithTT(board, currentDepth - 1, 1, beta - 1, beta, shouldStop, tt, pathHashes);
+                    if (!shouldStop.load() && eval < beta && eval > alpha) {
+                        eval = minimaxWithTT(board, currentDepth - 1, 1, alpha, beta, shouldStop, tt, pathHashes);
                     }
-                    if (eval < beta) beta = eval;
+                }
+                board.unmakeMove(undo);
+
+                if (!shouldStop.load()) {
+                    if (whiteToMove) {
+                        if (eval > currentBestScore) {
+                            currentBestScore = eval;
+                            currentBestMove = move;
+                        }
+                        if (eval > alpha) alpha = eval;
+                    } else {
+                        if (eval < currentBestScore) {
+                            currentBestScore = eval;
+                            currentBestMove = move;
+                        }
+                        if (eval < beta) beta = eval;
+                    }
                 }
             }
+
+            if (!completedDepth || shouldStop.load() || !useAspiration) break;
+
+            // The score landed outside the window, so this result is only a
+            // bound. Widen on the failing side and search the depth again.
+            if (currentBestScore <= windowLo) {
+                delta *= 4;
+                windowLo = (bestScore - delta < -29000) ? INF_LO : bestScore - delta;
+                if (!g_searchOptions.quiet) std::cout << "  aspiration fail low, widening" << std::endl;
+                continue;
+            }
+            if (currentBestScore >= windowHi) {
+                delta *= 4;
+                windowHi = (bestScore + delta > 29000) ? INF_HI : bestScore + delta;
+                if (!g_searchOptions.quiet) std::cout << "  aspiration fail high, widening" << std::endl;
+                continue;
+            }
+            break;
         }
-        
+
+
         // Only update best move if we completed the full depth
         if (completedDepth && !shouldStop.load()) {
             bestMove = currentBestMove;
             bestScore = currentBestScore;
+            haveScore = true;
             auto depthEnd = std::chrono::steady_clock::now();
             auto depthDuration = std::chrono::duration_cast<std::chrono::milliseconds>(depthEnd - depthStart);
-            std::cout << "Depth " << currentDepth << " complete in " << depthDuration.count() 
-                     << "ms. Best move: " << bestMove.toString() << " (score: " << bestScore << ")" << std::endl;
+            if (!g_searchOptions.quiet) {
+                std::cout << "Depth " << currentDepth << " complete in " << depthDuration.count()
+                         << "ms. Best move: " << bestMove.toString() << " (score: " << bestScore << ")" << std::endl;
+            }
         } else {
-            std::cout << "Depth " << currentDepth << " incomplete, using previous result" << std::endl;
+            if (!g_searchOptions.quiet) std::cout << "Depth " << currentDepth << " incomplete, using previous result" << std::endl;
             break;
         }
         
@@ -579,15 +697,17 @@ Move findBestMoveIterativeDeepening(Board& board, int maxDepth,
         // Only stop if we detect an actual mate score (near ±MATE_SCORE which is around ±30000)
         // Do NOT stop for large evaluation scores from material imbalances
         if (abs(bestScore) > 29000 && abs(bestScore) < 31000) {
-            std::cout << "Mate detected at depth " << currentDepth << ", stopping search" << std::endl;
+            if (!g_searchOptions.quiet) std::cout << "Mate detected at depth " << currentDepth << ", stopping search" << std::endl;
             break;
         }
     }
     
     auto searchEnd = std::chrono::steady_clock::now();
     auto totalDuration = std::chrono::duration_cast<std::chrono::milliseconds>(searchEnd - searchStart);
-    std::cout << "Iterative deepening search completed in " << totalDuration.count() 
-             << "ms. Final best move: " << bestMove.toString() << " (score: " << bestScore << ")" << std::endl;
+    if (!g_searchOptions.quiet) {
+        std::cout << "Iterative deepening search completed in " << totalDuration.count()
+                 << "ms. Final best move: " << bestMove.toString() << " (score: " << bestScore << ")" << std::endl;
+    }
     
     return bestMove;
 }

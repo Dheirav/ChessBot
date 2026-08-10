@@ -240,6 +240,31 @@ UndoInfo Board::makeMove(const Move& move) {
     return u;
 }
 
+NullUndo Board::makeNullMove() {
+    NullUndo u;
+    u.hashBefore = currentHash;
+    u.enPassantBefore = enPassantTarget;
+    u.halfmoveBefore = halfmoveClock;
+
+    uint64_t h = currentHash;
+    // Passing the turn clears any en passant right, exactly as a normal move
+    // that is not a double pawn push does.
+    h ^= ZobristHash::getEnPassantHash(enPassantTarget) ^ ZobristHash::getEnPassantHash("-");
+    enPassantTarget = "-";
+    activeColor = (activeColor == COLOR_WHITE) ? COLOR_BLACK : COLOR_WHITE;
+    h ^= ZobristHash::getSideToMoveHash();
+    ++halfmoveClock;
+    currentHash = h;
+    return u;
+}
+
+void Board::unmakeNullMove(const NullUndo& u) {
+    activeColor = (activeColor == COLOR_WHITE) ? COLOR_BLACK : COLOR_WHITE;
+    enPassantTarget = u.enPassantBefore;
+    halfmoveClock = u.halfmoveBefore;
+    currentHash = u.hashBefore;
+}
+
 void Board::unmakeMove(const UndoInfo& u) {
     if (u.from < 0 || u.from >= BOARD_SIZE * BOARD_SIZE ||
         u.to < 0 || u.to >= BOARD_SIZE * BOARD_SIZE) {

@@ -24,6 +24,15 @@ struct UndoInfo {
     int fullmoveBefore = 0;
 };
 
+// Data required to reverse a null move (see makeNullMove). A null move changes
+// only the side to move, the en passant target and the halfmove clock, so it
+// needs far less state than UndoInfo.
+struct NullUndo {
+    uint64_t hashBefore = 0;
+    std::string enPassantBefore;
+    int halfmoveBefore = 0;
+};
+
 class Board {
 public:
     Piece squares[BOARD_SIZE *BOARD_SIZE];
@@ -55,6 +64,12 @@ public:
 
     UndoInfo makeMove(const Move& move);
     void unmakeMove(const UndoInfo& undo);
+
+    // Pass the turn to the opponent without moving a piece. Used by null-move
+    // pruning in the search; never a legal chess move. Must not be called while
+    // the side to move is in check.
+    NullUndo makeNullMove();
+    void unmakeNullMove(const NullUndo& undo);
 
     // Undo/redo stacks
     std::vector<std::string> undoStack;
