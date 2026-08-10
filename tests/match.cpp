@@ -6,16 +6,38 @@
 // comparing output against a reference. The only way to know whether they help
 // is to play games and measure the score.
 //
-// Two SearchOptions configurations play a match under identical conditions:
-// same fixed depth, same openings, and every opening played twice with colours
-// swapped so neither side benefits from a favourable start.
+// Two configurations play a match under controlled conditions: the same
+// openings, every opening played twice with colours swapped so neither side
+// benefits from a favourable start, and either the same fixed depth or the same
+// per-move time budget.
+//
+// Time control matters more than it looks. A fixed-depth match answers "do
+// these cost accuracy at equal depth?" - it cannot answer "are they worth it?",
+// which is a question about equal *time*. The heuristics here are 1.31x faster
+// at depth 4 and 31x faster at depth 9 (BACKLOG.md section 7), so a fixed-depth
+// match at a shallow depth charges them their full accuracy cost while giving
+// them almost none of their benefit.
 //
 // Build and run:  make test-match
-//   ./tests/match [gamePairs] [depth] [seed]
+//   ./tests/match [gamePairs] [depth] [seed]        (positional, back-compatible)
+//   ./tests/match -n 100 -t 1000 --sprt             (time-equalized, sequential)
 //
-// Note on interpreting the result: a short match measures very little. The
-// reported 95% confidence interval is the honest read - if it spans zero, the
-// match has not demonstrated a difference in either direction.
+// Options:
+//   -n <pairs>      game pairs to play; each pair is two games (default 25)
+//   -s <seed>       opening-line seed (default 20260810)
+//   -d <depth>      fixed depth for both sides (default 4)
+//   -t <ms>         per-move time budget for both sides; 0 = depth only
+//   --da/--db <d>   per-side depth, for comparing two depth settings
+//   --ta/--tb <ms>  per-side time budget
+//   --ha/--hb on|off  per-side search heuristics (default A on, B off)
+//   --sprt          stop as soon as the result is decided (see below)
+//   --elo0/--elo1   SPRT hypotheses in Elo (default 0 and 10)
+//
+// Interpreting the result. A fixed-size match reports a 95% confidence
+// interval; if it spans zero, the match has not demonstrated a difference in
+// either direction, and at the observed draw rates that needs many hundreds of
+// games. --sprt instead stops the moment the evidence is conclusive either way,
+// which usually costs a fraction of the games - and fails a bad change fast.
 #include "engine/board.hpp"
 #include "engine/search.hpp"
 #include "engine/movegen.hpp"
@@ -35,6 +57,7 @@
 struct EngineConfig {
     const char* name;
     SearchOptions opts;
+    SearchLimits limits;
 };
 
 enum Result { A_WINS, DRAW, B_WINS };
@@ -52,7 +75,7 @@ static bool insufficientMaterial(const Board& b) {
 }
 
 // Plays one game. Returns the result from configuration A's point of view.
-static Result playGame(const std::vector<Move>& opening, bool aPlaysWhite, int depth,
+static Result playGame(const std::vector<Move>& opening, bool aPlaysWhite,
                        const EngineConfig& A, const EngineConfig& B,
                        TranspositionTable& ttA, TranspositionTable& ttB,
                        int maxPlies) {
@@ -91,7 +114,7 @@ static Result playGame(const std::vector<Move>& opening, bool aPlaysWhite, int d
 
         g_searchOptions = cfg.opts;
         g_searchOptions.quiet = true;
-        Move best = findBestMoveIterativeDeepening(board, depth, stop, tt);
+        Move best = findBestMoveIterativeDeepening(board, cfg.limits, stop, tt);
 
         // Defensive: a search that returns nothing usable would otherwise
         // corrupt the game; fall back to the first legal move.
@@ -121,53 +144,156 @@ static std::vector<Move> makeOpening(std::mt19937& rng, int plies) {
     return line;
 }
 
+// --- SPRT ---
+//
+// A fixed-size match commits to N games before seeing any of them. A sequential
+// test stops as soon as the evidence is conclusive, which for a clearly good or
+// clearly bad change is a small fraction of N.
+//
+// H0: the change is worth elo0 (default 0, i.e. no gain).
+// H1: the change is worth elo1 (default 10).
+// The log-likelihood ratio walks between two bounds set by the error rates;
+// crossing the upper bound accepts H1, the lower accepts H0.
+static double eloToScore(double elo) {
+    return 1.0 / (1.0 + std::pow(10.0, -elo / 400.0));
+}
+
+// Generalized SPRT under a normal approximation to the per-game score. Returns
+// 0 until every outcome has been seen at least once, since the variance
+// estimate is meaningless before then.
+static double computeLLR(int wins, int draws, int losses, double elo0, double elo1) {
+    if (wins == 0 || draws == 0 || losses == 0) return 0.0;
+    double n = wins + draws + losses;
+    double w = wins / n, d = draws / n;
+    double score = w + d / 2.0;
+    // Second moment of the per-game score: wins contribute 1, draws 0.25.
+    double variance = (w + d / 4.0) - score * score;
+    if (variance <= 0.0) return 0.0;
+
+    double s0 = eloToScore(elo0), s1 = eloToScore(elo1);
+    return n * (s1 - s0) * (2.0 * score - s0 - s1) / (2.0 * variance);
+}
+
 int main(int argc, char** argv) {
     initMoveLookupTables();
 
-    int pairs = (argc > 1) ? std::atoi(argv[1]) : 25;
-    int depth = (argc > 2) ? std::atoi(argv[2]) : 4;
-    unsigned seed = (argc > 3) ? (unsigned)std::atoi(argv[3]) : 20260810u;
+    int pairs = 25, depth = 4;
+    long timeMs = 0;
+    int depthA = -1, depthB = -1;
+    long timeA = -1, timeB = -1;
+    bool heurA = true, heurB = false;
+    unsigned seed = 20260810u;
+    bool depthGiven = false;
+    bool useSprt = false;
+    double elo0 = 0.0, elo1 = 10.0;
+    const double ALPHA = 0.05, BETA = 0.05;
     const int MAX_PLIES = 300;
     const int OPENING_PLIES = 6;
 
-    EngineConfig A{"heuristics-on", SearchOptions{}};
-    A.opts.nullMove = true;  A.opts.lmr = true;  A.opts.aspiration = true;
+    auto onOff = [](const char* v) { return std::string(v) == "on"; };
 
-    EngineConfig B{"baseline-off", SearchOptions{}};
-    B.opts.nullMove = false; B.opts.lmr = false; B.opts.aspiration = false;
+    // Positional form kept working: ./tests/match [pairs] [depth] [seed]
+    if (argc > 1 && argv[1][0] != '-') {
+        pairs = std::atoi(argv[1]);
+        if (argc > 2) depth = std::atoi(argv[2]);
+        if (argc > 3) seed = (unsigned)std::atoi(argv[3]);
+    } else {
+        for (int i = 1; i < argc; ++i) {
+            std::string a = argv[i];
+            auto next = [&]() -> const char* { return (i + 1 < argc) ? argv[++i] : "0"; };
+            if      (a == "-n")      pairs = std::atoi(next());
+            else if (a == "-s")      seed = (unsigned)std::atoi(next());
+            else if (a == "-d")    { depth = std::atoi(next()); depthGiven = true; }
+            else if (a == "-t")      timeMs = std::atol(next());
+            else if (a == "--da")    depthA = std::atoi(next());
+            else if (a == "--db")    depthB = std::atoi(next());
+            else if (a == "--ta")    timeA = std::atol(next());
+            else if (a == "--tb")    timeB = std::atol(next());
+            else if (a == "--ha")    heurA = onOff(next());
+            else if (a == "--hb")    heurB = onOff(next());
+            else if (a == "--sprt")  useSprt = true;
+            else if (a == "--elo0")  elo0 = std::atof(next());
+            else if (a == "--elo1")  elo1 = std::atof(next());
+            else {
+                std::printf("unknown option: %s\n", a.c_str());
+                return 1;
+            }
+        }
+    }
 
-    std::printf("%s vs %s | %d game pairs (%d games) | depth %d | seed %u\n",
-                A.name, B.name, pairs, pairs * 2, depth, seed);
+    // A depth ceiling is always set. Under a time budget it is a safety limit
+    // rather than the stopping condition, so it sits high enough not to bind.
+    long budgetA = (timeA >= 0) ? timeA : timeMs;
+    long budgetB = (timeB >= 0) ? timeB : timeMs;
+    // Under a time budget, an unspecified depth means "as deep as the clock
+    // allows" rather than the fixed-depth default, which would silently cap the
+    // faster engine and defeat the point of equalizing on time.
+    auto ceilingFor = [&](int sideDepth, long budget) {
+        if (sideDepth > 0) return sideDepth;
+        if (budget > 0 && !depthGiven) return 64;
+        return depth;
+    };
+    int ceilA = ceilingFor(depthA, budgetA);
+    int ceilB = ceilingFor(depthB, budgetB);
+
+    EngineConfig A{"A", SearchOptions{}, SearchLimits(ceilA, budgetA)};
+    A.opts.nullMove = heurA; A.opts.lmr = heurA; A.opts.aspiration = heurA;
+
+    EngineConfig B{"B", SearchOptions{}, SearchLimits(ceilB, budgetB)};
+    B.opts.nullMove = heurB; B.opts.lmr = heurB; B.opts.aspiration = heurB;
+
+    std::string nameA = std::string(heurA ? "heuristics-on" : "heuristics-off");
+    std::string nameB = std::string(heurB ? "heuristics-on" : "heuristics-off");
+    if (budgetA > 0) nameA += " @" + std::to_string(budgetA) + "ms";
+    else             nameA += " @d" + std::to_string(ceilA);
+    if (budgetB > 0) nameB += " @" + std::to_string(budgetB) + "ms";
+    else             nameB += " @d" + std::to_string(ceilB);
+    A.name = nameA.c_str();
+    B.name = nameB.c_str();
+
+    std::printf("%s  vs  %s\n", A.name, B.name);
+    std::printf("%d game pairs (up to %d games) | seed %u\n", pairs, pairs * 2, seed);
+    if (useSprt) {
+        std::printf("SPRT: H0 = %+.0f Elo, H1 = %+.0f Elo, alpha = beta = %.2f\n",
+                    elo0, elo1, ALPHA);
+    }
     std::printf("Each opening is played twice with colours swapped.\n\n");
 
     TranspositionTable ttA(32), ttB(32);
     std::mt19937 rng(seed);
 
     int wins = 0, draws = 0, losses = 0;
-    double aTimeMs = 0, bTimeMs = 0;
+    const double lowerBound = std::log(BETA / (1.0 - ALPHA));
+    const double upperBound = std::log((1.0 - BETA) / ALPHA);
+    const char* sprtVerdict = nullptr;
 
     auto t0 = std::chrono::steady_clock::now();
-    for (int p = 0; p < pairs; ++p) {
+    for (int p = 0; p < pairs && !sprtVerdict; ++p) {
         std::vector<Move> opening = makeOpening(rng, OPENING_PLIES);
         for (int side = 0; side < 2; ++side) {
             bool aWhite = (side == 0);
-            auto g0 = std::chrono::steady_clock::now();
-            Result r = playGame(opening, aWhite, depth, A, B, ttA, ttB, MAX_PLIES);
-            auto g1 = std::chrono::steady_clock::now();
-            double ms = std::chrono::duration<double, std::milli>(g1 - g0).count();
-            (aWhite ? aTimeMs : bTimeMs) += ms;
+            Result r = playGame(opening, aWhite, A, B, ttA, ttB, MAX_PLIES);
 
             if (r == A_WINS) ++wins; else if (r == B_WINS) ++losses; else ++draws;
-            std::printf("  pair %2d %s: %s   (running W-D-L %d-%d-%d)\n",
+            std::printf("  pair %3d %s: %-7s  (W-D-L %d-%d-%d",
                         p + 1, aWhite ? "A=white" : "A=black",
                         r == A_WINS ? "A wins" : (r == B_WINS ? "B wins" : "draw"),
                         wins, draws, losses);
+            if (useSprt) {
+                double llr = computeLLR(wins, draws, losses, elo0, elo1);
+                std::printf(" | LLR %+.2f [%.2f,%.2f]", llr, lowerBound, upperBound);
+                if (llr >= upperBound)      sprtVerdict = "H1 accepted: the change is an improvement";
+                else if (llr <= lowerBound) sprtVerdict = "H0 accepted: the change is not an improvement";
+            }
+            std::printf(")\n");
             std::fflush(stdout);
+            if (sprtVerdict) break;
         }
     }
     auto t1 = std::chrono::steady_clock::now();
 
     int games = wins + draws + losses;
+    if (games == 0) { std::printf("no games played\n"); return 1; }
     double score = (wins + 0.5 * draws) / games;
 
     // Standard error over per-game results (win=1, draw=0.5, loss=0).
@@ -188,9 +314,20 @@ int main(int argc, char** argv) {
     std::printf("score   : %.1f%%\n", 100.0 * score);
     std::printf("Elo     : %+.0f   95%% CI [%+.0f, %+.0f]\n", toElo(score), lo, hi);
     std::printf("wall    : %.1f s\n", std::chrono::duration<double>(t1 - t0).count());
-    if (lo < 0.0 && hi > 0.0) {
+
+    if (useSprt) {
+        double llr = computeLLR(wins, draws, losses, elo0, elo1);
+        std::printf("LLR     : %+.2f  (bounds %.2f / %.2f)\n", llr, lowerBound, upperBound);
+        if (sprtVerdict) {
+            std::printf("SPRT    : %s\n", sprtVerdict);
+        } else {
+            std::printf("SPRT    : inconclusive within %d pairs - the test ran out of\n"
+                        "          games before the evidence settled. Raise -n.\n", pairs);
+        }
+    } else if (lo < 0.0 && hi > 0.0) {
         std::printf("\nThe confidence interval spans zero: this match size does NOT\n"
-                    "demonstrate a difference. Increase the number of game pairs.\n");
+                    "demonstrate a difference. Increase the number of game pairs,\n"
+                    "or use --sprt to stop as soon as the result is decided.\n");
     }
     return 0;
 }
