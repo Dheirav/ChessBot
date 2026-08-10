@@ -19,15 +19,20 @@ The bottleneck is no longer the code. It is that **nothing is configured to
 spend the speedup**, and **the one open question was measured in the wrong
 regime**. In priority order:
 
-1. **Add time control** (§5.1). Not just a feature — it is the measurement
-   apparatus for everything else, and the setting the search heuristics were
-   designed for. Everything below is easier once this exists.
-2. **Raise `ChessBotEngine`'s default depth** from 5 (§1.3). It is currently
-   throwing away almost the entire gain from this session.
-3. **Re-run the strength match at depth 8+, time-equalized** (§1.1). The
-   existing −30 Elo result was measured at depth 4, which is the worst possible
-   depth for these heuristics.
+1. ~~**Add time control** (§5.1)~~ — **done**, PLAN.md 1.1.
+2. ~~**Raise `ChessBotEngine`'s default depth** from 5 (§1.3)~~ — **done and
+   measured at +246 Elo**, PLAN.md 1.2. See §1.3.
+3. **Re-run the strength match time-equalized** (§1.1) — **this is the next
+   step, and the only thing still blocking Phase 3.** The existing −30 Elo
+   result was measured at depth 4, the worst possible depth for these
+   heuristics. Run:
+   `./tests/match -n 400 -t 3000 --sprt`
 4. Only then consider tuning heuristics, or anything in §4.
+
+Since this file was written the engine has also gained a UCI interface, a
+negamax search, an evaluation regression test, a search bench signature, SEE
+(unit-tested, not yet wired in), CI, and a further 1.45× in speed. See PLAN.md
+for what is done and what remains.
 
 Do **not** start with the "obvious" engine optimizations. Bitboard move
 generation (~1.02× ceiling), pin-aware move generation (1.24×) and replacing
@@ -94,7 +99,36 @@ roughly fixed. At depth 9, the no-aspiration build takes 31 722 ms against
 This is a good example of the general trap: a heuristic measured outside its
 operating range will lie to you about its value.
 
-### 1.3 The app's default search depth is far too low
+### 1.3 The app's default search depth is far too low — RESOLVED
+
+**Settled by measurement on 2026-08-10.** Depth 8 against depth 5, both with
+heuristics on, time-unequalized by design (this asks whether the extra depth is
+worth having, not whether it is free):
+
+```
+./tests/match -n 150 --ha on --hb on --da 8 --db 5 --sprt --elo0 0 --elo1 20
+
+games : 23  (W 14 / D 9 / L 0)
+score : 80.4%
+Elo   : +246   95% CI [+151, +390]
+LLR   : +3.22  -> H1 accepted
+wall  : 2422 s
+```
+
+Depth 8 did not lose a single game. The default is now a 3000 ms clock with a
+depth-8 ceiling (PLAN.md 1.2), so this is banked. The prediction in the original
+note — "should be a rout" — was correct.
+
+Two things this also establishes. The measuring apparatus works, which was the
+real reason to run it first: a depth-8 engine that could not beat a depth-5 one
+would have meant something was broken in the search, the harness or the
+evaluation, and every later gate would have been measuring noise. And SPRT
+earns its place — 23 games rather than the 300 a fixed-size match would have
+played, 40 minutes rather than 6 to 10 hours.
+
+The original note follows.
+
+
 
 `ChessBotEngine`'s constructor sets `searchDepth(5)`. That was a reasonable
 setting for the old engine. It now costs about 1.1 s per move where depth 8
@@ -105,11 +139,12 @@ this session's speedup reaches the player** until this changes. Raising it is
 the single cheapest strength improvement available. Confirm with a match:
 depth 8 against depth 5 should be a rout.
 
-### 1.4 The match harness has no time control
+### 1.4 The match harness has no time control — RESOLVED
 
-`tests/match.cpp` plays at fixed depth only, which is why §1.1 is still open.
-Add a time-per-move mode so both sides get equal wall clock. This depends on
-§5.1 existing first.
+`tests/match.cpp` now takes `-t <ms>` for an equal budget, `--ta/--tb` for
+per-side budgets, `--da/--db` for per-side depths, `--optA/--optB` to set
+individual search options, and `--sprt` for sequential testing with early
+stopping. Search time control itself is PLAN.md 1.1.
 
 ---
 
@@ -480,6 +515,16 @@ aspiration 1.10×, all three 2.01×.
 Move generation is verified correct against published perft counts: startpos
 depth 4 = 197 281, kiwipete depth 3 = 97 862, position 3 depth 4 = 43 238,
 position 4 depth 3 = 9 467.
+
+### Gate 1.4 — depth 8 vs depth 5 (2026-08-10)
+
+```
+games : 23  (W 14 / D 9 / L 0)   score 80.4%
+Elo   : +246   95% CI [+151, +390]   LLR +3.22 -> H1 accepted
+wall  : 2422 s  (~105 s per game)
+```
+
+See §1.3. This is the measurement that validates every later gate.
 
 Self-play match, heuristics on vs off, depth 4, seed 20260810
 (`./tests/match 100 4 20260810`), completed:
