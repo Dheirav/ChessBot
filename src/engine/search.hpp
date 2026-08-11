@@ -33,6 +33,24 @@ extern SearchOptions g_searchOptions;
 // here and becomes testable from the match harness and over UCI at once.
 bool setSearchOption(SearchOptions& opts, const std::string& name, bool value);
 
+// Every switchable search feature, in one table. setSearchOption() and
+// describeSearchOptions() both read it, so a name can never be settable but
+// undescribable — which is exactly the drift that invalidated a gate once.
+struct SearchOptionEntry {
+    const char* name;       // lookup key, lowercase: "seepruning"
+    const char* shortName;  // label used in match headers: "seeprune"
+    bool SearchOptions::*field;
+};
+extern const SearchOptionEntry SEARCH_OPTIONS[];
+extern const size_t SEARCH_OPTION_COUNT;
+
+// "nullmove+lmr+asp+seeprune", or "plain-alphabeta" when nothing is enabled.
+//
+// Any logged comparison must say precisely what was compared or it cannot be
+// interpreted later — the problem with the −30 Elo figure in BACKLOG.md that
+// did not record its depth.
+std::string describeSearchOptions(const SearchOptions& opts);
+
 // Nodes visited by the last search: every entry to the main search or to
 // quiescence. Reset at the start of findBestMoveIterativeDeepening.
 //

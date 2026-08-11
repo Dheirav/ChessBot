@@ -192,7 +192,15 @@ int main(int argc, char** argv) {
     long timeMs = 0;
     int depthA = -1, depthB = -1;
     long timeA = -1, timeB = -1;
-    bool heurA = true, heurB = false;
+    // Both sides start from the shipped configuration, and a gate changes one
+    // thing with --optA/--optB.
+    //
+    // B used to default to heuristics-off, which was right for the single
+    // comparison this harness was written for (gate 1.5, heuristics on vs off)
+    // and a trap for every gate after it: `--optA seepruning=on` then silently
+    // compared four differences instead of one. The old comparison is still
+    // available, it just has to be asked for: `--hb off`.
+    bool heurA = true, heurB = true;
     unsigned seed = 20260810u;
     bool depthGiven = false;
     bool useSprt = false;
@@ -290,18 +298,10 @@ int main(int argc, char** argv) {
     applyOpts(B.opts, optsB, "--optB");
 
     // Name each side by the options it actually ends up with, not by the
-    // --ha/--hb baseline. A logged result has to say precisely what was
-    // compared, or it cannot be interpreted later — which is the whole problem
-    // with the -30 Elo figure in BACKLOG.md that did not record its depth.
-    auto describe = [](const SearchOptions& o) {
-        std::string d;
-        if (o.nullMove)   d += (d.empty() ? "" : "+") + std::string("nullmove");
-        if (o.lmr)        d += (d.empty() ? "" : "+") + std::string("lmr");
-        if (o.aspiration) d += (d.empty() ? "" : "+") + std::string("asp");
-        return d.empty() ? std::string("plain-alphabeta") : d;
-    };
-    std::string nameA = describe(A.opts);
-    std::string nameB = describe(B.opts);
+    // --ha/--hb baseline. This lives in search.cpp beside the option table, so
+    // that a feature added there cannot go missing from the header here.
+    std::string nameA = describeSearchOptions(A.opts);
+    std::string nameB = describeSearchOptions(B.opts);
     if (budgetA > 0) nameA += " @" + std::to_string(budgetA) + "ms";
     else             nameA += " @d" + std::to_string(ceilA);
     if (budgetB > 0) nameB += " @" + std::to_string(budgetB) + "ms";
@@ -310,6 +310,38 @@ int main(int argc, char** argv) {
     B.name = nameB.c_str();
 
     std::printf("%s  vs  %s\n", A.name, B.name);
+
+    // Say out loud what actually differs. A gate is only interpretable if
+    // exactly one thing changed, and the cheapest moment to notice otherwise is
+    // now rather than a day of wall clock later.
+    {
+        std::string diff;
+        for (size_t i = 0; i < SEARCH_OPTION_COUNT; ++i) {
+            bool a = A.opts.*(SEARCH_OPTIONS[i].field);
+            bool b = B.opts.*(SEARCH_OPTIONS[i].field);
+            if (a == b) continue;
+            if (!diff.empty()) diff += ", ";
+            diff += std::string(SEARCH_OPTIONS[i].shortName) +
+                    (a ? " (A on, B off)" : " (A off, B on)");
+        }
+        if (budgetA != budgetB) {
+            if (!diff.empty()) diff += ", ";
+            diff += "time budget";
+        }
+        if (ceilA != ceilB) {
+            if (!diff.empty()) diff += ", ";
+            diff += "depth ceiling";
+        }
+
+        if (diff.empty()) {
+            std::printf("\nREFUSING TO RUN: A and B are configured identically, "
+                        "so this match cannot measure anything.\n"
+                        "Set the feature under test with --optA <name>=on.\n");
+            return 1;
+        }
+        std::printf("difference: %s\n", diff.c_str());
+    }
+
     std::printf("%d game pairs (up to %d games) | seed %u\n", pairs, pairs * 2, seed);
     if (useSprt) {
         std::printf("SPRT: H0 = %+.0f Elo, H1 = %+.0f Elo, alpha = beta = %.2f\n",

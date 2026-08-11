@@ -52,13 +52,44 @@ static int scoreForSideToMove(const Board& board) {
 
 SearchOptions g_searchOptions;
 
+// The one place a search feature is named.
+//
+// Setting an option by name and describing which options are set are the same
+// knowledge, so they read the same table. Keeping them as two separate lists
+// cost a match: a run gated on `seepruning` printed a header that named only
+// the three old heuristics, because the describe() in tests/match.cpp had never
+// heard of SEE. A label that silently omits the variable under test is worse
+// than no label — it reads as confirmation that the right thing was compared.
+//
+// Adding a feature means adding one line here, and the harness header, the UCI
+// option list and the match log all learn about it at once.
+const SearchOptionEntry SEARCH_OPTIONS[] = {
+    {"nullmove",    "nullmove", &SearchOptions::nullMove},
+    {"lmr",         "lmr",      &SearchOptions::lmr},
+    {"aspiration",  "asp",      &SearchOptions::aspiration},
+    {"seeordering", "seeord",   &SearchOptions::seeOrdering},
+    {"seepruning",  "seeprune", &SearchOptions::seePruning},
+};
+const size_t SEARCH_OPTION_COUNT = sizeof(SEARCH_OPTIONS) / sizeof(SEARCH_OPTIONS[0]);
+
 bool setSearchOption(SearchOptions& opts, const std::string& name, bool value) {
-    if (name == "nullmove")    { opts.nullMove = value;    return true; }
-    if (name == "lmr")         { opts.lmr = value;         return true; }
-    if (name == "aspiration")  { opts.aspiration = value;  return true; }
-    if (name == "seeordering") { opts.seeOrdering = value; return true; }
-    if (name == "seepruning")  { opts.seePruning = value;  return true; }
+    for (size_t i = 0; i < SEARCH_OPTION_COUNT; ++i) {
+        if (name == SEARCH_OPTIONS[i].name) {
+            opts.*(SEARCH_OPTIONS[i].field) = value;
+            return true;
+        }
+    }
     return false;
+}
+
+std::string describeSearchOptions(const SearchOptions& opts) {
+    std::string out;
+    for (size_t i = 0; i < SEARCH_OPTION_COUNT; ++i) {
+        if (!(opts.*(SEARCH_OPTIONS[i].field))) continue;
+        if (!out.empty()) out += "+";
+        out += SEARCH_OPTIONS[i].shortName;
+    }
+    return out.empty() ? std::string("plain-alphabeta") : out;
 }
 uint64_t g_searchNodes = 0;
 SearchInfoFn g_searchInfo = nullptr;
