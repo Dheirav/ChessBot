@@ -242,12 +242,16 @@ int uciLoop() {
         if (command == "uci") {
             std::cout << "id name ChessBot 1.1\n";
             std::cout << "id author Dheirav\n";
-            // The three search heuristics are exposed so that A/B testing can
-            // run through standard tooling instead of tests/match.cpp.
+            // The search heuristics are exposed so that A/B testing can run
+            // through standard tooling instead of tests/match.cpp. Defaults
+            // here must match SearchOptions: the two SEE uses are off until
+            // their gates pass (PLAN.md 3.2).
             std::cout << "option name Hash type spin default 256 min 1 max 4096\n";
             std::cout << "option name NullMove type check default true\n";
             std::cout << "option name LMR type check default true\n";
             std::cout << "option name Aspiration type check default true\n";
+            std::cout << "option name SeeOrdering type check default false\n";
+            std::cout << "option name SeePruning type check default false\n";
             std::cout << "uciok" << std::endl;
         } else if (command == "isready") {
             std::cout << "readyok" << std::endl;

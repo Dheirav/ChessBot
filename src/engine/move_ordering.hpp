@@ -13,6 +13,11 @@ public:
     static constexpr int MAX_DEPTH = 64;
     static constexpr int MAX_KILLER_MOVES = 2;
     static constexpr int HISTORY_MAX = 16384; // 2^14 for scaling
+
+    // Upper bound on moves ordered in one call. No legal chess position has
+    // more than 218 legal moves; the buffer is stack-allocated, so this caps
+    // it rather than allocating per node.
+    static constexpr size_t MAX_ORDERED_MOVES = 256;
     
     MoveOrderer();
     

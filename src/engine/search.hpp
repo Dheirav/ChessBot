@@ -14,6 +14,12 @@ struct SearchOptions {
     bool lmr = true;         // late move reductions: search unpromising moves shallower
     bool aspiration = true;  // aspiration windows: narrow root window around the last score
     bool quiet = false;      // suppress the per-depth progress output
+
+    // Static exchange evaluation, as two independently gated uses (PLAN.md 3.2).
+    // Both default OFF: each is accepted by its own A/B match, and until then
+    // the shipped engine and the bench signature must stay exactly as they were.
+    bool seeOrdering = false;  // sort captures by the exchange result, not the victim
+    bool seePruning = false;   // quiescence skips captures that lose material
 };
 extern SearchOptions g_searchOptions;
 

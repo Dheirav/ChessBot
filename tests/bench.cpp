@@ -117,8 +117,38 @@ int main(int argc, char** argv) {
     bool regen = (argc > 1 && std::strcmp(argv[1], "--regen") == 0);
     int depth = DEFAULT_DEPTH;
     if (!check && !regen && argc > 1) depth = std::atoi(argv[1]);
+
+    // --opt <name>=<on|off> toggles one search option for this run.
+    //
+    // A match says whether a feature wins games; it cannot say why, and it
+    // costs hours. This says how the feature changes the tree, in seconds — the
+    // first question to ask of anything in Phase 3, and the one that catches a
+    // feature wired in backwards before a match is spent on it.
+    //
+    // Deliberately not usable with --check: the stored signature describes the
+    // defaults, and comparing a modified search against it would be meaningless.
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--opt") != 0 || i + 1 >= argc) continue;
+        std::string spec = argv[++i];
+        size_t eq = spec.find('=');
+        if (eq == std::string::npos) {
+            std::printf("--opt wants <name>=<on|off>, got '%s'\n", spec.c_str());
+            return 1;
+        }
+        std::string name = spec.substr(0, eq), value = spec.substr(eq + 1);
+        if (!setSearchOption(g_searchOptions, name, value == "on" || value == "true" || value == "1")) {
+            std::printf("unknown search option '%s'\n", name.c_str());
+            return 1;
+        }
+        if (check) {
+            std::printf("--opt cannot be combined with --check: the stored "
+                        "signature describes the default options\n");
+            return 1;
+        }
+    }
+
     if (depth < 1) {
-        std::printf("usage: %s [depth | --check | --regen]\n", argv[0]);
+        std::printf("usage: %s [depth | --check | --regen] [--opt <name>=<on|off>]...\n", argv[0]);
         return 1;
     }
 

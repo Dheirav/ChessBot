@@ -5,6 +5,7 @@
 #include "transposition_table.hpp"
 #include "move_ordering.hpp"
 #include "legal_move_validator.hpp"
+#include "see.hpp"
 #include <limits>
 #include <algorithm>
 #include <atomic>
@@ -13,6 +14,11 @@
 
 // Piece values for MVV-LVA ordering in the quiescence search
 static const int QS_PIECE_VALUES[7] = { 0, 20000, 100, 320, 330, 500, 900 };
+
+// Sorts a losing capture below every sound one while leaving MVV-LVA to order
+// within each group. Larger than any MVV-LVA key (10 × queen = 9000), so the
+// two groups can never interleave.
+static constexpr int SEE_LOSING_CAPTURE_BAND = 100000;
 
 // The search is negamax: every score is from the point of view of the side to
 // move, and a child's score is negated on the way back up. evaluate() is
@@ -47,9 +53,11 @@ static int scoreForSideToMove(const Board& board) {
 SearchOptions g_searchOptions;
 
 bool setSearchOption(SearchOptions& opts, const std::string& name, bool value) {
-    if (name == "nullmove")   { opts.nullMove = value;   return true; }
-    if (name == "lmr")        { opts.lmr = value;        return true; }
-    if (name == "aspiration") { opts.aspiration = value; return true; }
+    if (name == "nullmove")    { opts.nullMove = value;    return true; }
+    if (name == "lmr")         { opts.lmr = value;         return true; }
+    if (name == "aspiration")  { opts.aspiration = value;  return true; }
+    if (name == "seeordering") { opts.seeOrdering = value; return true; }
+    if (name == "seepruning")  { opts.seePruning = value;  return true; }
     return false;
 }
 uint64_t g_searchNodes = 0;
@@ -142,23 +150,72 @@ static int quiescence(Board& board, int ply, int alpha, int beta,
         return inCheck ? -(MATE_SCORE - ply) : alpha;
     }
 
-    // Order captures by MVV-LVA (most valuable victim, least valuable attacker)
-    std::sort(moves.begin(), moves.end(), [](const Move& a, const Move& b) {
-        auto score = [](const Move& m) {
-            if (m.flag == EN_PASSANT) {
-                return 10 * QS_PIECE_VALUES[PAWN] - QS_PIECE_VALUES[m.movedPiece.type()];
-            }
-            if (m.flag == PROMOTION && m.capturedPiece.type() == NONE) {
-                return 10 * QS_PIECE_VALUES[m.promotionPiece.type()];
-            }
+    // Order the tactical moves, and decide which to skip, in a single pass.
+    //
+    // Both SEE features want the same number for the same move, and resolving
+    // an exchange is not free, so it is computed at most once per move here
+    // rather than once per use — and, critically, not inside a sort comparator,
+    // which would evaluate it O(n log n) times instead of O(n).
+    //
+    // While in check this is evasion search, not capture search: every move
+    // must be searched, so neither SEE feature applies.
+    const bool useSee = !inCheck && (g_searchOptions.seeOrdering || g_searchOptions.seePruning);
+
+    struct ScoredMove {
+        int key;        // sort key, descending
+        int seeScore;   // exchange result; only meaningful when useSee
+        Move move;
+    };
+    static constexpr size_t MAX_TACTICAL = 256;  // legal move count never exceeds 218
+    ScoredMove scored[MAX_TACTICAL];
+    const size_t count = std::min(moves.size(), MAX_TACTICAL);
+
+    for (size_t i = 0; i < count; ++i) {
+        const Move& m = moves[i];
+        int seeScore = useSee ? see(board, m) : 0;
+
+        int key;
+        if (m.flag == EN_PASSANT) {
+            key = 10 * QS_PIECE_VALUES[PAWN] - QS_PIECE_VALUES[m.movedPiece.type()];
+        } else if (m.flag == PROMOTION && m.capturedPiece.type() == NONE) {
+            key = 10 * QS_PIECE_VALUES[m.promotionPiece.type()];
+        } else {
             int victim = (m.capturedPiece.type() == NONE) ? 0 : QS_PIECE_VALUES[m.capturedPiece.type()];
             int attacker = QS_PIECE_VALUES[m.movedPiece.type()];
-            return 10 * victim - attacker;
-        };
-        return score(a) > score(b);
-    });
+            key = 10 * victim - attacker;
+        }
 
-    for (const Move& move : moves) {
+        // SEE separates the winning captures from the losing ones; MVV-LVA
+        // still orders within each group.
+        //
+        // Using the exchange result as the sort key directly is the obvious
+        // thing and it is worse: most sound captures resolve to 0, so it
+        // collapses QxQ, RxR and PxP into one indistinguishable block and
+        // throws away exactly the victim-value information that produces early
+        // cutoffs. SEE knows which captures are sound; it does not know which
+        // to try first.
+        if (g_searchOptions.seeOrdering && !inCheck && seeScore < 0) {
+            key -= SEE_LOSING_CAPTURE_BAND;
+        }
+
+        scored[i] = ScoredMove{key, seeScore, m};
+    }
+
+    std::sort(scored, scored + count,
+              [](const ScoredMove& a, const ScoredMove& b) { return a.key > b.key; });
+
+    for (size_t i = 0; i < count; ++i) {
+        const Move& move = scored[i].move;
+
+        // Skip captures that lose material outright. Quiescence exists to
+        // resolve tactics, and a capture the opponent simply recaptures for
+        // profit resolves nothing — it only grows the tree. Promotions are
+        // covered too: SEE already credits the promotion gain, so an underpaid
+        // promotion is pruned and a sound one is not.
+        if (g_searchOptions.seePruning && !inCheck && scored[i].seeScore < 0) {
+            continue;
+        }
+
         if (searchAborted(shouldStop)) {
             break;
         }
