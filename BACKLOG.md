@@ -30,10 +30,20 @@ came back large and positive (+246 and +140), which together confirm the premise
 this whole plan was built on: the engine was fast and had nothing configured to
 spend the speed.
 
-**Next: Phase 3** — wire in SEE (already written and unit-tested), bound
-quiescence, then check extensions, futility/razoring, IID and the LMR formula.
-Every one of those is now gated by `./tests/match -t 3000 --sprt` against the
-current build, which is cheap enough to run per-feature.
+**Next: Phase 3.** SEE is now wired in behind two toggles and is at its gate
+(§5.2). After it: bound quiescence, check extensions, futility/razoring, IID and
+the LMR formula. Each is gated by `./tests/match -t 3000 --sprt --optA <f>=on
+--optB <f>=off` against the current build.
+
+**Two habits, both learned the expensive way:**
+
+- **Look at the tree before spending a day on a match.** `./tests/bench 6 --opt
+  <feature>=on` prints the node signature with one option flipped, in seconds
+  rather than hours. It caught a real ordering bug in SEE before the gate ran.
+- **A timed match needs a quiet machine.** `-t 3000` is wall clock, so parallel
+  builds mean both engines get fewer nodes per move and the result describes a
+  time control you did not ask for. Use `make -j4`, never two matches at once,
+  and `tee` the output — a timed match is not reproducible from its seed.
 
 Since this file was written the engine has also gained a UCI interface, a
 negamax search, an evaluation regression test, a search bench signature, SEE
@@ -354,9 +364,21 @@ iteration.
 
 ### 5.2 Search techniques not yet implemented
 
-- **Static Exchange Evaluation (SEE)** — for move ordering and to prune losing
-  captures in quiescence. Probably the single biggest strength win available;
-  quiescence currently searches every capture including obviously losing ones.
+- ~~**Static Exchange Evaluation (SEE)**~~ — **written, unit-tested and wired
+  in** (PLAN.md 3.2). Two toggles, both default OFF pending their gates:
+  `seepruning` cuts the tree 41.1% (1.73× faster) and `seeordering` 28.7%
+  (1.37×); together 42.7%, 1.78×. The prediction that this was the biggest
+  strength win available is so far supported by tree size; the Elo is what the
+  gate is for.
+
+  Two findings worth keeping, both from measuring rather than assuming:
+  **SEE classifies captures, it does not order them** — using the exchange
+  result as the sort key collapses QxQ, RxR and PxP into one block (they all
+  resolve to 0) and destroys the victim-value ordering that produces cutoffs,
+  which measured *worse* than not ordering at all. Band by SEE, sort by MVV-LVA
+  within the band. And **never score inside a sort comparator**: that is
+  ~2n·log(n) evaluations instead of n, invisible for a table lookup and ruinous
+  for an exchange resolution.
 - **Check extensions** — extend the search by a ply when in check.
 - **Futility pruning / razoring** at shallow depths.
 - **Internal iterative deepening** when there is no TT move to order on.

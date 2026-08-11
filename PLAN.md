@@ -294,23 +294,59 @@ rule (skip a capture that cannot raise alpha even with a queen's worth of
 margin). Bounds worst-case node counts and is close to free in strength.
 
 **3.2 Static Exchange Evaluation** (§5.2 — biggest single win available)
-*Status: implemented and unit-tested (`make test-see`, 13 hand-computed
-positions). NOT yet wired into the search — that changes the tree and needs a
-match. **1.5 has now cleared, so this is unblocked and is the next thing to
-do.***
+*Status: implemented, unit-tested (`make test-see`, 13 hand-computed positions)
+and **wired into the search** as of `1c0c6d6`. Both uses default OFF and are
+awaiting their gates.*
 
-*Also done, and a prerequisite for every gate below:* search options now have
-names (`setSearchOption`), and the match harness takes `--optA`/`--optB` to set
-them individually. Without that no single feature could be A/B'd, because
+Standard swap-off algorithm over the attacker sets, in two independently
+toggleable uses:
+
+| option | what it does | nodes @ bench 6 | vs baseline |
+|---|---|---|---|
+| — | baseline | 2 056 371 | — |
+| `seeordering` | captures banded by exchange result, losing ones last | 1 465 771 | −28.7%, 1.37× |
+| `seepruning` | quiescence skips captures that lose material | 1 212 044 | −41.1%, 1.73× |
+| both | | 1 177 851 | −42.7%, **1.78×** |
+
+**SEE must classify captures, not order them.** The obvious reading of "sort
+captures by SEE" — use the exchange result as the sort key — measured *worse
+combined than pruning alone* (1 362 996 against 1 212 044). Sound captures
+nearly all resolve to 0, so QxQ, RxR and PxP collapse into one indistinguishable
+block and the victim-value ordering that produces early cutoffs is destroyed.
+Banding instead — SEE picks the winning/losing group, MVV-LVA orders within it —
+was worth 120k nodes by itself and flipped both-on from worse than pruning to
+better than it. Applies to both `move_ordering.cpp` and the quiescence sort.
+
+**Never score inside a sort comparator.** Doing so calls the scorer ~2n·log(n)
+times rather than n. Harmless while a score was a table lookup; with SEE it is
+about a dozen exchange resolutions per move. Both orderers now score once into a
+stack buffer and sort that. The permutation is unchanged — identical keys give
+identical comparisons — which `bench --check` confirms byte for byte.
+
+*Gates (each hours of wall clock, run one at a time):*
+```
+./tests/match -n 400 -t 3000 --sprt --optA seepruning=on  --optB seepruning=off
+./tests/match -n 400 -t 3000 --sprt --optA seeordering=on --optB seeordering=off
+```
+Expect a smaller effect than gate 1.5 and therefore many more games: 1.5 stopped
+at 136 because +140 Elo is 14× the H1 bound, and SPRT game counts scale roughly
+as 1/effect². A 1.73× speedup is about three-quarters of a ply, so +40–60 Elo is
+the plausible range and the 800-game cap is reachable. A slow upward LLR drift
+is not a failure — it is the test correctly reporting a real but modest effect,
+and the point estimate with its CI is still a good answer.
+
+*Also done, and a prerequisite for every gate below:* search options have names
+(`setSearchOption`), the match harness takes `--optA`/`--optB`, and `uci.cpp`
+advertises each one. Without that no single feature could be A/B'd, because
 `--ha/--hb` moved all three heuristics at once. Each feature below adds one line
 to `setSearchOption` and becomes testable from the harness and over UCI at once.
 
-Standard swap-off algorithm over the attacker sets. Two uses:
-- **move ordering**: sort captures by SEE instead of pure MVV-LVA;
-- **quiescence pruning**: skip captures with SEE < 0. Quiescence currently
-  searches every capture including obviously losing ones.
-*Verify:* unit-test SEE against hand-computed positions first (it is
-self-contained and cheap to test in isolation), then match.
+*New tool, and the reason the two findings above were caught before a match was
+spent on them:* `./tests/bench <depth> --opt <name>=<on|off>` prints the
+signature with any option flipped. A match says whether a feature wins games, in
+hours; this says how it changes the tree, in seconds. **Run it on every Phase 3
+feature before gating it.** It is refused with `--check`, since the stored
+signature describes the defaults.
 
 **3.3 Check extensions** (§5.2) — extend a ply when in check. Small, standard,
 usually worth 10–20 Elo.
@@ -450,6 +486,23 @@ all — it buys the ability to tell whether anything after it worked.
   that changes the search tree), only matches say anything.
 - Test in the operating regime. Three wrong conclusions last session came from
   measuring at a convenient depth rather than a representative one.
+- **A timed match needs a quiet machine.** `-t 3000` is wall clock: anything
+  else competing for CPU means both engines get fewer nodes in their three
+  seconds, so the result describes a shorter and blurrier time control than the
+  one requested. The load lands on both sides roughly equally — they alternate
+  moves and swap colours — so this inflates variance rather than biasing the
+  result, and SPRT simply needs more games. But a timed match is also **not
+  reproducible**: unlike a fixed-depth run, the same seed does not replay the
+  same games under different load. In practice: no parallel builds (`make -j4`,
+  not `-j16`), and never two matches at once.
+- Do not "fix" that by gating on fixed nodes instead. It would be load-immune
+  and it would be wrong: a feature whose value is a smaller tree gets no credit
+  at equal nodes, so it measures only the accuracy cost. That is the depth-4
+  mistake in a new costume. Equal time is correct *because* the feature is a
+  speedup; a quiet machine is the price.
+- Deterministic tests are immune to all of the above and can run any time:
+  `perft`, `evalref`, `see_test`, `gamestate`, and `bench`'s node counts (its
+  time column is not). This is what makes `bench --opt` trustworthy under load.
 - Update `BACKLOG.md §7` with new measurements as each phase lands; the
   baseline table is the thing that makes the next session cheap.
 
@@ -479,13 +532,30 @@ is conclusive, and 1.5 needed 136 games where the fixed-N plan wanted ~800.
 
 ## Running a Phase 3 gate
 
-Same shape, against the current build rather than a disabled-heuristics one.
-Each feature gets its own `SearchOptions` toggle so A and B differ by exactly
-one thing:
+**First, look at the tree — it costs seconds, not hours:**
 
 ```
-./tests/match -n 400 -t 3000 --sprt --oa <feature>=on --ob <feature>=off
+./tests/bench 6 --opt <feature>=on
 ```
 
-Keep `-t 3000`. Changing the time control between gates makes the results
-incomparable, and 1.5 is the standing demonstration of what that costs.
+Compare against the 2 056 371-node baseline. A feature that barely moves the
+count, or moves it the wrong way, is wired in wrong or is not doing what you
+think; find that out now rather than a day into a match. This is how 3.2's
+classify-don't-order bug was caught.
+
+**Then gate it.** Each feature gets its own `SearchOptions` toggle so A and B
+differ by exactly one thing:
+
+```
+./tests/match -n 400 -t 3000 --sprt --optA <feature>=on --optB <feature>=off
+```
+
+- Keep `-t 3000`. Changing the time control between gates makes results
+  incomparable, and 1.5 is the standing demonstration of what that costs.
+- `tee` it to a log. A timed match is not reproducible, so a lost result is a
+  lost day, not a re-run.
+- Quiet machine, one match at a time — see Standing discipline above.
+- Expect far more games than 1.5 needed. It stopped at 136 only because +140 Elo
+  is 14× the H1 bound; game counts scale roughly as 1/effect². Hitting the cap
+  with the LLR drifting slowly upward is a real but modest effect, not a
+  failure, and the point estimate with its CI is still a good answer.
