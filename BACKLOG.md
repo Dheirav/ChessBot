@@ -22,12 +22,18 @@ regime**. In priority order:
 1. ~~**Add time control** (§5.1)~~ — **done**, PLAN.md 1.1.
 2. ~~**Raise `ChessBotEngine`'s default depth** from 5 (§1.3)~~ — **done and
    measured at +246 Elo**, PLAN.md 1.2. See §1.3.
-3. **Re-run the strength match time-equalized** (§1.1) — **this is the next
-   step, and the only thing still blocking Phase 3.** The existing −30 Elo
-   result was measured at depth 4, the worst possible depth for these
-   heuristics. Run:
-   `./tests/match -n 400 -t 3000 --sprt`
-4. Only then consider tuning heuristics, or anything in §4.
+3. ~~**Re-run the strength match time-equalized** (§1.1)~~ — **done and
+   measured at +140 Elo**, SPRT H1 accepted in 136 games. See §1.3.
+
+**All three gates are cleared, and Phase 1 is complete.** Both Phase 1 matches
+came back large and positive (+246 and +140), which together confirm the premise
+this whole plan was built on: the engine was fast and had nothing configured to
+spend the speed.
+
+**Next: Phase 3** — wire in SEE (already written and unit-tested), bound
+quiescence, then check extensions, futility/razoring, IID and the LMR formula.
+Every one of those is now gated by `./tests/match -t 3000 --sprt` against the
+current build, which is cheap enough to run per-feature.
 
 Since this file was written the engine has also gained a UCI interface, a
 negamax search, an evaluation regression test, a search bench signature, SEE
@@ -53,32 +59,46 @@ that rather than playing games — it is faster and conclusive. Where it cannot
 
 ## 1. Open questions from this session
 
-### 1.1 Are the search heuristics worth it? Still unanswered
+### 1.1 Are the search heuristics worth it? — RESOLVED: +140 Elo
 
-Null-move pruning, LMR and aspiration windows are implemented and enabled.
-A 200-game self-play match at **depth 4** (`make test-match`) put them at
-**−30 Elo, 95% CI [−62, +2]** against the same engine with all three disabled.
+**Yes, emphatically.** Time-equalized SPRT match at 3 s/move, null-move + LMR +
+aspiration against plain alpha-beta, `./tests/match -n 400 -t 3000 --sprt`:
 
-**Do not act on that number.** Depth 4 is close to the worst possible depth for
-these heuristics, because all three scale with tree size:
+```
+games   : 136  (W 69 / D 50 / L 17)
+score   : 69.1%
+Elo     : +140   95% CI [+94, +191]
+wall    : 27 505 s
+LLR     : +2.96  (bounds -2.94 / 2.94)
+SPRT    : H1 accepted
+```
+
+The heuristics stay on. Nothing further to investigate here.
+
+**The size of the correction is the lesson.** The same three heuristics measured
+**−30 Elo** at fixed depth 4 and **+140 Elo** at equal time — a 170 Elo swing
+from changing nothing but the measurement regime. The depth-4 number was not
+noisy, it was answering a different question ("do these cost accuracy at equal
+depth?" — mildly) than the one that mattered ("are they worth it?" — a question
+about equal *time*). All three scale with tree size:
 
 | depth | speedup vs heuristics-off |
 |---|---|
-| 4 | 1.31×  ← the match was run here |
+| 4 | 1.31×  ← the old match was run here |
 | 6 | 4.09× |
 | 8 | 19.97× |
 | 9 | 31.07× |
 
-At depth 4 they pay nearly their full accuracy cost while delivering almost
-none of their benefit. The match answered "do these cost accuracy at equal
-depth?" (mildly, or not measurably). It never answered "are they worth it?",
-which is a question about equal *time*.
+At depth 4 they pay nearly their full accuracy cost while delivering almost none
+of their benefit. At 3 s/move they are searching several plies deeper than the
+opponent, and depth beats everything.
 
-To settle it: add time control (§5.1), give both sides the same budget, and let
-the faster engine search deeper. Failing that, a fixed-depth match at depth 8
-would at least be measured somewhere representative — but note the draw rate
-was already 113/200 at depth 4 and rises with depth, so expect to need many
-more games (roughly 800 for a ±16 Elo interval).
+**SPRT paid for itself on the first use.** The fixed-N estimate in the old
+version of this section was ~800 games for a ±16 Elo interval. The sequential
+test stopped at **136** — the effect was far larger than the +10 Elo H1 bound,
+so the log-likelihood ratio crossed almost as fast as it arithmetically could.
+That is roughly 5.9× fewer games, or about 37 hours of wall clock saved at this
+time control.
 
 ### 1.2 Correction: aspiration windows are NOT the problem
 
@@ -541,10 +561,29 @@ not establish a regression at 95% confidence. What it does establish is that
 the heuristics are **not** buying strength at equal depth: 113 of 200 games
 were drawn, and the point estimate sits 30 Elo down.
 
-Resolving it properly needs roughly 800 games (the interval narrows with the
-square root of the sample, so 4× the games halves it to about ±16). At ~7.7 s
-per game that is a little under two hours:
+**Superseded — keep both numbers side by side.** The same comparison run
+time-equalized at 3 s/move (`./tests/match -n 400 -t 3000 --sprt`):
 
 ```
-./tests/match 400 4 20260810
+games   : 136  (W 69 / D 50 / L 17)
+score   : 69.1%
+Elo     : +140   95% CI [+94, +191]
+wall    : 27 505 s
+LLR     : +2.96  (bounds -2.94 / 2.94)   H1 accepted
 ```
+
+Same code, same heuristics, same opponent — **−30 Elo at fixed depth 4, +140 Elo
+at equal time.** A 170 Elo swing produced entirely by the choice of measurement
+regime. This pair is the most useful thing in this file: it is the concrete
+answer to "does it matter which depth I benchmark at?"
+
+Draw rate fell from 56.5% to 36.8%, because the stronger side now converts
+rather than shuffling. That is the opposite of the drift predicted when this
+section assumed the comparison would stay at fixed depth.
+
+Both Phase 1 gates, for reference:
+
+| gate | comparison | result | games |
+|---|---|---|---|
+| 1.4 | depth 8 vs depth 5 | **+246** Elo [+151, +390] | — |
+| 1.5 | heuristics on vs off @3 s | **+140** Elo [+94, +191] | 136 (SPRT) |

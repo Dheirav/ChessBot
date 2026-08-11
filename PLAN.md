@@ -172,9 +172,16 @@ and it carries a `STATUS:` block saying so.
 This is the top of the backlog (§0 items 1–3). Nothing in this repo currently
 spends the speedup. Expect one to two sessions, plus unattended match time.
 
-**Status: code complete (1.1, 1.2, 1.3). The two gates, 1.4 and 1.5, have not
-been run** — they are hours of match wall-clock and were deliberately left for
-a supervised run. Exact commands are at the bottom of this file.
+**Status: COMPLETE.** Code (1.1, 1.2, 1.3) and both gates:
+
+| gate | comparison | result |
+|---|---|---|
+| 1.4 | depth 8 vs depth 5 | **+246** Elo [+151, +390] |
+| 1.5 | heuristics on vs off @3 s/move | **+140** Elo [+94, +191], SPRT H1 in 136 games |
+
+Both large, both positive, both in the predicted direction. The premise this
+plan was built on — a fast engine with nothing configured to spend the speed —
+is confirmed.
 
 **1.1 Real time control in the search** (§5.1)
 Replace the `maxDepth`-only signature with a limits struct:
@@ -226,17 +233,27 @@ backlog predicts a rout; if it is not, something in 1.1 is wrong and everything
 downstream is measured on a broken instrument. **Treat a non-rout as a stop
 condition.**
 
-**1.5 Settle the heuristics question** (§1.1 — the session's open question)
-Time-equalized SPRT match, heuristics on vs. off, at a budget corresponding to
-depth 8–9 (~3 s/move). The old −30 Elo figure was measured at depth 4, where the
-heuristics deliver 1.31× of their eventual 20–31×; it answered a question nobody
-asked. Expect a large positive result. Record it in `BACKLOG.md §7` and delete
-the "still unanswered" framing in §1.1.
-*Also record:* §1.2 is already settled — aspiration windows stay on (+27% at
-depth 9, +46% at depth 10). No further work there.
+**1.5 Settle the heuristics question** (§1.1) — **DONE: +140 Elo**
+Time-equalized SPRT match, heuristics on vs. off, 3 s/move:
+`games 136 (W 69 / D 50 / L 17), 69.1%, Elo +140 [+94, +191], LLR +2.96, H1
+accepted, wall 27 505 s.` The heuristics stay on; §1.1 is closed.
 
-**Exit criteria:** engine plays to a clock; §1.1, §1.3, §1.4 closed in the
-backlog with measured numbers.
+Two things worth carrying forward:
+
+- **The prediction held, and the magnitude is the point.** Same code, same
+  opponent: **−30 Elo at fixed depth 4, +140 Elo at equal time.** A 170 Elo
+  swing from the measurement regime alone. Recorded side by side in
+  `BACKLOG.md §7` as the concrete answer to "does the benchmark depth matter?"
+- **SPRT paid for itself immediately.** The fixed-N plan was ~800 games for a
+  ±16 Elo interval; the sequential test stopped at 136, because the true effect
+  was 14× the +10 Elo H1 bound. ~5.9× fewer games, ~37 hours of wall clock saved
+  on this one gate — and Phase 3 has six more.
+
+*Already settled, no work needed:* §1.2 — aspiration windows stay on (+27% at
+depth 9, +46% at depth 10).
+
+**Exit criteria: met.** Engine plays to a clock; §1.1, §1.3, §1.4 all closed in
+the backlog with measured numbers.
 
 ---
 
@@ -279,7 +296,8 @@ margin). Bounds worst-case node counts and is close to free in strength.
 **3.2 Static Exchange Evaluation** (§5.2 — biggest single win available)
 *Status: implemented and unit-tested (`make test-see`, 13 hand-computed
 positions). NOT yet wired into the search — that changes the tree and needs a
-match, so it is queued behind 1.5.*
+match. **1.5 has now cleared, so this is unblocked and is the next thing to
+do.***
 
 *Also done, and a prerequisite for every gate below:* search options now have
 names (`setSearchOption`), and the match harness takes `--optA`/`--optB` to set
@@ -409,15 +427,15 @@ incremental material/PST updates (§4.3, ~1 µs against real drift risk).
 | Phase | Content | Gate to advance |
 |---|---|---|
 | 0 | Safety nets, deletions, **negamax**, CI | tests green; bench identical across 0.9 |
-| 1 | Time control, depth, match TC + SPRT | 1.4 is a rout; 1.1/1.3/1.4 closed |
+| 1 | Time control, depth, match TC + SPRT | ✅ 1.4 +246 Elo, 1.5 +140 Elo |
 | 2 | UCI | cutechess-cli self-play completes clean |
 | 3 | Qsearch bound, SEE, extensions, pruning, IID, LMR | each SPRT-accepted |
 | 4 | tempo, real defence | evalref diff as expected + match |
 | 5 | TT eval cache → allocations → strings → lazy eval → pins | perft/evalref clean; match for 5.4 |
 
-**Done so far:** all of Phase 0, the code of Phase 1, and Phase 2. Six tests
-now run in CI: perft, gamestate, evalref, bench, timecontrol, UCI, plus a match
-smoke test. What remains before Phase 3 is measurement, not code.
+**Done so far:** Phases 0, 1 (code **and** both gates) and 2. Six tests now run
+in CI: perft, gamestate, evalref, bench, timecontrol, UCI, plus a match smoke
+test. **Phase 3 is unblocked**, starting with wiring in the already-written SEE.
 
 Phases 0 and 1 are where nearly all the available strength is. Phase 5 in total
 is worth less than raising the default depth in 1.2. Phase 0 buys no strength at
@@ -437,34 +455,37 @@ all — it buys the ability to tell whether anything after it worked.
 
 ---
 
-## Queued: the two Phase 1 gates
+## The two Phase 1 gates — both cleared
 
-Both are hours of wall clock, so they were not run unattended. Run them in that
-order — 1.4 is a stop condition for everything after it.
-
-**1.4 — does the depth raise pay?** The new defaults against the old depth-5
-ones, both with heuristics on. The backlog predicts a rout.
+**1.4 — does the depth raise pay?** New defaults vs. the old depth-5 ones.
 
 ```
 ./tests/match -n 150 --ha on --hb on --da 8 --db 5 --sprt --elo0 0 --elo1 20
+→ +246 Elo [+151, +390].  H1 accepted.
 ```
 
-Expect SPRT to accept H1 quickly. **If it does not, stop.** A depth-8 engine
-that cannot beat a depth-5 one means the search, the harness or the evaluation
-is broken, and every measurement after this point would be meaningless.
-
-**1.5 — are the search heuristics worth it?** The question BACKLOG.md §1.1
-left open. Time-equalized at a budget corresponding to depth 8–9, where the
-heuristics are ~20–31× faster rather than the 1.31× they get at depth 4.
+**1.5 — are the search heuristics worth it?** Time-equalized at 3 s/move, the
+regime where the heuristics are ~20–31× faster rather than the 1.31× they get at
+depth 4.
 
 ```
 ./tests/match -n 400 -t 3000 --sprt
+→ 136 games (W 69 / D 50 / L 17), 69.1%, +140 Elo [+94, +191]
+  LLR +2.96, H1 accepted, wall 27 505 s.
 ```
 
-The old −30 Elo figure was measured at depth 4 and answered a question nobody
-asked. Expect a large positive result. Record whatever comes out in
-`BACKLOG.md §7` and rewrite §1.1 — it is no longer an open question either way
-once this runs.
+Both stopped well short of their game counts — SPRT ends as soon as the evidence
+is conclusive, and 1.5 needed 136 games where the fixed-N plan wanted ~800.
 
-Both print a running LLR and stop as soon as the evidence is conclusive, so
-they will usually finish well short of the game count given.
+## Running a Phase 3 gate
+
+Same shape, against the current build rather than a disabled-heuristics one.
+Each feature gets its own `SearchOptions` toggle so A and B differ by exactly
+one thing:
+
+```
+./tests/match -n 400 -t 3000 --sprt --oa <feature>=on --ob <feature>=off
+```
+
+Keep `-t 3000`. Changing the time control between gates makes the results
+incomparable, and 1.5 is the standing demonstration of what that costs.
