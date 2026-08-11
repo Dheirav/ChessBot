@@ -5,7 +5,7 @@
 ChessBot is a local C++ chess application with an SFML-based graphical interface and a built-in chess engine. The current codebase focuses on a playable desktop experience rather than a standalone engine protocol such as UCI.
 
 It includes:
-- A full chess board with drag-and-drop move input
+- A full chess board with click-to-move and drag-and-drop input
 - A search-based engine using alpha-beta pruning and a transposition table
 - Move generation for normal moves, castling, en passant, and promotion
 - Undo/redo support, resignation, and engine-interrupt controls
@@ -38,14 +38,20 @@ That produces an executable named `chessbot` in the project root.
 ./chessbot
 ```
 
-When the program starts, it asks which side you want to play. The GUI opens and you can make moves against the engine.
+The window opens and asks which side you want to play; pick one and the game starts against the engine.
 
 ## Controls
-- Drag and drop pieces to make moves
-- Ctrl+Z: undo the last move
+- Click a piece, then click one of its highlighted squares, to make a move
+- Or drag and drop a piece onto its destination
+- Clicking an empty square or an illegal destination clears the selection
+- Promotions open a dialog on the board: click a piece, or press Q, R, B or N.
+  Escape or a click outside the dialog cancels the move
+- Ctrl+Z: undo the last move (this also revives a finished game)
 - Ctrl+Y: redo a move
-- R: resign the current game
+- R, twice: resign the current game. The first press asks; any other key cancels
 - ESC: interrupt the engine while it is thinking
+
+The window is resizable: the board and panel scale together and stay centred.
 
 ## Features and design
 ChessBot is structured around a clean separation between the game layer, the engine, and the UI:

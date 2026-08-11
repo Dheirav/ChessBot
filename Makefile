@@ -37,7 +37,10 @@ $(EXEC): $(OBJ)
 ENGINE_SRC = $(wildcard src/engine/*.cpp)
 # game_manager has no GUI dependency, so game-state tests link without SFML too.
 GM_SRC = src/game_manager.cpp
-TESTS = tests/perft tests/match tests/gamestate tests/evalref tests/bench tests/timecontrol tests/see_test tests/bitboard_test
+# The GUI sources, for the input test. It links SFML for the types the GUI is
+# written in, but never opens a window.
+GUI_SRC = $(wildcard src/gui/*.cpp)
+TESTS = tests/perft tests/match tests/gamestate tests/evalref tests/bench tests/timecontrol tests/see_test tests/bitboard_test tests/guiinput
 
 # perft guards move generation: leaf counts must match published references.
 tests/perft: tests/perft.cpp $(ENGINE_SRC)
@@ -71,6 +74,13 @@ tests/see_test: tests/see_test.cpp $(ENGINE_SRC)
 # attack, checker and pin queries against the mailbox engine.
 tests/bitboard_test: tests/bitboard_test.cpp $(ENGINE_SRC)
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
+
+# guiinput drives the board input state machine headlessly: click-to-move,
+# drag-and-drop, and the promotion dialog's hitboxes. The dialog's hitboxes and
+# its drawing were computed separately once, and drifted apart the moment the
+# side panel widened the window; this pins them to the same geometry.
+tests/guiinput: tests/guiinput.cpp $(ENGINE_SRC) $(GM_SRC) $(GUI_SRC)
+	$(CXX) $(CXXFLAGS) $^ -o $@ $(SFML_LIBS) $(LDFLAGS)
 
 tests: $(TESTS)
 
@@ -123,6 +133,10 @@ test-see: tests/see_test
 test-bitboard: tests/bitboard_test
 	./tests/bitboard_test
 
+# Check the board input: selecting, click-to-move, dragging, promotion clicks.
+test-guiinput: tests/guiinput
+	./tests/guiinput
+
 # Check the UCI protocol. Needs the main binary, since UCI is a mode of it.
 # A protocol bug is invisible to every other test here: the engine plays fine
 # through its own GUI while being undrivable by any external tool.
@@ -139,4 +153,4 @@ remake:
 	$(MAKE) all
 
 # Mark these targets as not actual files
-.PHONY: all clean remake tests test-perft test-match test-gamestate test-evalref evalref-regen bench test-bench bench-regen test-timecontrol test-see test-bitboard test-uci
+.PHONY: all clean remake tests test-perft test-match test-gamestate test-evalref evalref-regen bench test-bench bench-regen test-timecontrol test-see test-bitboard test-guiinput test-uci

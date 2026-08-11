@@ -98,9 +98,12 @@ void renderBoard(sf::RenderTarget& window, const Board& board, const std::map<st
                 }
             }
 
-            // Draw piece if present
+            // Draw piece if present. The square a drag started from is left
+            // empty: that piece is drawn under the cursor by drawDraggedPiece,
+            // and drawing it here too showed the same piece in two places at
+            // once for the whole drag.
             const Piece& piece = board.squares[squareIdx];
-            std::string name = pieceToString(piece);
+            std::string name = squareIdx == input.getDragSquare() ? "" : pieceToString(piece);
             if (!name.empty() && textures.count(name)) {
                 sf::Sprite sprite;
                 sprite.setTexture(textures.at(name));
@@ -232,6 +235,16 @@ void drawText(sf::RenderTarget& w, const std::string& s, float x, float y,
     w.draw(t);
 }
 
+// Same, positioned by its own width so it sits centred on centreX.
+void drawCentered(sf::RenderTarget& w, const std::string& s, float centreX, float y,
+                  unsigned size, sf::Color color, bool bold = false) {
+    sf::Text t(s, uiFont(), size);
+    t.setCharacterSize(size);
+    if (bold) t.setStyle(sf::Text::Bold);
+    const sf::FloatRect b = t.getLocalBounds();
+    drawText(w, s, centreX - (b.left + b.width) / 2.f, y, size, color, bold);
+}
+
 std::string stateLabel(const GameManager& game) {
     switch (game.getGameState()) {
         case GameState::GAME_OVER_CHECKMATE:   return "Checkmate";
@@ -358,5 +371,101 @@ void renderSidePanel(sf::RenderTarget& window, const GameManager& game,
         if (blackIdx < history.size())
             drawText(window, history[blackIdx].toString(), left + 130.f, y, 13, TEXT_MAIN);
         y += lineHeight;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Overlays
+// ---------------------------------------------------------------------------
+
+void renderGameOverBanner(sf::RenderTarget& window, const GameManager& game) {
+    if (!game.isGameOver()) return;
+
+    // Dim the board, not the panel: the panel is still live information (the
+    // move list, the final clocks) and dimming it makes it harder to read.
+    sf::RectangleShape dim(sf::Vector2f((float)BOARD_PIXELS, (float)BOARD_PIXELS));
+    dim.setFillColor(sf::Color(0, 0, 0, 120));
+    window.draw(dim);
+
+    const float boxH = 104.f;
+    const float boxY = ((float)BOARD_PIXELS - boxH) / 2.f;
+    sf::RectangleShape box(sf::Vector2f((float)BOARD_PIXELS - 56.f, boxH));
+    box.setPosition(28.f, boxY);
+    box.setFillColor(sf::Color(32, 30, 27, 244));
+    box.setOutlineColor(sf::Color(235, 170, 90));
+    box.setOutlineThickness(2.f);
+    window.draw(box);
+
+    const float centre = (float)BOARD_PIXELS / 2.f;
+    drawCentered(window, stateLabel(game), centre, boxY + 14.f, 26, sf::Color(235, 170, 90), true);
+    if (!game.getGameResult().empty()) {
+        drawCentered(window, game.getGameResult(), centre, boxY + 50.f, 16, TEXT_MAIN);
+    }
+    // Undo revives a finished game (see GameManager::undoLastMove), so this is
+    // a real offer rather than a description of the keymap.
+    drawCentered(window, "Ctrl+Z takes the move back", centre, boxY + 76.f, 12, TEXT_DIM);
+}
+
+void renderPrompt(sf::RenderTarget& window, const std::string& text) {
+    const float h = 34.f;
+    sf::RectangleShape strip(sf::Vector2f((float)BOARD_PIXELS, h));
+    strip.setPosition(0.f, (float)BOARD_PIXELS - h);
+    strip.setFillColor(sf::Color(18, 16, 14, 230));
+    window.draw(strip);
+    drawCentered(window, text, (float)BOARD_PIXELS / 2.f, (float)BOARD_PIXELS - h + 8.f,
+                 15, sf::Color(245, 220, 150), true);
+}
+
+void renderSideChooser(sf::RenderTarget& window,
+                       const std::map<std::string, sf::Texture>& textures,
+                       const sf::Vector2f& buttonSize,
+                       const sf::Vector2f& whitePos,
+                       const sf::Vector2f& blackPos,
+                       const sf::Vector2f& mouse) {
+    const float centre = (float)WINDOW_WIDTH / 2.f;
+    drawCentered(window, "ChessBot", centre, 96.f, 40, TEXT_MAIN, true);
+    drawCentered(window, "Which side would you like to play?", centre, 146.f, 16, TEXT_DIM);
+
+    struct Option { const sf::Vector2f& pos; const char* label; const char* key; const char* texture; };
+    const Option options[2] = {
+        {whitePos, "Play as White", "W", "wK"},
+        {blackPos, "Play as Black", "B", "bK"},
+    };
+
+    for (const Option& o : options) {
+        const bool hovered = mouse.x >= o.pos.x && mouse.x <= o.pos.x + buttonSize.x &&
+                             mouse.y >= o.pos.y && mouse.y <= o.pos.y + buttonSize.y;
+
+        sf::RectangleShape box(buttonSize);
+        box.setPosition(o.pos);
+        box.setFillColor(hovered ? sf::Color(58, 56, 52) : sf::Color(46, 44, 41));
+        box.setOutlineColor(hovered ? ACCENT : sf::Color(70, 68, 63));
+        box.setOutlineThickness(2.f);
+        window.draw(box);
+
+        // The king of that colour, so the choice reads without the label. It
+        // stands on a board-coloured tile: the black king is nearly invisible
+        // against the panel's own dark grey.
+        if (textures.count(o.texture)) {
+            const sf::Texture& tex = textures.at(o.texture);
+            const float pieceSize = 64.f;
+            const float px = o.pos.x + (buttonSize.x - pieceSize) / 2.f;
+            const float py = o.pos.y + 14.f;
+
+            sf::RectangleShape tile(sf::Vector2f(pieceSize, pieceSize));
+            tile.setPosition(px, py);
+            tile.setFillColor(sf::Color(239, 208, 157));
+            window.draw(tile);
+
+            sf::Sprite sprite;
+            sprite.setTexture(tex);
+            sprite.setScale(pieceSize / tex.getSize().x, pieceSize / tex.getSize().y);
+            sprite.setPosition(px, py);
+            window.draw(sprite);
+        }
+
+        const float cx = o.pos.x + buttonSize.x / 2.f;
+        drawCentered(window, o.label, cx, o.pos.y + 84.f, 16, hovered ? TEXT_MAIN : TEXT_DIM, hovered);
+        drawCentered(window, std::string("press ") + o.key, cx, o.pos.y + 106.f, 11, TEXT_DIM);
     }
 }

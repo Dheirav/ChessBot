@@ -41,7 +41,7 @@ int main(int argc, char** argv) {
 
     // Create game manager with the engine
     GameManager gameManager(std::move(engine));
-    
+
     // Initialize the game
     gameManager.initializeGame();
     
@@ -57,10 +57,11 @@ int main(int argc, char** argv) {
     
     std::cout << "Game started! Use mouse to make moves." << std::endl;
     std::cout << "Controls:" << std::endl;
-    std::cout << "  - Drag and drop pieces to move" << std::endl;
+    std::cout << "  - Click a piece, then click a highlighted square (or drag it there)" << std::endl;
+    std::cout << "  - Q/R/B/N: choose the piece when promoting (Esc cancels)" << std::endl;
     std::cout << "  - Ctrl+Z: Undo move" << std::endl;
     std::cout << "  - Ctrl+Y: Redo move" << std::endl;
-    std::cout << "  - R: Resign game" << std::endl;
+    std::cout << "  - R, twice: Resign game" << std::endl;
     std::cout << "  - ESC: Interrupt engine thinking" << std::endl;
     std::cout << "Engine: " << gameManager.getEngineName() << " with Transposition Table" << std::endl;
     

@@ -30,3 +30,20 @@ void renderBoard(sf::RenderTarget& window, const Board& board,
 // The right-hand panel: status, clocks, live search readout and move list.
 void renderSidePanel(sf::RenderTarget& window, const GameManager& game,
                      long whiteClockMs, long blackClockMs);
+
+// A banner across the board once the game is finished. The result was reported
+// to stdout only, which is not where someone playing in the window is looking.
+void renderGameOverBanner(sf::RenderTarget& window, const GameManager& game);
+
+// A one-line prompt across the foot of the board, for a question the GUI needs
+// answered before it acts (currently only the resign confirmation).
+void renderPrompt(sf::RenderTarget& window, const std::string& text);
+
+// The pre-game "which side do you want?" screen. mouse is in layout
+// coordinates, or negative when the cursor has not been over the window yet.
+void renderSideChooser(sf::RenderTarget& window,
+                       const std::map<std::string, sf::Texture>& textures,
+                       const sf::Vector2f& buttonSize,
+                       const sf::Vector2f& whitePos,
+                       const sf::Vector2f& blackPos,
+                       const sf::Vector2f& mouse);

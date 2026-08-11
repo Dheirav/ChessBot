@@ -1,198 +1,182 @@
 #include "input.hpp"
 #include "engine/movegen.hpp"
 #include "constants.hpp"
-#include <cctype>
-#include <iostream>
+#include "renderer.hpp"
 
 Input::Input()
-    : dragging(false), dragStartX(-1), dragStartY(-1), draggedPiece(), mousePos(0, 0),
-      promotionActive(false), promotionFromSquare(-1), promotionToSquare(-1) {}
+    : dragging(false), dragFromSquare(-1), draggedPiece(), mousePos(0, 0),
+      promotionActive(false) {}
 
-void Input::handleEvent(const sf::Event& event, Board& board) {
-    // Handle promotion selection clicks first
-    if (promotionActive && event.type == sf::Event::MouseButtonPressed && event.mouseButton.button == sf::Mouse::Left) {
-        int x = event.mouseButton.x;
-        int y = event.mouseButton.y;
-        
-        // Check if click is within promotion dialog area - use same centering as drawing
-        int pieceSize = 80;
-        int spacing = 10;
-        int dialogWidth = 4 * pieceSize + 3 * spacing + 20;
-        int dialogHeight = pieceSize + 40;
-        
-        // Use actual window size
-        int windowWidth = TILE_SIZE * BOARD_SIZE;
-        int windowHeight = TILE_SIZE * BOARD_SIZE;
-        
-        int dialogX = (windowWidth - dialogWidth) / 2;
-        int dialogY = (windowHeight - dialogHeight) / 2;
-        
-        for (int i = 0; i < 4; i++) {
-            int pieceX = dialogX + 10 + (pieceSize + spacing) * i;
-            int pieceY = dialogY + 30;
-            
-            if (x >= pieceX && x <= pieceX + pieceSize && y >= pieceY && y <= pieceY + pieceSize) {
-                // Clicked on promotion piece
-                PieceType selectedType;
-                switch (i) {
-                    case 0: selectedType = QUEEN; break;
-                    case 1: selectedType = ROOK; break;
-                    case 2: selectedType = BISHOP; break;
-                    case 3: selectedType = KNIGHT; break;
-                    default: selectedType = QUEEN; break;
-                }
-                
-                // Find the matching promotion move
-                for (const Move& move : promotionMoves) {
-                    if (move.promotionPiece.type() == selectedType) {
-                        completedMove = move;
-                        moveCompleted = true;
-                        break;
-                    }
-                }
-                
-                // Clear promotion state
-                promotionActive = false;
-                promotionMoves.clear();
-                selectedSquare = -1;
-                highlightedSquares.clear();
-                return;
+// Clears everything tied to the currently selected piece. The board is never
+// modified while a piece is selected or dragged, so dropping the UI state is
+// all that "cancel" means here.
+void Input::clearSelection() {
+    selectedSquare = -1;
+    highlightedSquares.clear();
+    legalMoves.clear();
+    dragging = false;
+}
+
+// Selects a square and caches the legal moves leaving it, which both the
+// highlights and the move-completion path read.
+void Input::selectSquare(int idx, const Board& board) {
+    selectedSquare = idx;
+    highlightedSquares.clear();
+    legalMoves.clear();
+    MoveList moves = generateLegalMoves(board, board.activeColor);
+    for (const Move& m : moves) {
+        if (m.from == idx) {
+            highlightedSquares.push_back(m.to);
+            legalMoves.push_back(m);
+        }
+    }
+}
+
+// Commits selectedSquare -> to if that is legal, or opens the promotion dialog
+// when the destination needs a piece chosen. Returns false when the pair is not
+// a legal move, so the caller can treat the click as something else.
+bool Input::tryMove(int from, int to, const Board& board) {
+    std::vector<Move> promotions;
+    for (const Move& m : legalMoves) {
+        if (m.from != from || m.to != to) continue;
+        if (m.flag == PROMOTION) {
+            promotions.push_back(m);
+            continue;
+        }
+        completedMove = m;
+        moveCompleted = true;
+        clearSelection();
+        return true;
+    }
+
+    if (!promotions.empty()) {
+        // Hold the move open until a piece is picked. Selection state stays as
+        // it is; the dialog handler clears it once the choice is made.
+        promotionActive = true;
+        promotionColor = board.squares[from].color();
+        promotionMoves = promotions;
+        dragging = false;
+        return true;
+    }
+    return false;
+}
+
+// The promotion options, in the order they are drawn and hit-tested.
+const PieceType Input::PROMOTION_TYPES[4] = {QUEEN, ROOK, BISHOP, KNIGHT};
+
+// Closes the dialog, playing option i (-1 cancels). The board was never
+// modified — the pawn is still on its original square — so cancelling only has
+// to drop the UI state.
+void Input::finishPromotion(int option) {
+    if (option >= 0) {
+        for (const Move& move : promotionMoves) {
+            if (move.promotionPiece.type() == PROMOTION_TYPES[option]) {
+                completedMove = move;
+                moveCompleted = true;
+                break;
             }
         }
-        
-        // Clicked outside promotion dialog - cancel promotion.
-        // The board was never modified during the drag (the pawn is still on
-        // its original square), so only the UI state needs to be cleared.
-        promotionActive = false;
-        promotionMoves.clear();
-        selectedSquare = -1;
-        highlightedSquares.clear();
-        legalMoves.clear();
-        return;
     }
-    
-    // Don't handle other events while promotion is active
+    promotionActive = false;
+    promotionMoves.clear();
+    promotionHover = -1;
+    clearSelection();
+}
+
+void Input::handleEvent(const sf::Event& event, Board& board) {
     if (promotionActive) {
+        // A click picks the option under the cursor, or cancels if it lands
+        // outside the dialog. Hitboxes come from the same helper the dialog is
+        // drawn with, so the two cannot drift apart.
+        if (event.type == sf::Event::MouseButtonPressed && event.mouseButton.button == sf::Mouse::Left) {
+            finishPromotion(promotionOptionAt(event.mouseButton.x, event.mouseButton.y));
+            return;
+        }
+        // Keys, for anyone who would rather not aim: the piece letters choose,
+        // Escape cancels.
+        if (event.type == sf::Event::KeyPressed) {
+            switch (event.key.code) {
+                case sf::Keyboard::Q: finishPromotion(0); break;
+                case sf::Keyboard::R: finishPromotion(1); break;
+                case sf::Keyboard::B: finishPromotion(2); break;
+                case sf::Keyboard::N: finishPromotion(3); break;
+                case sf::Keyboard::Escape: finishPromotion(-1); break;
+                default: break;
+            }
+            return;
+        }
+        // Track the cursor so the dialog can show which option it is over.
+        if (event.type == sf::Event::MouseMoved) {
+            mousePos = {event.mouseMove.x, event.mouseMove.y};
+            promotionHover = promotionOptionAt(mousePos.x, mousePos.y);
+        }
+        // Everything else — board clicks especially — is ignored while the
+        // dialog owns the input.
         return;
     }
 
     if (event.type == sf::Event::MouseButtonPressed && event.mouseButton.button == sf::Mouse::Left) {
         // Bounds-check pixel coordinates before touching board.squares: the
-        // window is resizable, and negative coords truncate toward zero.
+        // click may land on the side panel, and negative coords truncate
+        // toward zero.
         int px = event.mouseButton.x;
         int py = event.mouseButton.y;
         int x = px / TILE_SIZE;
         int y = py / TILE_SIZE;
-        if (px >= 0 && py >= 0 && x < BOARD_SIZE && y < BOARD_SIZE) {
+        if (px < 0 || py < 0 || x >= BOARD_SIZE || y >= BOARD_SIZE) {
+            // Clicked off the board (panel or outside): keep the selection.
+            return;
+        }
         int idx = screenToSquare(x, y, flipped);
+
+        // Click-to-move: with a piece already selected, a click on one of its
+        // destinations plays the move. This runs before the selection logic so
+        // that captures work — the destination holds an enemy piece, which the
+        // selection branch below would otherwise just ignore.
+        if (selectedSquare != -1 && idx != selectedSquare && tryMove(selectedSquare, idx, board)) {
+            return;
+        }
+
         const Piece& piece = board.squares[idx];
-        if (piece.type() != NONE) {
-            if (piece.color() == board.activeColor) {
-                if (selectedSquare != idx) {
-                    selectedSquare = idx;
-                    highlightedSquares.clear();
-                    legalMoves.clear();
-                    MoveList moves = generateLegalMoves(board, board.activeColor);
-                    std::cout << "All generated moves for side " << board.activeColor << ": ";
-                    for (const Move& m : moves) {
-                        std::cout << "(" << m.from << "," << m.to << ") ";
-                    }
-                    std::cout << std::endl;
-                    for (const Move& m : moves) {
-                        if (m.from == idx && idx >= 0 && idx < 64) {
-                            highlightedSquares.push_back(m.to);
-                            legalMoves.push_back(m);
-                        }
-                    }
-                    std::cout << "Selected square: " << idx << ", possible moves: ";
-                    for (int to : highlightedSquares) std::cout << to << " ";
-                    std::cout << std::endl;
-                }
-                dragging = false;
-            } else {
-                // Clicked on opponent's piece or empty square: do nothing, keep highlight
+        if (piece.type() != NONE && piece.color() == board.activeColor) {
+            // Own piece: select it (or keep it selected) and arm a drag, so
+            // click-click and drag-and-drop both work from the same press.
+            if (selectedSquare != idx) {
+                selectSquare(idx, board);
             }
+            dragging = true;
+            dragFromSquare = idx;
+            draggedPiece = piece;
         } else {
-            // Clicked on empty square: do nothing, keep highlight
+            // Empty square, enemy piece, or an illegal destination: deselect.
+            clearSelection();
         }
-        } else {
-            // Clicked outside the board: do nothing, keep highlight
-        }
+        return;
     }
-    // Start dragging if a piece is selected and mouse is pressed again on it
-    if (event.type == sf::Event::MouseButtonPressed && event.mouseButton.button == sf::Mouse::Left && selectedSquare != -1) {
-        int px = event.mouseButton.x;
-        int py = event.mouseButton.y;
-        int x = px / TILE_SIZE;
-        int y = py / TILE_SIZE;
-        if (px >= 0 && py >= 0 && x < BOARD_SIZE && y < BOARD_SIZE) {
-            int idx = screenToSquare(x, y, flipped);
-            if (idx == selectedSquare) {
-                dragging = true;
-                dragStartX = x;
-                dragStartY = y;
-                draggedPiece = board.squares[idx];
-            }
-        }
-    }
+
     // Handle drop
     if (event.type == sf::Event::MouseButtonReleased && event.mouseButton.button == sf::Mouse::Left && dragging) {
+        dragging = false;
         int px = event.mouseButton.x;
         int py = event.mouseButton.y;
         int x = px / TILE_SIZE;
         int y = py / TILE_SIZE;
         // Releases outside the window can arrive during a mouse grab; a drop
-        // off the board just cancels the drag (the board was never modified).
+        // off the board just cancels the drag and keeps the piece selected.
         if (px < 0 || py < 0 || x >= BOARD_SIZE || y >= BOARD_SIZE) {
-            dragging = false;
             return;
         }
-        int from = screenToSquare(dragStartX, dragStartY, flipped);
+        int from = dragFromSquare;
         int to = screenToSquare(x, y, flipped);
+        // A release on the square the drag started from is a plain click: the
+        // piece stays selected so the next click can name its destination.
+        // Anything else is a drop; an illegal one leaves the selection alone.
         if (from != to) {
-            // Check if this is a promotion move
-            bool found = false;
-            bool isPromotionMove = false;
-            std::vector<Move> possiblePromotions;
-            
-            for (const Move& m : legalMoves) {
-                if (m.from == from && m.to == to) {
-                    if (m.flag == PROMOTION) {
-                        isPromotionMove = true;
-                        possiblePromotions.push_back(m);
-                    } else {
-                        // Non-promotion move
-                        completedMove = m;
-                        moveCompleted = true;
-                        found = true;
-                        break;
-                    }
-                }
-            }
-            
-            if (isPromotionMove && !possiblePromotions.empty()) {
-                // Start promotion selection
-                promotionActive = true;
-                promotionFromSquare = from;
-                promotionToSquare = to;
-                promotionColor = board.squares[from].color();
-                promotionMoves = possiblePromotions;
-                found = true; // Don't reset the piece position
-            }
-            
-            if (!found) {
-                // Not a legal move, reset piece
-                board.squares[from] = draggedPiece;
-            } else if (!isPromotionMove) {
-                // After a move, clear selection and highlights
-                selectedSquare = -1;
-                highlightedSquares.clear();
-            }
-        } else {
-            board.squares[from] = draggedPiece;
+            tryMove(from, to, board);
         }
-        dragging = false;
+        return;
     }
+
     if (event.type == sf::Event::MouseMoved) {
         mousePos = {event.mouseMove.x, event.mouseMove.y};
     }
@@ -253,55 +237,52 @@ bool Input::isPromotionActive() const {
 void Input::drawPromotionDialog(sf::RenderTarget& window, const std::map<std::string, sf::Texture>& textures) const {
     if (!promotionActive) return;
     
-    // Draw semi-transparent overlay
-    sf::RectangleShape overlay(sf::Vector2f(window.getSize().x, window.getSize().y));
+    // Dim the board only. The dialog is anchored to the board, not the window,
+    // because that is the coordinate space the clicks are tested in.
+    sf::RectangleShape overlay(sf::Vector2f(BOARD_PIXELS, BOARD_PIXELS));
     overlay.setFillColor(sf::Color(0, 0, 0, 128));
     window.draw(overlay);
-    
-    // Draw dialog background - center it on the screen
-    int pieceSize = 80;
-    int spacing = 10;
-    int dialogWidth = 4 * pieceSize + 3 * spacing + 20; // 4 pieces + 3 gaps + padding
-    int dialogHeight = pieceSize + 40; // piece height + title space
-    
-    int dialogX = (window.getSize().x - dialogWidth) / 2;
-    int dialogY = (window.getSize().y - dialogHeight) / 2;
-    
-    sf::RectangleShape dialogBg(sf::Vector2f(dialogWidth, dialogHeight));
+
+    const int dialogX = PROMO_DIALOG_X;
+    const int dialogY = PROMO_DIALOG_Y;
+    const int dialogWidth = PROMO_DIALOG_W;
+
+    sf::RectangleShape dialogBg(sf::Vector2f(PROMO_DIALOG_W, PROMO_DIALOG_H));
     dialogBg.setPosition(dialogX, dialogY);
     dialogBg.setFillColor(sf::Color(240, 217, 181));
     dialogBg.setOutlineColor(sf::Color(139, 69, 19));
     dialogBg.setOutlineThickness(3);
     window.draw(dialogBg);
     
-    // Draw title text
-    sf::Font font;
-    if (font.loadFromFile("src/gui/assets/fonts/arial.ttf")) {
-        sf::Text titleText("Choose promotion piece:", font, 16);
+    // Draw title text, in the font the rest of the UI already loaded once
+    {
+        sf::Text titleText("Choose promotion piece  (Q R B N, Esc to cancel)", uiFont(), 14);
         titleText.setFillColor(sf::Color::Black);
         // Center the title text
         sf::FloatRect textBounds = titleText.getLocalBounds();
         titleText.setPosition(dialogX + (dialogWidth - textBounds.width) / 2, dialogY + 5);
         window.draw(titleText);
     }
-    
+
     // Draw promotion piece options
-    PieceType promotionTypes[] = {QUEEN, ROOK, BISHOP, KNIGHT};
-    
     for (int i = 0; i < 4; i++) {
-        int pieceX = dialogX + 10 + (pieceSize + spacing) * i; // 10px padding from dialog edge
-        int pieceY = dialogY + 30; // Below the title
-        
-        // Draw background for piece
+        int pieceX, pieceY;
+        promotionOptionPos(i, pieceX, pieceY);
+        const int pieceSize = PROMO_PIECE_SIZE;
+        const bool hovered = (i == promotionHover);
+
+        // Draw background for piece. The hovered option lights up, so it is
+        // clear which one a click will take before the click is spent.
         sf::RectangleShape pieceBg(sf::Vector2f(pieceSize, pieceSize));
         pieceBg.setPosition(pieceX, pieceY);
-        pieceBg.setFillColor(sf::Color(255, 255, 255, 200));
-        pieceBg.setOutlineColor(sf::Color::Black);
-        pieceBg.setOutlineThickness(2);
+        pieceBg.setFillColor(hovered ? sf::Color(255, 246, 200, 255)
+                                     : sf::Color(255, 255, 255, 200));
+        pieceBg.setOutlineColor(hovered ? sf::Color(0, 160, 210) : sf::Color::Black);
+        pieceBg.setOutlineThickness(hovered ? 3.f : 2.f);
         window.draw(pieceBg);
-        
+
         // Draw piece
-        Piece promotionPiece(promotionColor, promotionTypes[i]);
+        Piece promotionPiece(promotionColor, PROMOTION_TYPES[i]);
         std::string textureName = pieceToString(promotionPiece);
         
         if (!textureName.empty() && textures.count(textureName)) {

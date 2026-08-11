@@ -26,7 +26,9 @@ private:
     
     // GUI state
     bool isRunning;
-    
+    // Resigning takes two presses of R; this is whether the first has landed.
+    bool resignArmed = false;
+
 public:
     GUIManager();
     ~GUIManager();
@@ -49,6 +51,12 @@ public:
     
 private:
     bool loadResources();
+    // Keeps the fixed WINDOW_WIDTH x WINDOW_HEIGHT layout centred and
+    // aspect-correct inside a window the user may have resized.
+    void applyLetterboxView(unsigned width, unsigned height);
+    // A copy of the event with mouse coordinates translated from window pixels
+    // into that layout, so nothing downstream has to know about the view.
+    sf::Event toLayoutCoords(const sf::Event& event) const;
     void handleMouseInput(const sf::Event& event);
     void tickClocks();
     void handleKeyboardInput(const sf::Event& event);
