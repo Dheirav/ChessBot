@@ -11,7 +11,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Only the GUI binary needs SFML; every test target links without it.
+      # The GUI binary needs SFML, and so does tests/guiinput, which drives the
+      # input state machine using SFML's event types (without opening a window).
+      # Every other test target links without it.
       - name: Install SFML
         run: sudo apt-get update && sudo apt-get install -y libsfml-dev
 
@@ -59,6 +61,17 @@ jobs:
       # The UCI protocol, which is how any external tool drives the engine.
       - name: UCI protocol
         run: make test-uci
+
+      # Board input: selection, click-to-move, dragging, and the promotion
+      # dialog's hitboxes against the geometry it is drawn with. Headless — it
+      # builds the frames' worth of state without opening a window.
+      - name: GUI input
+        run: make test-guiinput
+
+      # PGN export. SAN is unambiguous only if the writer does the
+      # disambiguation work, and a wrong spelling replays a different game.
+      - name: PGN export
+        run: make test-pgn
 
       # Not a strength measurement — just a check that the engine plays a legal
       # game end to end. Real matches are far too long for CI.
