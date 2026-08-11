@@ -143,6 +143,11 @@ test-guiinput: tests/guiinput
 test-uci: $(EXEC)
 	python3 tests/uci_smoke.py
 
+# Play on Lichess. Needs LICHESS_BOT_TOKEN in the environment and a lichess-bot
+# checkout (external, AGPL-3.0) — see lichess/README.md.
+lichess:
+	./lichess/run.sh
+
 # Clean up build files
 clean:
 	rm -f $(OBJ) $(DEP) $(EXEC) $(TESTS)
@@ -153,4 +158,4 @@ remake:
 	$(MAKE) all
 
 # Mark these targets as not actual files
-.PHONY: all clean remake tests test-perft test-match test-gamestate test-evalref evalref-regen bench test-bench bench-regen test-timecontrol test-see test-bitboard test-guiinput test-uci
+.PHONY: all clean remake lichess tests test-perft test-match test-gamestate test-evalref evalref-regen bench test-bench bench-regen test-timecontrol test-see test-bitboard test-guiinput test-uci

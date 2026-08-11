@@ -2,7 +2,7 @@
 # ChessBot
 
 ## Overview
-ChessBot is a local C++ chess application with an SFML-based graphical interface and a built-in chess engine. The current codebase focuses on a playable desktop experience rather than a standalone engine protocol such as UCI.
+ChessBot is a local C++ chess application with an SFML-based graphical interface and a built-in chess engine. It plays in its own window, and also speaks UCI (`./chessbot --uci`), so it can be driven by standard chess tooling or put online as a Lichess bot.
 
 It includes:
 - A full chess board with click-to-move and drag-and-drop input
@@ -52,6 +52,12 @@ The window opens and asks which side you want to play; pick one and the game sta
 - ESC: interrupt the engine while it is thinking
 
 The window is resizable: the board and panel scale together and stay centred.
+
+## Playing online
+
+The engine speaks UCI, so it can play on Lichess as a bot account against other
+bots and humans. See [`lichess/README.md`](lichess/README.md); the short version
+is a token in the environment and `./lichess/run.sh`.
 
 ## Features and design
 ChessBot is structured around a clean separation between the game layer, the engine, and the UI:
