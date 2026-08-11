@@ -48,6 +48,8 @@ The window opens and asks which side you want to play; pick one and the game sta
   Escape or a click outside the dialog cancels the move
 - Ctrl+Z: undo the last move (this also revives a finished game)
 - Ctrl+Y: redo a move
+- Ctrl+S: save the game as PGN under `games/`, ready to paste into
+  Lichess analysis or open in any viewer
 - R, twice: resign the current game. The first press asks; any other key cancels
 - ESC: interrupt the engine while it is thinking
 
@@ -89,25 +91,33 @@ Several implementation details are aimed at making the engine faster and more pr
 - The engine can be interrupted mid-search, which keeps the interface responsive even when the search is still running.
 
 ## Configuration
-onl
-```ini
-searchDepth = 5
-transpositionTableSizeMB = 256
-```
+Settings are read from `chessbot.conf` in the working directory, if it exists.
+Every key is optional; missing ones keep the defaults in
+[src/config.hpp](src/config.hpp).
 
-Supported keys are `searchDepth` and `transpositionTableSizeMB`.
+```ini
+moveTimeMs = 3000               # wall-clock budget per move; 0 searches by depth alone
+searchDepth = 8                 # ceiling on iterative deepening (1..64)
+transpositionTableSizeMB = 256  # hash table size
+logEvaluations = off            # per-move evaluation dump, for debugging by hand
+```
 
 ## Project layout
 - [src/main.cpp](src/main.cpp) - application entry point and startup flow
 - [src/game_manager.hpp](src/game_manager.hpp) - game-state coordination between GUI and engine
 - [src/engine](src/engine) - board logic, move generation, evaluation, search, and hashing
 - [src/gui](src/gui) - SFML UI, input handling, rendering, and assets
-- [tests/legacy](tests/legacy) - older standalone test sources
+- [tests](tests) - the regression suite: perft, evaluation reference, search
+  signature, SEE, bitboards, game state, PGN and GUI input
+- [lichess](lichess) - configuration for playing online as a bot
 
 ## Development
 Useful maintenance commands:
 
 ```bash
+make            # build ./chessbot
+make tests      # build every test binary
+make test-pgn   # ...and any single one: test-perft, test-evalref, test-guiinput, ...
 make clean
 make remake
 ```

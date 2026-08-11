@@ -43,6 +43,7 @@ int main(int argc, char** argv) {
     GameManager gameManager(std::move(engine));
 
     // Initialize the game
+    gameManager.setEvaluationLogging(settings.logEvaluations);
     gameManager.initializeGame();
     
     // Connect GUI and game manager
@@ -61,6 +62,7 @@ int main(int argc, char** argv) {
     std::cout << "  - Q/R/B/N: choose the piece when promoting (Esc cancels)" << std::endl;
     std::cout << "  - Ctrl+Z: Undo move" << std::endl;
     std::cout << "  - Ctrl+Y: Redo move" << std::endl;
+    std::cout << "  - Ctrl+S: Save the game as PGN (games/)" << std::endl;
     std::cout << "  - R, twice: Resign game" << std::endl;
     std::cout << "  - ESC: Interrupt engine thinking" << std::endl;
     std::cout << "Engine: " << gameManager.getEngineName() << " with Transposition Table" << std::endl;

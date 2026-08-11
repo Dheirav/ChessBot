@@ -13,12 +13,14 @@
 //   move_time_ms                = <integer, 0 disables the clock>
 //   search_depth                = <1..64>
 //   transposition_table_size_mb = <integer>
+//   log_evaluations             = <on|off>
 //
 // Example chessbot.conf:
 //   # Engine settings
 //   moveTimeMs = 3000
 //   searchDepth = 8
 //   transpositionTableSizeMB = 256
+//   logEvaluations = off
 struct Settings {
     // Wall-clock budget per move. This, not searchDepth, is what normally ends
     // the engine's search: the same depth costs milliseconds in an endgame and
@@ -33,6 +35,15 @@ struct Settings {
     int searchDepth = 8;
 
     int transpositionTableSizeMB = 256;
+
+    // Dump every evaluation term, per move, to evaluation_log_<epoch>.txt.
+    //
+    // Off by default. It used to be unconditional, so every run of the app left
+    // a new file in whatever directory it was started from, and nothing read
+    // them: tests/evalref covers the same ground deliberately, over 24k
+    // positions with a stored reference to diff against. This is now a debug
+    // switch for looking at one game by hand.
+    bool logEvaluations = false;
 };
 
 namespace detail {
@@ -62,6 +73,11 @@ inline bool applyKey(const std::string& key, const std::string& value, Settings&
     if (key == "transpositionTableSizeMB" || key == "transposition_table_size_mb") {
         int v = std::atoi(value.c_str());
         if (v >= 8) s.transpositionTableSizeMB = v;
+        return true;
+    }
+    if (key == "logEvaluations" || key == "log_evaluations") {
+        s.logEvaluations = (value == "1" || value == "true" || value == "yes" ||
+                            value == "on");
         return true;
     }
     return false;

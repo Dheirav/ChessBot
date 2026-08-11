@@ -1,6 +1,8 @@
 #include "game_manager.hpp"
 #include "engine/movegen.hpp"
 #include "engine/chessbot_engine.hpp"
+#include "engine/pgn.hpp"
+#include <filesystem>
 #include <iostream>
 #include <algorithm>
 #include <ctime>
@@ -24,13 +26,20 @@ void GameManager::initializeGame() {
         engine->initialize();
     }
     
-    // Open evaluation log file
+    // Open the evaluation log, if it was asked for. It used to open
+    // unconditionally, which left a new evaluation_log_<epoch>.txt in the
+    // working directory on every single run, read by nobody: tests/evalref
+    // covers the same ground on purpose, against a stored reference.
+    if (!evaluationLogging) {
+        return;
+    }
     std::string logFileName = "evaluation_log_";
     logFileName += std::to_string(time(nullptr));
     logFileName += ".txt";
     evaluationLog.open(logFileName);
-    
+
     if (evaluationLog.is_open()) {
+        std::cout << "Logging evaluations to " << logFileName << std::endl;
         evaluationLog << "FEN,Eval,Material,Mobility,KingSafety,CenterControl,BishopPair,DoubledPawn,IsolatedPawn,PassedPawn,BackwardPawn,ConnectedPawn,PawnChain,RooksOpenFile,RooksSemiOpenFile,Rooks7thRank,PST,Outpost,Trapped,Coordination,KingActivity,Threats,Undefended,Space,Drawish\n";
     }
 }
@@ -525,4 +534,66 @@ void GameManager::printTranspositionTableStats() const {
     if (auto* chessBotEngine = dynamic_cast<ChessBotEngine*>(engine.get())) {
         chessBotEngine->printTranspositionTableStats();
     }
+}
+
+// The game as PGN.
+//
+// The result tag has to be derived rather than read off gameResult, which is
+// an English sentence for the panel ("Human wins by checkmate"). PGN wants
+// 1-0 / 0-1 / 1/2-1/2 / *, from White's point of view, and the mated side is
+// whoever is on move when the game ends.
+std::string GameManager::savePgn(const std::string& directory) const {
+    PgnTags tags;
+    tags.date  = pgnToday();
+    tags.event = "ChessBot game";
+    tags.site  = "local";
+
+    const std::string engineName = engine ? engine->getEngineName() : "ChessBot";
+    tags.white = (humanSide == COLOR_WHITE) ? "Human" : engineName;
+    tags.black = (humanSide == COLOR_WHITE) ? engineName : "Human";
+
+    switch (currentState) {
+        case GameState::GAME_OVER_CHECKMATE:
+            // board.activeColor is the side that has been mated.
+            tags.result = (board.activeColor == COLOR_WHITE) ? "0-1" : "1-0";
+            break;
+        case GameState::GAME_OVER_RESIGNATION:
+            // resignGame() is always the human resigning.
+            tags.result = (humanSide == COLOR_WHITE) ? "0-1" : "1-0";
+            break;
+        case GameState::GAME_OVER_STALEMATE:
+        case GameState::GAME_OVER_DRAW:
+            tags.result = "1/2-1/2";
+            break;
+        default:
+            tags.result = "*";   // still in progress
+            break;
+    }
+
+    // A game started from a set-up position needs its FEN, or the movetext
+    // replays into a different game entirely. gameHistory[0] is the position
+    // before the first move was played.
+    if (!gameHistory.empty() && gameHistory.front() != Board::INITIAL_FEN) {
+        tags.startFen = gameHistory.front();
+    }
+
+    std::error_code ec;
+    std::filesystem::create_directories(directory, ec);
+    if (ec) {
+        std::cerr << "Could not create " << directory << ": " << ec.message() << std::endl;
+        return "";
+    }
+
+    char stamp[32];
+    const std::time_t now = std::time(nullptr);
+    std::tm local{};
+    localtime_r(&now, &local);
+    std::strftime(stamp, sizeof(stamp), "%Y%m%d-%H%M%S", &local);
+
+    const std::string path = directory + "/chessbot-" + stamp + ".pgn";
+    if (!writePgn(path, moveHistory, tags)) {
+        std::cerr << "Could not write " << path << std::endl;
+        return "";
+    }
+    return path;
 }

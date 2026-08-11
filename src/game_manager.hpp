@@ -44,6 +44,7 @@ private:
     std::vector<std::string> gameHistory;  // FEN strings
     std::vector<Move> moveHistory;
     std::ofstream evaluationLog;
+    bool evaluationLogging = false;
     
     // Undo/Redo management. Redo entries carry the move that produced the
     // position so redoing can restore moveHistory/gameHistory correctly.
@@ -74,6 +75,9 @@ public:
     
     // Game setup
     void initializeGame();
+    // Per-move evaluation dump, off unless chessbot.conf turns it on. Call
+    // before initializeGame(), which is where the file is opened.
+    void setEvaluationLogging(bool enabled) { evaluationLogging = enabled; }
     void setHumanSide(PieceColor side);
     void startNewGame();
     void loadGameFromFEN(const std::string& fen);
@@ -111,6 +115,11 @@ public:
     
     // Game information
     std::string getGameResult() const { return gameResult; }
+
+    // The game as PGN, written under `directory` (created if missing). Returns
+    // the path written, or "" on failure. The engine could play a whole game
+    // and then had no way to hand it to anything that reads chess.
+    std::string savePgn(const std::string& directory = "games") const;
     int getCurrentEvaluation() const;
     const std::vector<Move>& getMoveHistory() const { return moveHistory; }
     std::string getCurrentFEN() const { return board.getFEN(); }

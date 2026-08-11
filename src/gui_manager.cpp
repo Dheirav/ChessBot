@@ -178,8 +178,15 @@ void GUIManager::render() {
     input.drawDraggedPiece(window, textures);
     renderSidePanel(window, *gameManager, whiteClockMs, blackClockMs);
     renderGameOverBanner(window, *gameManager);
+    // The resign question outranks a status line: it is waiting on an answer.
     if (resignArmed && !gameManager->isGameOver()) {
         renderPrompt(window, "Resign?  R again to confirm, any other key to cancel");
+    } else if (!statusMessage.empty()) {
+        if (std::chrono::steady_clock::now() < statusUntil) {
+            renderPrompt(window, statusMessage);
+        } else {
+            statusMessage.clear();
+        }
     }
 
     window.display();
@@ -249,6 +256,18 @@ void GUIManager::handleKeyboardInput(const sf::Event& event) {
     } else if (ctrl && event.key.code == sf::Keyboard::Y) {
         gameManager->redoLastMove();
     }
+    // Save the game as PGN with Ctrl+S. Written on demand rather than
+    // automatically: files nobody asked for are how the evaluation logs piled
+    // up in the first place.
+    else if (ctrl && event.key.code == sf::Keyboard::S) {
+        const std::string path = gameManager->savePgn();
+        if (path.empty()) {
+            setStatus("Could not save the game");
+        } else {
+            std::cout << "Game saved to " << path << std::endl;
+            setStatus("Saved " + path);
+        }
+    }
     // Arm resignation with R
     else if (event.key.code == sf::Keyboard::R && !ctrl) {
         if (!gameManager->isGameOver()) {
@@ -262,6 +281,11 @@ void GUIManager::handleKeyboardInput(const sf::Event& event) {
             gameManager->stopEngineThinking();
         }
     }
+}
+
+void GUIManager::setStatus(const std::string& text, int seconds) {
+    statusMessage = text;
+    statusUntil = std::chrono::steady_clock::now() + std::chrono::seconds(seconds);
 }
 
 void GUIManager::processCompletedMove() {

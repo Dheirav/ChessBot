@@ -28,6 +28,10 @@ private:
     bool isRunning;
     // Resigning takes two presses of R; this is whether the first has landed.
     bool resignArmed = false;
+    // A short-lived line across the foot of the board — "saved to ..." and the
+    // like. Feedback that only reaches stdout is feedback the player never sees.
+    std::string statusMessage;
+    std::chrono::steady_clock::time_point statusUntil;
 
 public:
     GUIManager();
@@ -61,4 +65,5 @@ private:
     void tickClocks();
     void handleKeyboardInput(const sf::Event& event);
     void processCompletedMove();
+    void setStatus(const std::string& text, int seconds = 4);
 };

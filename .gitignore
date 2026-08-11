@@ -21,3 +21,6 @@ evaluation_log_*.txt
 
 # Match gate logs (tee output, often still being written)
 gate-*.log
+
+# Games saved from the GUI with Ctrl+S
+games/

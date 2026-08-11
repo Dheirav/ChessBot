@@ -40,7 +40,7 @@ GM_SRC = src/game_manager.cpp
 # The GUI sources, for the input test. It links SFML for the types the GUI is
 # written in, but never opens a window.
 GUI_SRC = $(wildcard src/gui/*.cpp)
-TESTS = tests/perft tests/match tests/gamestate tests/evalref tests/bench tests/timecontrol tests/see_test tests/bitboard_test tests/guiinput
+TESTS = tests/perft tests/match tests/gamestate tests/evalref tests/bench tests/timecontrol tests/see_test tests/bitboard_test tests/guiinput tests/pgn
 
 # perft guards move generation: leaf counts must match published references.
 tests/perft: tests/perft.cpp $(ENGINE_SRC)
@@ -81,6 +81,12 @@ tests/bitboard_test: tests/bitboard_test.cpp $(ENGINE_SRC)
 # side panel widened the window; this pins them to the same geometry.
 tests/guiinput: tests/guiinput.cpp $(ENGINE_SRC) $(GM_SRC) $(GUI_SRC)
 	$(CXX) $(CXXFLAGS) $^ -o $@ $(SFML_LIBS) $(LDFLAGS)
+
+# pgn guards the SAN export. Notation is unambiguous only if the writer does
+# the disambiguation work, and a viewer handed "Nf3" where it needed "Nbd2"
+# replays a different game than the one that was played.
+tests/pgn: tests/pgn.cpp $(ENGINE_SRC)
+	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
 
 tests: $(TESTS)
 
@@ -137,6 +143,10 @@ test-bitboard: tests/bitboard_test
 test-guiinput: tests/guiinput
 	./tests/guiinput
 
+# Check PGN export: SAN, disambiguation, numbering, whole documents.
+test-pgn: tests/pgn
+	./tests/pgn
+
 # Check the UCI protocol. Needs the main binary, since UCI is a mode of it.
 # A protocol bug is invisible to every other test here: the engine plays fine
 # through its own GUI while being undrivable by any external tool.
@@ -158,4 +168,4 @@ remake:
 	$(MAKE) all
 
 # Mark these targets as not actual files
-.PHONY: all clean remake lichess tests test-perft test-match test-gamestate test-evalref evalref-regen bench test-bench bench-regen test-timecontrol test-see test-bitboard test-guiinput test-uci
+.PHONY: all clean remake lichess tests test-perft test-match test-gamestate test-evalref evalref-regen bench test-bench bench-regen test-timecontrol test-see test-bitboard test-guiinput test-pgn test-uci
