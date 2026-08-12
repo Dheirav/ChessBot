@@ -41,23 +41,34 @@ spend the speed.
 
 **Next: Phase 3.** SEE is now wired in behind two toggles and is at its gate
 (§5.2). After it: bound quiescence, check extensions, futility/razoring, IID and
-the LMR formula. Each is gated by `./tests/match -t 3000 --sprt --optA <f>=on
---optB <f>=off` against the current build.
+the LMR formula.
+
+> **Corrected — the gate command below this line was superseded.** This section
+> used to read `./tests/match -t 3000 --sprt --optA <f>=on --optB <f>=off`. The
+> standing gate is now node-budgeted and sharded:
+> `./tests/shard-gate.sh 14 60 -N 100000 --optA <f>=on --optB <f>=off`, and
+> `--sprt` is invalid under sharding. A timed gate is not reproducible and
+> depends on machine load; the first `seepruning` attempt lost 12 hours that
+> way. See `PLAN.md` "Running a Phase 3 gate" and `tests/README.md`. Use `-t`
+> only for a change whose value is speed per node rather than quality per node.
 
 **Two habits, both learned the expensive way:**
 
 - **Look at the tree before spending a day on a match.** `./tests/bench 6 --opt
   <feature>=on` prints the node signature with one option flipped, in seconds
   rather than hours. It caught a real ordering bug in SEE before the gate ran.
-- **A timed match needs a quiet machine.** `-t 3000` is wall clock, so parallel
-  builds mean both engines get fewer nodes per move and the result describes a
-  time control you did not ask for. Use `make -j4`, never two matches at once,
-  and `tee` the output — a timed match is not reproducible from its seed.
+- **A timed match needs a quiet machine** — which is why gates no longer use
+  one. `-t 3000` is wall clock, so anything else on the machine means both
+  engines get fewer nodes per move and the result describes a time control you
+  did not ask for, irreproducibly. The conclusion drawn at the time was "keep
+  the machine quiet"; the conclusion that stuck is "stop depending on it", and
+  gates moved to a node budget.
 
 Since this file was written the engine has also gained a UCI interface, a
 negamax search, an evaluation regression test, a search bench signature, SEE
-(unit-tested, not yet wired in), CI, and a further 1.45× in speed. See PLAN.md
-for what is done and what remains.
+(unit-tested and since wired in, both uses off by default pending their gates),
+CI, and a further 1.45× in speed. See `HANDOFF.md` for current state and
+`PLAN.md` for what is done and what remains.
 
 Do **not** start with the "obvious" engine optimizations. Bitboard move
 generation (~1.02× ceiling), pin-aware move generation (1.24×) and replacing

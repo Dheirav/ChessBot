@@ -270,13 +270,17 @@ node-limited rather than time-limited, and how sharding across cores stays
 statistically valid.
 
 ## Documentation map
+- [HANDOFF.md](HANDOFF.md) — **start here**: current state, what is in flight,
+  what to pick up next
 - [README.md](README.md) — this file: build, play, features, UCI
 - [src/README.md](src/README.md) — architecture and where each concern lives
 - [tests/README.md](tests/README.md) — the test suite and match methodology
 - [lichess/README.md](lichess/README.md) — playing online, and why the config
   says what it says
 - [PLAN.md](PLAN.md) — ordered plan of work, phase by phase
-- [BACKLOG.md](BACKLOG.md) — measured findings, profiling numbers, known issues
+- [BACKLOG.md](BACKLOG.md) — the 2026-08-10 profiling session, kept as a dated
+  archive; its measured ceilings and baselines are still the reference, but read
+  its header before trusting any of its status claims
 
 The source carries the rest. Headers here explain *why* a thing is the way it
 is, not just what it does — `search.hpp`, `bitboard.hpp`, `see.hpp` and
