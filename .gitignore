@@ -10,6 +10,7 @@ tests/*
 !tests/*.cpp
 !tests/*.py
 !tests/*.sh
+!tests/*.md
 !tests/data/
 
 # Move lookup tables are cached next to whichever binary generated them

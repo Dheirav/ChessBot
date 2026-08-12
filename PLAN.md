@@ -27,9 +27,9 @@ Phases are sequential. Items inside a phase are ordered but mostly independent.
 Nothing here changes engine behaviour except by deletion. It exists so that
 Phases 1–5 can be verified cheaply. Expect one session.
 
-**Status: COMPLETE.** All ten items landed. `make tests` builds five binaries;
-`test-perft`, `test-gamestate`, `test-evalref` and `test-bench` all pass, and
-CI runs them on every push. The negamax conversion (0.9) reproduced the bench
+**Status: COMPLETE.** All ten items landed. `make tests` built five binaries at
+the time; it now builds ten, and CI runs eleven test steps. `test-perft`,
+`test-gamestate`, `test-evalref` and `test-bench` all pass on every push. The negamax conversion (0.9) reproduced the bench
 signature bit-identically — 2,056,371 nodes and the same best move in all 12
 positions — which is the strongest evidence available that it was an exact
 restatement rather than a rewrite.
@@ -74,6 +74,17 @@ class is now just `isInCheck()` and `findKing()`.
 **Decision: retained.** `bitboard.{cpp,hpp}`, `bitboard_move_gen.{cpp,hpp}`,
 `bitboard_pawn_moves.hpp` and `magic_bitboards.{cpp,hpp}` stay in the repo and
 in the build.
+
+> **Superseded — the defects listed below are all fixed.** The module was
+> subsequently *completed*, not merely labelled: magics are initialised and
+> validated exhaustively, `BitboardMove` carries castling and en-passant flags,
+> `checkers()`/`blockersForKing()` and a legal generator with make/unmake all
+> exist, and `tests/bitboard_test` perft-checks it against the same published
+> counts as `movegen.cpp`. It remains **unconnected** — nothing outside the
+> module calls it — for the reason this item already gives: a movegen swap caps
+> the search at ~1.02×. The `STATUS:` block at the top of `bitboard.hpp` is
+> current; the paragraph below is kept as the record of why the module was not
+> deleted. Backlog §2.1 is stale in the same way.
 
 What changes is only that the module stops being a trap for a future reader. Add
 a `STATUS:` block at the top of `bitboard.hpp` recording, in place, the four
@@ -363,6 +374,37 @@ unlocks.
 harness and a search that has stopped changing shape underneath it. Grid over
 reduction depth/move-count thresholds, SPRT the best two or three candidates.
 
+**3.7 Transposition table aging**
+*Not in the backlog — found while preparing the 3.2 gates.*
+
+*Status: implemented and **on by default**, unlike everything else in Phase 3.
+Its gate is running; no result recorded here yet.*
+
+The table was depth-preferred and **ageless**: an entry could only be displaced
+by one at least as deep, with no notion of which search stored it. Over a game
+that means positions from moves already played — which will never occur again —
+permanently occupy slots the live search cannot reclaim, so the useful share of
+the table shrinks move by move. This is how a warm table comes to play *worse*
+than an empty one.
+
+The fix is one generation counter, bumped once per search
+(`TranspositionTable::newSearch()`), and one clause in `shouldReplace`: an entry
+from an earlier generation is evictable regardless of depth. It costs a byte
+per entry, paid for by narrowing `depth` to `int8_t` so the entry does not grow
+— which matters beyond memory, since entry size divides into `ENTRIES_PER_MB`
+and a wider entry would change the table length, the index distribution, and
+therefore every node count the search produces.
+
+**It defaults ON because it is a repair, not a feature.** The other Phase 3
+toggles default off until a gate accepts them; this one restores intended
+behaviour that was never there, so the burden runs the other way. It is still a
+toggle — so the repair can be measured, and so the old behaviour is one flag
+away if the measurement disagrees.
+
+```
+./tests/shard-gate.sh 14 120 -N 100000 --optA ttaging=on --optB ttaging=off
+```
+
 ---
 
 ## Phase 4 — Evaluation correctness
@@ -469,9 +511,14 @@ incremental material/PST updates (§4.3, ~1 µs against real drift risk).
 | 4 | tempo, real defence | evalref diff as expected + match |
 | 5 | TT eval cache → allocations → strings → lazy eval → pins | perft/evalref clean; match for 5.4 |
 
-**Done so far:** Phases 0, 1 (code **and** both gates) and 2. Six tests now run
-in CI: perft, gamestate, evalref, bench, timecontrol, UCI, plus a match smoke
-test. **Phase 3 is unblocked**, starting with wiring in the already-written SEE.
+**Done so far:** Phases 0, 1 (code **and** both gates) and 2. Eleven tests now
+run in CI: perft, gamestate, evalref, bench, see, bitboard, timecontrol, UCI,
+guiinput, pgn, plus a match smoke test. **Phase 3 is unblocked**; SEE is wired
+in and awaiting its gates (3.2).
+
+Landed since this plan was written, and not covered by any item above: PGN
+export with a SAN test, the headless GUI-input test, and transposition-table
+aging (3.7 below).
 
 Phases 0 and 1 are where nearly all the available strength is. Phase 5 in total
 is worth less than raising the default depth in 1.2. Phase 0 buys no strength at
@@ -495,11 +542,21 @@ all — it buys the ability to tell whether anything after it worked.
   reproducible**: unlike a fixed-depth run, the same seed does not replay the
   same games under different load. In practice: no parallel builds (`make -j4`,
   not `-j16`), and never two matches at once.
-- Do not "fix" that by gating on fixed nodes instead. It would be load-immune
+- ~~Do not "fix" that by gating on fixed nodes instead. It would be load-immune
   and it would be wrong: a feature whose value is a smaller tree gets no credit
   at equal nodes, so it measures only the accuracy cost. That is the depth-4
   mistake in a new costume. Equal time is correct *because* the feature is a
-  speedup; a quiet machine is the price.
+  speedup; a quiet machine is the price.~~
+
+  **Reversed — nodes are now the standing gate budget** (`-N 100000`), for the
+  reasons in "Running a Phase 3 gate" below. What this bullet got right is the
+  cost, and it still stands as the caveat: a change whose value is *speed per
+  node* rather than *quality per node* earns nothing at equal nodes and must be
+  gated on the clock (`-t`) instead. What it got wrong is treating "a quiet
+  machine" as a price that can actually be paid — it cannot be guaranteed over
+  a multi-hour run, and the first `seepruning` attempt is the proof: 12 hours,
+  half of it against a job pinning fifteen cores, 103 pairs of unusable data.
+  A budget that silently depends on machine load is not a budget.
 - Deterministic tests are immune to all of the above and can run any time:
   `perft`, `evalref`, `see_test`, `gamestate`, and `bench`'s node counts (its
   time column is not). This is what makes `bench --opt` trustworthy under load.

@@ -6,6 +6,15 @@ iterative deepening with a 256 MB transposition table unless stated otherwise.
 
 Items are ordered within each section by how much they matter.
 
+> **Read this as a dated archive, not as current state.** It is the record of
+> what was found on 2026-08-10, and `PLAN.md` cites its section numbers as
+> fixed references — so entries are kept in place rather than edited as they are
+> resolved. Much of sections 2 and 3 has since been fixed, and **§2.1 is now
+> flatly wrong**: the bitboard module is complete and perft-verified, and is
+> unconnected by choice rather than broken. The measured ceilings in §4 and the
+> baselines in §7 are the parts that stay useful. For current state, start from
+> `README.md` and `PLAN.md`'s status lines.
+
 ---
 
 ## 0. Start here next session
