@@ -9,10 +9,18 @@
  */
 struct TTEntry {
     uint64_t hash = 0;
-    int depth = -1;
     int score = 0;
+    // depth is a search depth, 0..64, so it does not need 32 bits — and the
+    // byte freed pays for `generation` without growing the entry. The size
+    // matters beyond memory: it divides into ENTRIES_PER_MB, so a wider entry
+    // would change the table's length, its index distribution, and therefore
+    // every node count the search produces.
+    int8_t depth = -1;
+    // Which search stored this. See shouldReplace: an entry left over from an
+    // earlier search is evictable regardless of how deep it was.
+    uint8_t generation = 0;
     Move bestMove;
-    
+
     enum NodeType {
         EXACT,       // Exact score (PV node)
         LOWER_BOUND, // Alpha cutoff (fail-high)
@@ -54,6 +62,9 @@ private:
     
     std::vector<TTEntry> table;
     size_t tableSize;
+    // Bumped once per search. Wrapping at 256 is harmless: it means an entry
+    // 256 searches old can survive one more, which is 256 moves ago.
+    uint8_t generation = 0;
     
     // Statistics
     uint64_t hits = 0;
@@ -73,6 +84,16 @@ public:
     void store(uint64_t hash, int depth, int ply, int score, Move bestMove,
                TTEntry::NodeType nodeType);
     
+    // Begin a new search. Entries stored before this call become evictable by
+    // any entry from the new search, however deep they were.
+    //
+    // Without it the table is depth-preferred and ageless: entries from moves
+    // already played, for positions that will never occur again, can only be
+    // displaced by something deeper still. Over a game the live search is left
+    // with a shrinking share of the table, which is how a warm table comes to
+    // play worse than an empty one.
+    void newSearch() { ++generation; }
+
     // Table management
     void clear();
     void resize(size_t sizeMB);

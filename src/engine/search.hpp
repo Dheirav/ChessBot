@@ -20,6 +20,16 @@ struct SearchOptions {
     // the shipped engine and the bench signature must stay exactly as they were.
     bool seeOrdering = false;  // sort captures by the exchange result, not the victim
     bool seePruning = false;   // quiescence skips captures that lose material
+
+    // Age the transposition table once per search, so entries left by earlier
+    // searches lose their depth-preference and can be displaced.
+    //
+    // Defaults ON, unlike the two above, because it is a repair rather than a
+    // feature: without it the table is ageless and a game's dead positions
+    // crowd out the live search. It is still a toggle so the repair can be
+    // measured — see PLAN.md's gate for it — and so the old behaviour is one
+    // flag away if the measurement ever disagrees.
+    bool ttAging = true;
 };
 extern SearchOptions g_searchOptions;
 

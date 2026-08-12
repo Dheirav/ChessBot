@@ -69,6 +69,7 @@ const SearchOptionEntry SEARCH_OPTIONS[] = {
     {"aspiration",  "asp",      &SearchOptions::aspiration},
     {"seeordering", "seeord",   &SearchOptions::seeOrdering},
     {"seepruning",  "seeprune", &SearchOptions::seePruning},
+    {"ttaging",     "ttage",    &SearchOptions::ttAging},
 };
 const size_t SEARCH_OPTION_COUNT = sizeof(SEARCH_OPTIONS) / sizeof(SEARCH_OPTIONS[0]);
 
@@ -461,6 +462,8 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
     // Clear move ordering data for new search
     g_moveOrderer.clear();
     g_searchNodes = 0;
+    // Age the table: entries this search does not reuse are now displaceable.
+    if (g_searchOptions.ttAging) tt.newSearch();
 
     // Arm the deadline. With no budget the search is depth-limited and every
     // clock check short-circuits, which is what keeps tests/bench reproducible.

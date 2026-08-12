@@ -48,7 +48,8 @@ void TranspositionTable::store(uint64_t hash, int depth, int ply, int score, Mov
     // Create new entry
     TTEntry newEntry;
     newEntry.hash = hash;
-    newEntry.depth = depth;
+    newEntry.depth = (int8_t)depth;
+    newEntry.generation = generation;
     newEntry.score = scoreToTT(score, ply);
     newEntry.bestMove = bestMove;
     newEntry.nodeType = nodeType;
@@ -66,6 +67,7 @@ void TranspositionTable::clear() {
     for (auto& entry : table) {
         entry = TTEntry{};
     }
+    generation = 0;
     clearStats();
 }
 
@@ -116,12 +118,16 @@ bool TranspositionTable::shouldReplace(const TTEntry& existing, const TTEntry& n
     if (existing.hash == newEntry.hash) {
         return newEntry.depth >= existing.depth;
     }
-    
-    // Replace if new entry has greater depth
-    if (newEntry.depth > existing.depth) {
+
+    // A different position, left behind by an earlier search. Its depth says
+    // how much work it cost, not how much it is worth now: the game has moved
+    // on and most of those positions cannot occur again. Depth-preference
+    // between searches is what lets them accumulate until the current search
+    // has almost no table left, so age wins over depth here.
+    if (existing.generation != newEntry.generation) {
         return true;
     }
-    
-    // Keep existing entry if it has greater depth
-    return false;
+
+    // A different position from this same search: depth-preferred, as before.
+    return newEntry.depth > existing.depth;
 }

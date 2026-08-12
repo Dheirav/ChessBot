@@ -252,6 +252,7 @@ int uciLoop() {
             std::cout << "option name Aspiration type check default true\n";
             std::cout << "option name SeeOrdering type check default false\n";
             std::cout << "option name SeePruning type check default false\n";
+            std::cout << "option name TtAging type check default true\n";
             std::cout << "uciok" << std::endl;
         } else if (command == "isready") {
             std::cout << "readyok" << std::endl;
