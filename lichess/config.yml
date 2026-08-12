@@ -194,9 +194,9 @@ greeting:
   hello_spectators: "Hi! I'm {me}. Type !help for a list of commands I can respond to." # Message to send to spectator chat at the start of a game
   goodbye_spectators: "Thanks for watching!" # Message to send to spectator chat at the end of a game
 
-pgn_directory: "game_records"      # PGN of every game, for analysis. The engine
-                                   # has no PGN export of its own (src/engine/pgn.cpp
-                                   # is an empty placeholder).
+pgn_directory: "game_records"      # PGN of every game, for analysis. This is
+                                   # lichess-bot's own export; the engine has
+                                   # its own for local games (Ctrl+S in the GUI).
 # pgn_file_grouping: "game"        # How to group games into files. Options are "game", "opponent", and "all"
                                    # "game" (default) - every game is written to a different file named "{White name} vs. {Black name} - {lichess game ID}.pgn"
                                    # "opponent" - every game with a given opponent is written to a file named "{Bot name} games vs. {Opponent name}.pgn"
@@ -207,19 +207,39 @@ matchmaking:
                                    # of the exercise.
   allow_during_games: false        # Set it to 'true' to create challenges during long games.
   challenge_variant: "random"      # If set to 'random', the bot will choose one variant from the variants enabled in 'challenge.variants'.
-  challenge_timeout: 30            # Create a challenge after being idle for 'challenge_timeout' minutes. The minimum is 1 minute.
-  challenge_initial_time:          # Initial time in seconds of the challenge (to be chosen at random).
-    - 300
-    - 600
-  challenge_increment:             # Increment in seconds of the challenge (to be chosen at random).
-    - 3
-    - 5
+  challenge_timeout: 5             # Minutes idle before challenging a bot. The
+                                   # default 30 means half an hour of nothing
+                                   # happening on a fresh account with no
+                                   # incoming challenges. Minimum is 1.
+  challenge_initial_time:          # One time control only: 15+10.
+    - 900                          # Lichess rates blitz and rapid separately, so
+  challenge_increment:             # splitting games between them makes each
+    - 10                           # rating converge half as fast.
+                                   #
+                                   # 15+10 gives the engine ~35s a move against
+                                   # 10+5's ~15s, which is worth about one more
+                                   # ply: it reached depth 8 in 7.9s on a real
+                                   # middlegame position and each further ply
+                                   # costs ~2.3x the last. Still rapid, not
+                                   # classical (Lichess classifies on
+                                   # initial + 40*increment = 1300s), so the
+                                   # games keep accumulating in one pool.
 #  challenge_days:                 # Days for correspondence challenge (to be chosen at random).
 #    - 1
 #    - 2
-# opponent_min_rating: 600         # Opponents rating should be above this value (600 is the minimum rating in lichess).
-# opponent_max_rating: 4000        # Opponents rating should be below this value (4000 is the maximum rating in lichess).
-  opponent_rating_difference: 300  # The maximum difference in rating between the bot's rating and opponent's rating.
+  opponent_min_rating: 1200        # Absolute bounds, not a band around our own
+  opponent_max_rating: 2200        # rating — because Lichess starts BOT accounts
+                                   # at 3000 with rd 500, and a band around 3000
+                                   # means every opponent is a top engine. The
+                                   # first game was against a 3042.
+                                   #
+                                   # These two are only read when
+                                   # opponent_rating_difference is unset:
+                                   # lib/matchmaking.py overwrites both with
+                                   # bot_rating +/- difference whenever it is
+                                   # present, so leaving it set would silently
+                                   # ignore the cap.
+# opponent_rating_difference: 300  # Deliberately unset; see above.
   rating_preference: "none"        # One of "none", "high", "low".
   challenge_mode: "rated"          # Rated, so the games produce a real rating.
   challenge_filter: none           # If a bot declines a challenge, do not issue a similar challenge to that bot. Possible options are 'none', 'coarse', and 'fine'.
