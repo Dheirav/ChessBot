@@ -9,6 +9,7 @@ chessbot
 tests/*
 !tests/*.cpp
 !tests/*.py
+!tests/*.sh
 !tests/data/
 
 # Move lookup tables are cached next to whichever binary generated them
@@ -21,6 +22,9 @@ evaluation_log_*.txt
 
 # Match gate logs (tee output, often still being written)
 gate-*.log
+gates-all.log
+# Per-shard logs from tests/shard-gate.sh
+shard-*/
 
 # Games saved from the GUI with Ctrl+S
 games/

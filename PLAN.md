@@ -325,8 +325,8 @@ identical comparisons — which `bench --check` confirms byte for byte.
 
 *Gates (each hours of wall clock, run one at a time):*
 ```
-./tests/match -n 400 -t 3000 --sprt --optA seepruning=on  --optB seepruning=off
-./tests/match -n 400 -t 3000 --sprt --optA seeordering=on --optB seeordering=off
+./tests/shard-gate.sh 14 60 -N 100000 --optA seepruning=on  --optB seepruning=off
+./tests/shard-gate.sh 14 60 -N 100000 --optA seeordering=on --optB seeordering=off
 ```
 Expect a smaller effect than gate 1.5 and therefore many more games: 1.5 stopped
 at 136 because +140 Elo is 14× the H1 bound, and SPRT game counts scale roughly
@@ -547,14 +547,28 @@ classify-don't-order bug was caught.
 differ by exactly one thing:
 
 ```
-./tests/match -n 400 -t 3000 --sprt --optA <feature>=on --optB <feature>=off
+./tests/shard-gate.sh 14 60 -N 100000 --optA <feature>=on --optB <feature>=off
 ```
 
-- Keep `-t 3000`. Changing the time control between gates makes results
-  incomparable, and 1.5 is the standing demonstration of what that costs.
-- `tee` it to a log. A timed match is not reproducible, so a lost result is a
-  lost day, not a re-run.
-- Quiet machine, one match at a time — see Standing discipline above.
+- **Budget nodes, not milliseconds.** `-N 100000` per move is the standing
+  gate time control, replacing `-t 3000`. A node budget is spent identically
+  whatever else the machine is doing, so the result reproduces exactly and the
+  gate can be sharded across cores; the first `seepruning` attempt ran 12 hours
+  on the clock, half of it against a job pinning fifteen cores, and produced
+  103 pairs of unusable data. Use `-t` only to gate a change whose point is
+  speed per node rather than quality per node.
+- **Shard it.** `tests/match` is single-threaded; `shard-gate.sh` runs one
+  gate as N seeded shards and pools them with `pool-shards.sh`. 14 shards × 60
+  pairs is 1 680 games in roughly the time 100 games used to take.
+- **No `--sprt` under sharding**, and the script refuses it: a stopping rule
+  applied per shard stops each one on its own favourable noise. Fixed N per
+  shard, pooled after, is the valid form. `--sprt` is still right for a single
+  unsharded run.
+- `tee` it to a log — or rather, the script writes one per shard already.
+- Changing the gate's time control between features makes their results
+  incomparable, and 1.5 is the standing demonstration of what that costs. The
+  move from `-t 3000` to `-N 100000` is that break, made once and deliberately;
+  every Phase 3 result from here is on nodes.
 - Expect far more games than 1.5 needed. It stopped at 136 only because +140 Elo
   is 14× the H1 bound; game counts scale roughly as 1/effect². Hitting the cap
   with the LLR drifting slowly upward is a real but modest effect, not a

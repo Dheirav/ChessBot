@@ -105,6 +105,9 @@ static bool g_hasDeadline = false;
 static bool g_outOfTime = false;
 static std::chrono::steady_clock::time_point g_deadline;
 static uint64_t g_nextTimeCheck = 0;
+// Node budget, in the same place and for the same reason. 0 = unlimited, which
+// is the only state tests/bench and tests/perft ever see.
+static uint64_t g_nodeLimit = 0;
 
 // Checking the clock costs far more than a node does, so it is checked once
 // every few thousand nodes instead of at every one. At the measured ~165k
@@ -116,6 +119,11 @@ static constexpr uint64_t TIME_CHECK_INTERVAL = 2048;
 // time. Everywhere the search used to test shouldStop it now tests this.
 static inline bool searchAborted(const std::atomic<bool>& shouldStop) {
     if (shouldStop.load()) return true;
+    // The node budget is exact rather than sampled: the counter is already in
+    // a register's reach at every node, so unlike the clock there is nothing to
+    // amortize, and an exactly-enforced budget is what makes a node-limited
+    // match reproduce move for move.
+    if (g_nodeLimit && g_searchNodes >= g_nodeLimit) return true;
     if (!g_hasDeadline) return false;
     if (g_outOfTime) return true;
     if (g_searchNodes < g_nextTimeCheck) return false;
@@ -459,6 +467,7 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
     g_hasDeadline = (limits.moveTimeMs > 0);
     g_outOfTime = false;
     g_nextTimeCheck = TIME_CHECK_INTERVAL;
+    g_nodeLimit = limits.maxNodes;
     if (g_hasDeadline) {
         g_deadline = std::chrono::steady_clock::now() +
                      std::chrono::milliseconds(limits.moveTimeMs);
@@ -497,6 +506,7 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
         }
 
         auto depthStart = std::chrono::steady_clock::now();
+        const uint64_t depthStartNodes = g_searchNodes;
         if (!g_searchOptions.quiet) std::cout << "Searching depth " << currentDepth << "..." << std::endl;
         
         // Try to get best move from transposition table for move ordering
@@ -638,6 +648,26 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
         // measured at ~2.3x per ply and is stable from depth 6 (BACKLOG.md 7),
         // so predict the next iteration at 2.3x the last one and only start it
         // if it fits in what is left.
+        // The same prediction against the node budget. Without it the last
+        // iteration of every move is one that could never finish, so a fixed
+        // share of the budget is spent on results that are thrown away — and
+        // that share is spent differently by the two sides of an A/B, which is
+        // exactly the sort of difference a gate must not invent.
+        if (g_nodeLimit && currentDepth < maxDepth) {
+            const uint64_t used = g_searchNodes;
+            const uint64_t lastIteration = used - depthStartNodes;
+            const double BRANCHING = 2.3;
+            if (used >= g_nodeLimit ||
+                (double)lastIteration * BRANCHING > (double)(g_nodeLimit - used)) {
+                if (!g_searchOptions.quiet) {
+                    std::cout << "Stopping at depth " << currentDepth << ": next iteration needs ~"
+                              << (uint64_t)((double)lastIteration * BRANCHING) << " nodes, "
+                              << (g_nodeLimit - std::min(used, g_nodeLimit)) << " left" << std::endl;
+                }
+                break;
+            }
+        }
+
         if (g_hasDeadline && currentDepth < maxDepth) {
             auto now = std::chrono::steady_clock::now();
             auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(

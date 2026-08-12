@@ -84,13 +84,30 @@ extern SearchInfoFn g_searchInfo;
 // alone cannot be benchmarked: node counts stop being reproducible. Both exist,
 // and whichever binds first ends the search.
 struct SearchLimits {
-    int maxDepth = 64;      // hard ceiling on iterations
-    long moveTimeMs = 0;    // wall-clock budget for this move; 0 = no budget
+    int maxDepth = 64;       // hard ceiling on iterations
+    long moveTimeMs = 0;     // wall-clock budget for this move; 0 = no budget
+    uint64_t maxNodes = 0;   // node budget for this move; 0 = no budget
 
     SearchLimits() = default;
     explicit SearchLimits(int depth) : maxDepth(depth) {}
     SearchLimits(int depth, long ms) : maxDepth(depth), moveTimeMs(ms) {}
 };
+
+// A node budget is a time control that does not depend on the machine.
+//
+// Two engine configurations given the same milliseconds are only comparable if
+// they get the same share of the CPU for the whole match — which is false the
+// moment anything else runs, and false in a different way on every machine. The
+// SEE gate that prompted this spent its first hours against a job pinning
+// fifteen cores and its last hours on an idle box: the same command, two
+// different time controls, one pooled result.
+//
+// Nodes remove that. The budget is spent identically wherever it runs, the same
+// seed replays the same games move for move, and matches can be sharded across
+// cores without each shard changing the others' effective time control. It
+// costs one thing worth stating: a feature whose value is speed per node rather
+// than quality per node — a faster evaluation, say — is invisible to a
+// node-limited match, and must be gated on the clock instead.
 
 // The engine's only search entry point. Iterative deepening over a
 // transposition table, with the heuristics in SearchOptions above.
