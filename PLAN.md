@@ -33,8 +33,8 @@ the time; it now builds ten, and CI runs eleven test steps. `test-perft`,
 signature bit-identically — 2,056,371 nodes and the same best move in all 12
 positions — which is the strongest evidence available that it was an exact
 restatement rather than a rewrite. (That figure is the signature *as it stood
-then*; it is 1 465 771 since `seeordering` was gated on. The claim here is about
-matching the baseline of the day, so the old number is the right one to keep.)
+then*; it is 1 725 755 today. The claim here is about matching the baseline of
+the day, so the old number is the right one to keep.)
 
 **0.1 Remove dead eval fields and constants first** (§3.3)
 `captureBonus[]` (`evaluation.cpp:15`), `threatBonus[KING]`, `Piece::fromValue()`,
@@ -458,14 +458,26 @@ Both items change evaluation output, so both need `test-evalref` to *show a
 diff* (confirming the change landed and is shaped as expected) and then a match
 to confirm it is an improvement.
 
-**4.1 Fix `tempoBonus`** (§2.2)
+**4.1 Fix `tempoBonus`** (§2.2) — **DONE 2026-08-14.** Deleted rather than made
+an honest int: as written it was a constant, not a bonus to the side to move, so
+there was no correct integer version of it to keep. A real tempo bonus is a
+separate, gateable idea. The mirror-symmetry test also found a second addend
+with the same defect, `(int)(gamePhaseFactor * 1.5f)`, which is gone too. See
+`BUGS.md` 2.
 `evaluation.cpp:235` declares it `float 0.01f`; summed into `e.total` at `:588`
 it promotes the sum to float, and truncation-toward-zero turns −5 into −4. The
 net effect is a one-centipawn asymmetry favouring black that has nothing to do
 with tempo. Make it an honest `int` applied to the side to move, or delete it —
 prefer an honest int and let the match say whether it earns its place.
 
-**4.2 King safety is asymmetric in a symmetric position**
+**4.2 King safety is asymmetric in a symmetric position** — **DONE 2026-08-14.**
+Cause was `|x - 3|` as distance from the centre, which is not symmetric on an
+eight-coordinate axis whose centre lies between 3 and 4. Replaced by
+`centreDistance()`, measuring to the nearer of the two central coordinates. The
+mirror-symmetry check below was added with it and now passes across 4 691
+positions. Cost: bench 1 465 771 -> 1 725 755 (+17.7%), no best move changed.
+See `BUGS.md` 3.
+
 *Not in the backlog — found by 0.2 on its first line of output.*
 
 The reference file's first entry is the starting position, which is mirror
@@ -507,7 +519,7 @@ split at depth 5: evaluation 34.1%, legality filter 19.4%, `makeMove` 10.4%.
 
 **Status: 5.1, 5.2 and 5.3 are DONE** — 1.45× together, all verified by the
 bench signature staying at 2 056 371, which was the baseline at the time (it is
-1 465 771 now). Remaining: 5.4 (lazy eval, needs a match)
+1 725 755 now). Remaining: 5.4 (lazy eval, needs a match)
 and 5.5 (pin-aware movegen). See `BACKLOG.md §7` for the measurements.
 
 **5.1 Cache the static eval in the TT entry** (§4.3) — repeated visits skip
@@ -642,8 +654,9 @@ is conclusive, and 1.5 needed 136 games where the fixed-N plan wanted ~800.
 ./tests/bench 6 --opt <feature>=on
 ```
 
-Compare against the current baseline, **1 465 771** nodes at depth 6 (it was
-2 056 371 until `seeordering` was gated on, 2026-08-13). A feature that barely moves the
+Compare against the current baseline, **1 725 755** nodes at depth 6 (2 056 371
+until `seeordering` was gated on 2026-08-13, then 1 465 771 until the evaluation
+symmetry fixes on 2026-08-14). A feature that barely moves the
 count, or moves it the wrong way, is wired in wrong or is not doing what you
 think; find that out now rather than a day into a match. This is how 3.2's
 classify-don't-order bug was caught.

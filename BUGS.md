@@ -14,6 +14,9 @@ caught these.
 Fix order is not the order they were found. It is roughly expected Elo per hour
 of work, with one exception noted at 3.
 
+**Entries keep their numbers when fixed.** Code comments and `HANDOFF.md` cite
+them by number, so a fixed entry is marked, not deleted or renumbered.
+
 ---
 
 ## The baseline these are measured against
@@ -25,7 +28,7 @@ source in `lichess/config.yml` is `enabled: false`.
 
 ---
 
-## 1. The search cannot see the game's move history
+## 1. The search cannot see the game's move history — **FIXED 2026-08-14**
 
 **Cost: proven. One drawn win against a 1404, −48 rating in a single game.**
 
@@ -48,50 +51,137 @@ So the search sees repetitions it creates *inside its own tree* and is blind to
 every position the game has actually visited. From the root it just sees
 `Qa8+` → +5.16, and it will see that forever.
 
-**Fix.** Collect the zobrist key after each move replayed in the `position`
-handler and hand that history to the search as the initial `pathHashes`. Count
-occurrences rather than treating any repeat as a draw, so the engine can tell a
-second occurrence from a third.
-
-**Note the symmetry:** the engine also cannot *seek* a repetition when it is
-losing. This is not only a way to throw away wins; it is a missing way to save
+**Note the symmetry:** the engine also could not *seek* a repetition when it was
+losing. This was not only a way to throw away wins; it was a missing way to save
 losses.
 
-**Verification.** Changes the tree, so `test-bench` will fail and the signature
-will move. That is correct, not a regression — read the diff before regenerating.
-Add a test that replays the CTGzqoeY move list and asserts the engine does not
-play `Qa8+` at move 13.
+### What the fix does
+
+`findBestMoveIterativeDeepening` now takes the positions the game already
+visited, and every caller that plays a game supplies them: the UCI `position`
+handler (`uci.cpp`), the match harness (`tests/match.cpp`), and the GUI through
+`GameManager::repetitionHistory()`. The history stops at the last irreversible
+move, because nothing across a capture or a pawn push can recur — which also
+keeps it short enough for the linear scan the search does per node.
+
+The search then applies **two** rules rather than one, and the difference
+between them is the whole point:
+
+- **Inside the tree, one match is a draw.** Both sides are choosing moves, so a
+  line that reaches a position twice can normally reach it a third time. This is
+  the pre-existing behaviour, deliberately left alone.
+- **Against the game's past, one match is not.** It makes the current position
+  only the *second* occurrence, and a second occurrence is not a draw. Scoring
+  it 0 would make the engine decline winning lines and claim draws that do not
+  exist — trading this bug for a worse one. Two prior occurrences make this the
+  third, which is the one that ends the game.
+
+### Verification
+
+- `tests/uci_smoke.py` replays CTGzqoeY to move 13 and asserts the engine does
+  not answer `c6a8`. It asserts *not the draw* rather than a specific
+  replacement, so a future evaluation change cannot fail it spuriously. Checked
+  against the pre-fix binary first: it fails there, which is the only way to
+  know a regression test is wired to the thing it claims to guard.
+- **The bench signature did not move** (still 1 465 771). That is the expected
+  result, not a surprise: bench passes no history, so the new rule can never
+  fire, and the search it measures is unchanged. The fix adds knowledge the
+  engine did not have rather than altering how it searches a position with no
+  past.
+- Before: `bestmove c6a8`, score +515. After: `bestmove c6c3`, score +481 —
+  it takes the pawn and keeps the win instead of checking into the draw.
+
+Not yet gated. The change is inert without history, so no A/B match can measure
+it at all — the only instrument that can is games against real opponents.
 
 ---
 
-## 2. `tempoBonus` is a float, and it truncates the whole evaluation
+## 2. Colour-blind constants added to a colour-relative score — **FIXED 2026-08-14**
 
-**PLAN.md 4.1.** `evaluation.cpp:235` declares it `float 0.01f`; summed into
-`e.total` at `:588` it promotes the sum to float, and truncation toward zero
-turns −5 into −4. The result is a one-centipawn asymmetry favouring Black that
-has nothing to do with tempo.
+**PLAN.md 4.1.** Two addends in `e.total` were the same for both sides, so both
+handed White a bonus for nothing. Only one of them was in the backlog; the
+mirror-symmetry test found the other.
 
-Fix first, not because it is worth much on its own, but because it corrupts the
-reading of every other evaluation term — including 3 below. Make it an honest
-`int` applied to the side to move, or delete it and let a match decide.
+- **`tempoBonus`** was declared `float 0.01f`. Summed into an otherwise integer
+  `e.total`, it promoted the whole expression to float, and truncation toward
+  zero turned −5 into −4. It was also a constant rather than a bonus to the side
+  to move, so it never measured tempo at all.
+- **`(int)(gamePhaseFactor * 1.5f)`** added 1 centipawn to White in any position
+  with roughly a full opening's material. The game phase is a property of the
+  position, identical for both sides — a legitimate *weight*, which is how it is
+  still used for the king piece-square blend, and meaningless as a *term*.
+
+Both are gone. `e.total` is now integer throughout and made only of terms that
+negate when the board is mirrored.
+
+An honest tempo bonus applied to the side to move remains a real idea, and is
+deliberately **not** included here: it changes evaluation, so it needs its own
+gate rather than a free ride on a bug fix.
 
 ---
 
-## 3. King safety is asymmetric in a symmetric position
+## 3. King safety is asymmetric in a symmetric position — **FIXED 2026-08-14**
 
 **PLAN.md 4.2.** The starting position is mirror symmetric, so every
-white-perspective term must be exactly 0. `kingSafety` is **−4**. Material,
-mobility, PST and centre control are all correctly 0, so this is specific to the
-king-safety term and not a general orientation error.
+white-perspective term had to be 0. `kingSafety` was **−4**.
 
-This is a colour-dependent error in *every* position the engine evaluates, not
-just the start. It is listed third only because 2 must land first for the
-number to be readable.
+The cause was `|x - 3|` as distance from the centre. A board has eight ranks, so
+its centre lies *between* 3 and 4; `|x - 3|` charges 4 at one edge and 3 at the
+other. White's king on rank 7 was therefore penalised one more than Black's
+identical king on rank 0 — in every position, from move one, in every game the
+engine has ever played. The same flaw applied to files, where it made a king on
+a1 score differently from one on h1.
 
-**While fixing:** add a mirror-symmetry check to `tests/evalref.cpp` — flip
-colours and ranks, assert every term negates exactly. It is the strongest cheap
-invariant an evaluation has, it needs no reference file, and it would have
-caught this the day the term was written.
+Fixed by measuring to the nearer of the two central coordinates
+(`centreDistance` in `evaluation.cpp`), which is symmetric under both
+reflections. Range is now 0..6 instead of 0..7, so king safety is slightly
+smaller in magnitude; the multiplier is a tuning question and a separate, gated
+one.
+
+### The mirror-symmetry test
+
+`tests/evalref.cpp` now reflects every position top to bottom, swaps the
+colours, and asserts that every term comes back exactly negated. It is the
+strongest cheap invariant an evaluation has, and unlike the reference
+comparison beside it, **it cannot be regenerated into agreement** — there is no
+file to rewrite. It says the evaluation is *wrong*, not merely *changed*.
+
+Run against the unfixed build it reports:
+
+```
+FAILED: 4691 of 4691 positions evaluate asymmetrically
+        Terms at fault: total(4691) kingSafety(4499)
+```
+
+Every other term was already symmetric, which is why the fix touched only these
+two. The starting position now evaluates to exactly 0 in every column.
+
+### What it cost
+
+Reviewed before regenerating either reference, as the diff is the only thing
+those tests are for:
+
+- **`evalref`**: 23 590 of 23 603 positions moved, and only `kingSafety` and
+  `total` changed — the other 21 terms are untouched. Every `kingSafety` delta
+  is a multiple of 4 (the term's own multiplier), and every `total` delta equals
+  its `kingSafety` delta minus the removed game-phase constant, minus one more
+  where the old float truncated a negative sum toward zero. No unexplained
+  movement.
+- **`bench`**: **1 465 771 → 1 725 755 nodes**, +17.7%, and **no best move
+  changed** in any of the twelve positions. The increase concentrates in the
+  opening positions and reverses in the endgames.
+
+That node cost is the part to be honest about. A correct evaluation is not
+automatically a stronger one at equal *time*: +17.7% nodes at a fixed depth is
+roughly a fifth of a ply given up on the clock. The plausible cause is that a
+symmetric evaluation returns exact ties more often, and proving equality costs
+alpha-beta more than proving superiority — but that is a hypothesis, not a
+measurement.
+
+**This fix is correct and ungated.** It is shipped on the grounds that an
+evaluation which contradicts the symmetry of the game is a defect regardless of
+what a match says. Whether it is worth Elo is a separate question and wants a
+node-budgeted gate.
 
 ---
 

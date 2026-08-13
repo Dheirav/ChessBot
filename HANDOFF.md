@@ -44,10 +44,12 @@ neutral at equal nodes, which is what a change that buys *speed* per node rather
 than *quality* per node looks like when both sides are paid the same nodes. Its
 open gate is a timed one. Do not read +2.2 as "SEE pruning does nothing".
 
-The bench signature is **1,465,771 nodes** at depth 6. Any change claiming to
-preserve search behaviour must reproduce it exactly. It was 2,056,371 until
-`seeordering` was turned on (2026-08-13); older documents quoting that figure
-are describing the baseline of their day, not a regression.
+The bench signature is **1,725,755 nodes** at depth 6. Any change claiming to
+preserve search behaviour must reproduce it exactly. It has moved twice this
+week — 2,056,371 until `seeordering` was turned on (2026-08-13), then 1,465,771
+until the evaluation symmetry fixes (2026-08-14, `BUGS.md` 2 and 3, +17.7% with
+no best move changed). Older documents quoting either figure are describing the
+baseline of their day, not a regression.
 
 ---
 
@@ -98,6 +100,12 @@ Two of the eight non-wins were self-inflicted and are written up in `BUGS.md`:
 a drawn win against a 1404 (−48) and a time forfeit caused by restarting the bot
 mid-game (−120).
 
+**The engine has already moved past this baseline.** `BUGS.md` 1 — the search
+never receiving the game's move history — was fixed on 2026-08-14, so games from
+that build on are not comparable to the 24 above without splitting them. The
+baseline stays frozen as written rather than being edited forward; that is what
+makes it usable as a comparison later.
+
 ---
 
 ## In flight
@@ -129,14 +137,17 @@ point estimate barely moved; the interval is what shrank. One shard is a
 
 ## Next, in order
 
-1. **Give the search the game's move history** (`BUGS.md` 1). The engine cannot
-   see repetitions that happened in the actual game, only ones it creates inside
-   its own tree, and it has already drawn a won position against a 1404 because
-   of it. Smallest fix on this list with a proven cost attached.
-2. **Evaluation correctness** (`BUGS.md` 2, 3, 5 — `PLAN.md` 4.1-4.3), in that
-   order: `tempoBonus` truncates the total, so it has to land before the −4 king
-   safety asymmetry can be read cleanly. Add the mirror-symmetry check to
-   `tests/evalref.cpp` as part of the king-safety fix.
+1. **Make "defended" mean defended** (`BUGS.md` 5 — `PLAN.md` 4.3), the last of
+   the evaluation-correctness items. `attackedBy[own][sq]` already exists and is
+   the right predicate; the term currently counts any adjacent friendly piece.
+2. **A gate for the evaluation symmetry fixes** (`BUGS.md` 2 and 3). They are
+   shipped ungated on correctness grounds, but they cost +17.7% nodes at bench 6,
+   so whether they are worth Elo is genuinely open:
+   ```bash
+   ./tests/shard-gate.sh 14 120 -N 100000 --optA <...> --optB <...>
+   ```
+   There is no toggle for them, which is the awkward part — measuring them means
+   building two binaries rather than flipping a flag.
 3. **A timed gate for `seepruning`** (`PLAN.md` 3.2), on a quiet machine:
    ```bash
    ./tests/shard-gate.sh 14 120 -t 3000 --optA seepruning=on --optB seepruning=off

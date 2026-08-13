@@ -20,7 +20,7 @@ make test-perft   # ...or any single target; see the table below
 | `test-perft` | move generation, against published perft counts | exact — one wrong or missing move changes a leaf count |
 | `test-bitboard` | 107,648 exhaustive magic lookups, 765,696 `isSquareAttacked` comparisons against the mailbox engine over 5,982 positions, pin detection, and perft through the bitboard generator | exact |
 | `test-see` | static exchange evaluation, against hand-computed positions | exact |
-| `test-evalref` | every evaluation term over 23,603 positions | diff against a stored reference |
+| `test-evalref` | every evaluation term over 23,603 positions, plus mirror symmetry | diff against a stored reference, plus an invariant |
 | `test-bench` | the search's node-count signature at depth 6 | diff against a stored signature |
 | `test-gamestate` | a finished game refuses moves, and terminal state is not sticky across a new game | exact |
 | `test-timecontrol` | a search given a budget returns inside it | exact |
@@ -64,6 +64,15 @@ make bench-regen      # after reviewing the new node counts
 Regenerating without reading the diff throws away the only thing these tests do.
 In particular, any change claiming to preserve search behaviour must reproduce
 the bench signature *exactly* — not approximately.
+
+**`test-evalref` has a second half that cannot be regenerated.** It reflects
+each position top to bottom, swaps the colours, and asserts every term comes
+back exactly negated. Chess is symmetric under that reflection, so this needs no
+reference file — which means it states that the evaluation is *wrong*, not
+merely *changed*, and no amount of `--regen` will quiet it. It was added on
+2026-08-14 and immediately failed on every position tested, naming `kingSafety`
+and `total`: a king on rank 7 had been charged one more than an identical king
+on rank 0 since the term was written.
 
 ## The match harness
 
