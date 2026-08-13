@@ -553,28 +553,24 @@ EvalDetails evaluate_details(const Board& board) {
 
     threatScore = (whiteThreats - blackThreats) + captureIncentive + hangingPiecePenalty;
 
-    // Undefended pieces
+    // Undefended pieces.
+    //
+    // "Defended" means a friendly piece actually attacks the square, which is
+    // what attackedBy[own] already says — it was built above for the threat
+    // term and costs nothing to reuse.
+    //
+    // It used to mean "a friendly piece stands on one of the eight neighbouring
+    // squares", which is a different property entirely and not the one the term
+    // is named after. It scored a knight beside its own rook as defended when
+    // neither could recapture on the other's square, and scored a rook defended
+    // down an open file as undefended because the defender was five squares
+    // away. What it measured was how clumped the pieces were.
     for (int i = 0; i < 64; ++i) {
         const Piece& p = board.squares[i];
         if (p.type() == NONE) continue;
-        // "Defended" here means simply an adjacent friendly piece. The old
-        // 64-square sweep tested Chebyshev distance <= 1, which is exactly
-        // the eight neighbouring squares.
-        bool defended = false;
-        const int x = i % 8, y = i / 8;
-        for (int dy = -1; dy <= 1 && !defended; ++dy) {
-            for (int dx = -1; dx <= 1; ++dx) {
-                if (dx == 0 && dy == 0) continue;
-                int nx = x + dx, ny = y + dy;
-                if (nx < 0 || nx > 7 || ny < 0 || ny > 7) continue;
-                const Piece& q = board.squares[ny * 8 + nx];
-                if (q.type() != NONE && q.color() == p.color()) { defended = true; break; }
-            }
-        }
-        if (!defended) {
-            if (p.color() == COLOR_WHITE) whiteUndefended++;
-            else blackUndefended++;
-        }
+        if (attackedBy[p.color()][i]) continue;
+        if (p.color() == COLOR_WHITE) whiteUndefended++;
+        else blackUndefended++;
     }
     undefendedPenalty = -5 * whiteUndefended + 5 * blackUndefended;
 
