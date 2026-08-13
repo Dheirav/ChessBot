@@ -243,16 +243,21 @@ int uciLoop() {
             std::cout << "id name ChessBot 1.1\n";
             std::cout << "id author Dheirav\n";
             // The search heuristics are exposed so that A/B testing can run
-            // through standard tooling instead of tests/match.cpp. Defaults
-            // here must match SearchOptions: the two SEE uses are off until
-            // their gates pass (PLAN.md 3.2).
+            // through standard tooling instead of tests/match.cpp.
+            //
+            // The advertised defaults are read out of a default-constructed
+            // SearchOptions rather than written here, because the hand-copied
+            // version of this list went stale the moment a gate flipped one:
+            // it still said SeeOrdering was off after the engine shipped it on,
+            // which tells a GUI the opposite of what the engine does.
             std::cout << "option name Hash type spin default 256 min 1 max 4096\n";
-            std::cout << "option name NullMove type check default true\n";
-            std::cout << "option name LMR type check default true\n";
-            std::cout << "option name Aspiration type check default true\n";
-            std::cout << "option name SeeOrdering type check default false\n";
-            std::cout << "option name SeePruning type check default false\n";
-            std::cout << "option name TtAging type check default true\n";
+            const SearchOptions defaults;
+            for (size_t i = 0; i < SEARCH_OPTION_COUNT; ++i) {
+                std::cout << "option name " << SEARCH_OPTIONS[i].uciName
+                          << " type check default "
+                          << (defaults.*(SEARCH_OPTIONS[i].field) ? "true" : "false")
+                          << "\n";
+            }
             std::cout << "uciok" << std::endl;
         } else if (command == "isready") {
             std::cout << "readyok" << std::endl;

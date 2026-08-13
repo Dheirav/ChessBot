@@ -32,7 +32,9 @@ the time; it now builds ten, and CI runs eleven test steps. `test-perft`,
 `test-gamestate`, `test-evalref` and `test-bench` all pass on every push. The negamax conversion (0.9) reproduced the bench
 signature bit-identically — 2,056,371 nodes and the same best move in all 12
 positions — which is the strongest evidence available that it was an exact
-restatement rather than a rewrite.
+restatement rather than a rewrite. (That figure is the signature *as it stood
+then*; it is 1 465 771 since `seeordering` was gated on. The claim here is about
+matching the baseline of the day, so the old number is the right one to keep.)
 
 **0.1 Remove dead eval fields and constants first** (§3.3)
 `captureBonus[]` (`evaluation.cpp:15`), `threatBonus[KING]`, `Piece::fromValue()`,
@@ -306,8 +308,10 @@ margin). Bounds worst-case node counts and is close to free in strength.
 
 **3.2 Static Exchange Evaluation** (§5.2 — biggest single win available)
 *Status: implemented, unit-tested (`make test-see`, 13 hand-computed positions)
-and **wired into the search** as of `1c0c6d6`. Both uses default OFF and are
-awaiting their gates.*
+and **wired into the search** as of `1c0c6d6`. Both gated 2026-08-13:
+`seeordering` **accepted** (+25.6 Elo) and **now on by default**, which moved the
+bench signature to 1 465 771; `seepruning` **not demonstrated at equal nodes**
+(+2.2, CI spans zero) and still off — see the gate results below.*
 
 Standard swap-off algorithm over the attacker sets, in two independently
 toggleable uses:
@@ -334,17 +338,55 @@ about a dozen exchange resolutions per move. Both orderers now score once into a
 stack buffer and sort that. The permutation is unchanged — identical keys give
 identical comparisons — which `bench --check` confirms byte for byte.
 
-*Gates (each hours of wall clock, run one at a time):*
+*Gates, run 2026-08-13, 14 shards × 120 pairs each (3 360 games), baseline
+`nullmove+lmr+asp+ttage`:*
+
+| gate | Elo | 95% CI | verdict |
+|---|---|---|---|
+| `seeordering` on vs off | **+25.6** | [+16.1, +35.2] | **accepted** |
+| `seepruning` on vs off | +2.2 | [−7.2, +11.6] | not demonstrated |
+
 ```
-./tests/shard-gate.sh 14 60 -N 100000 --optA seepruning=on  --optB seepruning=off
-./tests/shard-gate.sh 14 60 -N 100000 --optA seeordering=on --optB seeordering=off
+./tests/shard-gate.sh 14 120 -N 100000 --optA seeordering=on --optB seeordering=off
+./tests/shard-gate.sh 14 120 -N 100000 --optA seepruning=on  --optB seepruning=off
 ```
-Expect a smaller effect than gate 1.5 and therefore many more games: 1.5 stopped
-at 136 because +140 Elo is 14× the H1 bound, and SPRT game counts scale roughly
-as 1/effect². A 1.73× speedup is about three-quarters of a ply, so +40–60 Elo is
-the plausible range and the 800-game cap is reachable. A slow upward LLR drift
-is not a failure — it is the test correctly reporting a real but modest effect,
-and the point estimate with its CI is still a good answer.
+
+The estimate of +40–60 Elo was made for the *combined* 1.73× and came in high;
+banding alone is worth about +26, which is roughly the two-thirds of the node
+saving it accounts for.
+
+**The two results do not mean what the node table predicts, and the reason is
+the gate's own budget.** `seepruning` cuts the most nodes (−41.1%) and won the
+fewest games; `seeordering` cuts fewer (−28.7%) and won clearly. That is not a
+contradiction, because `-N 100000` *pays both sides the same nodes* and so
+deliberately measures quality per node with speed per node divided out.
+Banding changes which move is searched first, which is quality; skipping losing
+captures in quiescence mostly changes how fast the same conclusion is reached,
+which the budget hides by construction. So the honest reading is that
+`seepruning` is **neutral at equal nodes and 1.73× cheaper**, and its value is
+real but invisible to this instrument.
+
+*Therefore the open question on `seepruning` is a timed gate, not a longer
+node-budgeted one* — this is the exception the standing "gate on nodes" rule
+names, a change whose value is speed per node:
+```
+./tests/shard-gate.sh 14 120 -t 3000 --optA seepruning=on --optB seepruning=off
+```
+Read it knowing a timed match is load-dependent: run it on a quiet machine, and
+treat a narrow result as suspect in a way the node-budgeted ones need not be.
+
+*Turning `seeordering` on moved the bench signature to **1 465 771** (from
+2 056 371) and changed two stored best moves*, which is expected — ordering
+decides which of several moves reaching the same score is returned, and it
+changes what gets pruned at a fixed depth. `midgame-1` went `d1c2` → `d4c5`;
+the engine picks `d4c5` under unrelated conditions too (UCI, 64 MB and 256 MB
+hash), so that one is corroborated. `open-sicil` went `b8c6` → `d7d5`, which is
+the weaker-looking of the two: after 1.e4 c5 2.Nf3, `2...d5 3.exd5 Qxd5` costs
+Black time, and the same position over UCI still returns `b8c6`. It is specific
+to bench's conditions and is beyond a depth-6 horizon. **Recorded rather than
+resolved:** the bench is a signature test, not a strength test, and the strength
+question was answered by 3 360 games. If a future eval change is expected to fix
+horizon effects, this is a position worth re-reading.
 
 *Also done, and a prerequisite for every gate below:* search options have names
 (`setSearchOption`), the match harness takes `--optA`/`--optB`, and `uci.cpp`
@@ -378,7 +420,9 @@ reduction depth/move-count thresholds, SPRT the best two or three candidates.
 *Not in the backlog — found while preparing the 3.2 gates.*
 
 *Status: implemented and **on by default**, unlike everything else in Phase 3.
-Its gate is running; no result recorded here yet.*
+Gated 2026-08-13 — **+11.5 Elo, 95% CI [+3.2, +19.8]** over 3 360 games
+(14 shards × 120 pairs, `-N 100000`). The default it shipped with was the right
+one, and it is now measured rather than assumed.*
 
 The table was depth-preferred and **ageless**: an entry could only be displaced
 by one at least as deep, with no notion of which search stored it. Over a game
@@ -395,9 +439,10 @@ per entry, paid for by narrowing `depth` to `int8_t` so the entry does not grow
 and a wider entry would change the table length, the index distribution, and
 therefore every node count the search produces.
 
-**It defaults ON because it is a repair, not a feature.** The other Phase 3
-toggles default off until a gate accepts them; this one restores intended
-behaviour that was never there, so the burden runs the other way. It is still a
+**It defaults ON because it is a repair, not a feature.** A Phase 3 toggle
+defaults off until a gate accepts it — as `seeordering` did on 2026-08-13 —
+whereas this one restores intended behaviour that was never there, so the burden
+runs the other way. It is still a
 toggle — so the repair can be measured, and so the old behaviour is one flag
 away if the measurement disagrees.
 
@@ -461,7 +506,8 @@ The backlog's measured ceilings are the whole point of this ordering. Current
 split at depth 5: evaluation 34.1%, legality filter 19.4%, `makeMove` 10.4%.
 
 **Status: 5.1, 5.2 and 5.3 are DONE** — 1.45× together, all verified by the
-bench signature staying at 2 056 371. Remaining: 5.4 (lazy eval, needs a match)
+bench signature staying at 2 056 371, which was the baseline at the time (it is
+1 465 771 now). Remaining: 5.4 (lazy eval, needs a match)
 and 5.5 (pin-aware movegen). See `BACKLOG.md §7` for the measurements.
 
 **5.1 Cache the static eval in the TT entry** (§4.3) — repeated visits skip
@@ -514,7 +560,8 @@ incremental material/PST updates (§4.3, ~1 µs against real drift risk).
 **Done so far:** Phases 0, 1 (code **and** both gates) and 2. Eleven tests now
 run in CI: perft, gamestate, evalref, bench, see, bitboard, timecontrol, UCI,
 guiinput, pgn, plus a match smoke test. **Phase 3 is unblocked**; SEE is wired
-in and awaiting its gates (3.2).
+in and both its gates have run (3.2) — ordering accepted and on, pruning still
+off pending a timed gate.
 
 Landed since this plan was written, and not covered by any item above: PGN
 export with a SAN test, the headless GUI-input test, and transposition-table
@@ -595,7 +642,8 @@ is conclusive, and 1.5 needed 136 games where the fixed-N plan wanted ~800.
 ./tests/bench 6 --opt <feature>=on
 ```
 
-Compare against the 2 056 371-node baseline. A feature that barely moves the
+Compare against the current baseline, **1 465 771** nodes at depth 6 (it was
+2 056 371 until `seeordering` was gated on, 2026-08-13). A feature that barely moves the
 count, or moves it the wrong way, is wired in wrong or is not doing what you
 think; find that out now rather than a day into a match. This is how 3.2's
 classify-don't-order bug was caught.

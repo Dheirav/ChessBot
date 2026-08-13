@@ -90,8 +90,8 @@ reporting mates as `mate N` rather than a centipawn value.
 | `LMR` | check | true | late move reductions |
 | `Aspiration` | check | true | aspiration windows |
 | `TtAging` | check | true | age the TT once per search |
-| `SeeOrdering` | check | **false** | order captures by SEE; awaiting its gate |
-| `SeePruning` | check | **false** | drop losing captures in quiescence; awaiting its gate |
+| `SeeOrdering` | check | true | order captures by SEE; gated +25.6 Elo |
+| `SeePruning` | check | **false** | drop losing captures in quiescence; awaiting a *timed* gate |
 
 The heuristic toggles are exposed on purpose: A/B testing a single feature can
 then run through standard tooling instead of only through `tests/match`. They
@@ -156,10 +156,18 @@ small risk of missing a line for a much smaller tree. That is why each one is an
 strength measurement is only interpretable if the two arms differ in exactly one
 thing, which one combined switch cannot express.
 
-**SEE ships disabled.** Both of its uses (`SeeOrdering`, `SeePruning`) default
-to off. The code is complete and unit-tested, but a heuristic is not accepted
-here until it wins a match against the version without it (PLAN.md 3.2), and
-until then the shipped engine and the bench signature stay exactly as they were.
+**SEE ships half on**, and the split is the method working rather than an
+inconsistency. `SeeOrdering` defaults **on**: it won its match by +25.6 Elo
+(95% CI [+16.1, +35.2], 3 360 games) and was turned on the same day. `SeePruning`
+defaults **off**: it measured +2.2 with the interval spanning zero.
+
+That second result is not "SEE pruning does nothing". The gate pays both sides
+the same *nodes*, which is what makes it reproducible — and that budget divides
+out exactly what pruning buys. Skipping losing captures in quiescence cuts 41%
+of the tree but barely changes the conclusion reached, so at equal nodes there
+is nothing left for it to win with. It stays off until a timed gate rules on it,
+because a heuristic is not accepted here until it wins a match against the
+version without it (PLAN.md 3.2).
 
 ### Evaluation
 Handcrafted and material-plus-terms: piece-square tables, mobility, king safety

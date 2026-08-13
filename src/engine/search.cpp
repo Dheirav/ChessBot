@@ -64,12 +64,12 @@ SearchOptions g_searchOptions;
 // Adding a feature means adding one line here, and the harness header, the UCI
 // option list and the match log all learn about it at once.
 const SearchOptionEntry SEARCH_OPTIONS[] = {
-    {"nullmove",    "nullmove", &SearchOptions::nullMove},
-    {"lmr",         "lmr",      &SearchOptions::lmr},
-    {"aspiration",  "asp",      &SearchOptions::aspiration},
-    {"seeordering", "seeord",   &SearchOptions::seeOrdering},
-    {"seepruning",  "seeprune", &SearchOptions::seePruning},
-    {"ttaging",     "ttage",    &SearchOptions::ttAging},
+    {"nullmove",    "nullmove", "NullMove",    &SearchOptions::nullMove},
+    {"lmr",         "lmr",      "LMR",         &SearchOptions::lmr},
+    {"aspiration",  "asp",      "Aspiration",  &SearchOptions::aspiration},
+    {"seeordering", "seeord",   "SeeOrdering", &SearchOptions::seeOrdering},
+    {"seepruning",  "seeprune", "SeePruning",  &SearchOptions::seePruning},
+    {"ttaging",     "ttage",    "TtAging",     &SearchOptions::ttAging},
 };
 const size_t SEARCH_OPTION_COUNT = sizeof(SEARCH_OPTIONS) / sizeof(SEARCH_OPTIONS[0]);
 

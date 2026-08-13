@@ -16,9 +16,19 @@ struct SearchOptions {
     bool quiet = false;      // suppress the per-depth progress output
 
     // Static exchange evaluation, as two independently gated uses (PLAN.md 3.2).
-    // Both default OFF: each is accepted by its own A/B match, and until then
-    // the shipped engine and the bench signature must stay exactly as they were.
-    bool seeOrdering = false;  // sort captures by the exchange result, not the victim
+    // Each is accepted or rejected by its own A/B match, and the defaults below
+    // are what those matches returned on 2026-08-13 over 3 360 games each.
+    //
+    // Ordering is ON: +25.6 Elo, 95% CI [+16.1, +35.2], at equal nodes.
+    //
+    // Pruning is OFF, but *not* because it was rejected. It measured +2.2 with
+    // the interval spanning zero on a node-budgeted gate — and a node budget
+    // pays both sides the same nodes, so it divides out exactly the thing
+    // pruning buys. Skipping losing captures in quiescence mostly reaches the
+    // same conclusion faster (−41.1% nodes at bench 6); it barely changes which
+    // conclusion that is. It stays off until a *timed* gate rules on it, since
+    // shipping an unmeasured default is the habit these toggles exist to break.
+    bool seeOrdering = true;   // sort captures by the exchange result, not the victim
     bool seePruning = false;   // quiescence skips captures that lose material
 
     // Age the transposition table once per search, so entries left by earlier
@@ -49,6 +59,7 @@ bool setSearchOption(SearchOptions& opts, const std::string& name, bool value);
 struct SearchOptionEntry {
     const char* name;       // lookup key, lowercase: "seepruning"
     const char* shortName;  // label used in match headers: "seeprune"
+    const char* uciName;    // as advertised over UCI: "SeePruning"
     bool SearchOptions::*field;
 };
 extern const SearchOptionEntry SEARCH_OPTIONS[];

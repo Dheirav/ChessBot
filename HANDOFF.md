@@ -25,62 +25,65 @@ Phase 3 is in progress. What is wired in:
 
 | feature | default | status |
 |---|---|---|
-| null-move pruning, LMR, aspiration windows | **on** | accepted by gate 1.5 |
-| TT aging | **on** | gate running now — see below |
-| `seeordering` | off | awaiting gate |
-| `seepruning` | off | awaiting gate |
+| null-move pruning, LMR, aspiration windows | **on** | accepted by gate 1.5, +140 Elo |
+| TT aging | **on** | **accepted**, +11.5 Elo [+3.2, +19.8] |
+| `seeordering` | **on** | **accepted**, +25.6 Elo [+16.1, +35.2] — on by default since 2026-08-13 |
+| `seepruning` | off | equal-nodes gate neutral: +2.2 [−7.2, +11.6]; needs a **timed** gate |
 
-TT aging defaults on because it is a repair, not a feature: the table was
-depth-preferred and ageless, so positions from moves already played could only
-be displaced by something deeper still, and the live search got a shrinking
-share of the table. The others default off until a gate accepts them.
+All three gates ran 2026-08-13 at 14 shards × 120 pairs (3 360 games each,
+`-N 100000`). TT aging defaults on because it is a repair, not a feature — the
+table was depth-preferred and ageless, so positions from moves already played
+could only be displaced by something deeper still, and the live search got a
+shrinking share of the table. The gate has now confirmed that default rather
+than merely assuming it.
 
-The bench signature is **2,056,371 nodes** at depth 6. Any change claiming to
-preserve search behaviour must reproduce it exactly.
+**`seepruning` was not rejected; it was measured with the wrong instrument.** It
+cuts the most nodes of anything in Phase 3 (−41.1% at bench 6) and scored
+neutral at equal nodes, which is what a change that buys *speed* per node rather
+than *quality* per node looks like when both sides are paid the same nodes. Its
+open gate is a timed one. Do not read +2.2 as "SEE pruning does nothing".
+
+The bench signature is **1,465,771 nodes** at depth 6. Any change claiming to
+preserve search behaviour must reproduce it exactly. It was 2,056,371 until
+`seeordering` was turned on (2026-08-13); older documents quoting that figure
+are describing the baseline of their day, not a regression.
 
 ---
 
 ## In flight
 
-**The `ttaging` gate is running.** Started 2026-08-13 00:06, 14 shards × 120
-pairs (3,360 games), roughly 110 minutes.
+**Nothing is running.** Three gates completed overnight on 2026-08-13 and are
+pooled and recorded above; their logs are kept:
 
-```
-./tests/shard-gate.sh 14 120 -N 100000 --optA ttaging=on --optB ttaging=off
-```
+| directory | gate | pooled result |
+|---|---|---|
+| `shard-20260813-000634/` | `ttaging` | +11.5 [+3.2, +19.8] |
+| `shard-20260813-015757/` | `seepruning` | +2.2 [−7.2, +11.6] |
+| `shard-20260813-034736/` | `seeordering` | +25.6 [+16.1, +35.2] |
 
-Logs are in `shard-20260813-000634/`. When it finishes:
+Re-pool any of them with `./tests/pool-shards.sh <dir>/`.
 
-```bash
-./tests/pool-shards.sh shard-20260813-000634/
-```
-
-Then record the pooled result in `PLAN.md` 3.7 and in the table above. If it
-comes back negative, the flag is the way to revert — `ttaging` is a toggle
-precisely so the repair can be measured rather than assumed.
-
-Note the gate is node-budgeted, so it is immune to whatever else was running on
-the machine while it ran. That is the whole reason for `-N`.
+**Always pool before believing a shard.** Shard 1 of the `ttaging` gate on its
+own read +13 with a CI spanning zero — "no difference demonstrated". Pooled over
+all fourteen, the same experiment is +11.5 with the interval clear of zero. The
+point estimate barely moved; the interval is what shrank. One shard is a
+240-game match, and no 240-game match resolves a 10-Elo effect.
 
 ---
 
 ## Next, in order
 
-1. **Pool and record the `ttaging` result.** Ten minutes of work; do it before
-   starting anything else, or the logs get confusing.
-2. **The two SEE gates** (`PLAN.md` 3.2). Run one at a time, each is hours:
+1. **A timed gate for `seepruning`** (`PLAN.md` 3.2), on a quiet machine:
    ```bash
-   ./tests/shard-gate.sh 14 60 -N 100000 --optA seepruning=on  --optB seepruning=off
-   ./tests/shard-gate.sh 14 60 -N 100000 --optA seeordering=on --optB seeordering=off
+   ./tests/shard-gate.sh 14 120 -t 3000 --optA seepruning=on --optB seepruning=off
    ```
-   Both have been attempted before and produced nothing usable — the first was
-   timed rather than node-budgeted and ran half its length against a job pinning
-   fifteen cores. Expect a modest effect (+40–60 Elo plausible) and therefore
-   many games; a slow LLR drift is a real result, not a failure.
-3. **Phase 3 remainder:** bound quiescence and delta pruning (3.1), check
+   This is the documented exception to gating on nodes. Its baseline is now the
+   engine as shipped, with `seeordering` on — which is also the harder test for
+   it, since ordering already removes some of the tree pruning would have cut.
+2. **Phase 3 remainder:** bound quiescence and delta pruning (3.1), check
    extensions (3.3), futility/razoring (3.4), IID (3.5), retune LMR (3.6).
    3.1 and 3.3 are the cheap ones and neither is implemented yet.
-4. **Phase 4** (evaluation correctness) has a known concrete bug waiting: king
+3. **Phase 4** (evaluation correctness) has a known concrete bug waiting: king
    safety is **−4** in the mirror-symmetric starting position, where every term
    must be 0. See `PLAN.md` 4.2.
 
@@ -121,6 +124,19 @@ the machine while it ran. That is the whole reason for `-N`.
 - **`TTEntry.depth` is `int8_t` on purpose.** Entry size divides into
   `ENTRIES_PER_MB`, so widening it changes the table length, the index
   distribution, and every node count the search produces.
+- **A header-only change does not rebuild the test binaries.** They are built
+  from `$(ENGINE_SRC)` in one `g++` call per binary, and `-MMD` with many
+  sources but a single `-o` overwrites the `.d` once per translation unit, so
+  `tests/bench.d` ends up listing only the last file compiled. Editing
+  `search.hpp` and running `make tests` prints *"Nothing to be done"* and leaves
+  you testing the old engine. `rm -f tests/{perft,match,gamestate,evalref,bench,timecontrol,see_test,bitboard_test,guiinput,pgn}`
+  and rebuild, or `make clean`. This is silent and it will fool you.
+- **`make tests` also says "Nothing to be done" for the innocent reason** that
+  `tests/` is a directory — the target is `.PHONY`, so that is not the cause,
+  but the two look identical from the terminal.
+- **UCI advertises its defaults from a default-constructed `SearchOptions`.**
+  Do not hand-write `option name ... default ...` lines; the hand-written list
+  said `SeeOrdering default false` for as long as it took someone to notice.
 - **`test-evalref` and `test-bench` fail on any change they cover, by design.**
   Review the diff, then `make evalref-regen` / `make bench-regen`. Regenerating
   without reading the diff throws away the only thing they do.
