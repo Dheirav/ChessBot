@@ -138,22 +138,37 @@ point estimate barely moved; the interval is what shrank. One shard is a
 
 ## Next, in order
 
-1. **Gate Phase 4.** `BUGS.md` 2, 3 and 5 are all shipped ungated on correctness
-   grounds, and together they cost +20.1% nodes at bench 6 (1 465 771 ->
-   1 759 990). Whether that is worth Elo is genuinely open, and one match covers
-   all three since they landed together. There is no toggle for them, which is
-   the awkward part: measuring them means building two binaries and pointing the
-   harness at both, rather than flipping a flag.
-3. **A timed gate for `seepruning`** (`PLAN.md` 3.2), on a quiet machine:
+1. **A timed gate for `seepruning`** (`PLAN.md` 3.2), on a quiet machine:
    ```bash
-   ./tests/shard-gate.sh 14 120 -t 3000 --optA seepruning=on --optB seepruning=off
+   ./tests/match -n 1680 -t 100 --optA seepruning=on --optB seepruning=off
    ```
-   This is the documented exception to gating on nodes. Its baseline is now the
-   engine as shipped, with `seeordering` on — which is also the harder test for
-   it, since ordering already removes some of the tree pruning would have cut.
-   **Nothing else may run on the machine while it does**, including the Lichess
-   bot: a timed match silently measures whatever else was competing for the CPU.
-4. **Phase 3 remainder:** bound quiescence and delta pruning (3.1 — also
+   This is the documented exception to gating on nodes, and the only measurement
+   currently ready to run. Its baseline is now the engine as shipped, with
+   `seeordering` on — the harder test for it, since ordering already removes some
+   of the tree pruning would have cut. **Nothing else may run on the machine
+   while it does**, including the Lichess bot: a timed match silently measures
+   whatever else was competing for the CPU.
+
+   It is `tests/match` directly and **not** `shard-gate.sh`, which refuses
+   anything without `-N` — sharding a timed gate is what its header exists to
+   forbid. One core, therefore, and that is what sets the time control: `-t` is
+   a budget *per move*, and measured throughput is ~3.5 s per game at `-t 50`,
+   so 3 360 games (the volume of the other three gates) is about 3.3 h there and
+   an estimated 6-7 h at `-t 100`. The `-t 3000` this file used to recommend
+   would have been roughly nineteen days, on a command that exits immediately
+   (`BUGS.md` 9).
+
+2. **Gate Phase 4** — *blocked on `BUGS.md` 8.* `BUGS.md` 2, 3 and 5 are shipped
+   ungated on correctness grounds and together cost +20.1% nodes at bench 6
+   (1 465 771 -> 1 759 990), so whether that is worth Elo is genuinely open. One
+   match would cover all three, since they landed together. But `tests/match`
+   runs both configurations in one process and shares a process-global eval
+   cache between them, so it cannot measure an evaluation change at all until
+   that is fixed. Note this would not reverse the fixes if it came back
+   negative — it would call for retuning king-safety magnitude against the
+   corrected baseline, which is a change that gates normally.
+
+3. **Phase 3 remainder:** bound quiescence and delta pruning (3.1 — also
    `BUGS.md` 4), check extensions (3.3), futility/razoring (3.4), IID (3.5),
    retune LMR (3.6). 3.1 and 3.3 are the cheap ones and neither is implemented.
 

@@ -276,6 +276,58 @@ have.
 
 ---
 
+## 8. The harness cannot gate an evaluation change
+
+Not an engine defect — an instrument one, and it surfaced only when Phase 4
+became the first evaluation change this project has tried to measure.
+
+`tests/match.cpp` plays two `SearchOptions` configurations **inside one
+process**, and `g_evalCache` (`evaluation.cpp`) is a single process-global array
+it never clears between them. A position scored under configuration A is served
+from that cache to configuration B. Every gate run so far compared *search*
+changes — `nullmove`, `lmr`, `aspiration`, `seeordering`, `seepruning`,
+`ttaging` — none of which touch evaluation, so the shared cache was harmless. It
+is not harmless now, and `PLAN.md` 5.4 (lazy evaluation) will meet the same wall.
+
+There is also no way to point the harness at two *binaries*, which is the other
+way this is normally done.
+
+Fixing it is one of:
+
+- fold a per-configuration id into the eval cache's lock, so entries written by
+  one side never validate for the other — cheap, and it keeps the node-budget
+  methodology the rest of the gates rely on;
+- teach `tests/match` to drive two external UCI binaries — more work, but it
+  removes the need to keep a superseded implementation behind a flag purely so a
+  match can see it.
+
+Not urgent: the Phase 4 fixes are correctness repairs that a bad match result
+would not reverse. This entry exists so the limitation is known before someone
+plans a gate that cannot run.
+
+---
+
+## 9. `shard-gate.sh` cannot run the gate this repo told you to run
+
+`HANDOFF.md` carried, as its top next step, a command that exits immediately:
+
+```
+$ ./tests/shard-gate.sh 14 120 -t 3000 --optA seepruning=on --optB seepruning=off
+refusing: shard only a node-limited gate (-N); see header
+```
+
+The script is right and the instruction was wrong — its header explains that
+shards under a time budget compete for the CPU and pool into a time control
+nobody chose. `-t` is also a budget per *move*, so 3 000 ms was roughly nineteen
+days for the volume the other gates used. Corrected on 2026-08-14 to sequential
+`tests/match` at a time control sized from measured throughput.
+
+The lesson is the cheap one: a documented command that has never been run is a
+guess. This one sat at the top of the file and was carried forward through two
+separate edits before anyone tried it.
+
+---
+
 ## Things that look like bugs and are not
 
 - **Two games against `ficheallrs` show `Termination "Abandoned"` after
