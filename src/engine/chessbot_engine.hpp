@@ -44,7 +44,8 @@ public:
     void initialize() override;
     void shutdown() override;
     
-    Move findBestMove(const Board& board, int depth = 3) override;
+    Move findBestMove(const Board& board, int depth = 3,
+                      const std::vector<uint64_t>& gameHistory = {}) override;
     int evaluatePosition(const Board& board) override;
     
     std::string getEngineName() const override;
@@ -56,7 +57,8 @@ public:
     void setMoveTimeMs(int ms);
     int getMoveTimeMs() const;
     
-    void findBestMoveAsync(const Board& board, MoveCallback callback) override;
+    void findBestMoveAsync(const Board& board, MoveCallback callback,
+                           const std::vector<uint64_t>& gameHistory = {}) override;
     bool isThinking() const override;
     void stopThinking() override;
     

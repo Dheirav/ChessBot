@@ -26,7 +26,8 @@ void ChessBotEngine::shutdown() {
     }
 }
 
-Move ChessBotEngine::findBestMove(const Board& board, int depth) {
+Move ChessBotEngine::findBestMove(const Board& board, int depth,
+                                  const std::vector<uint64_t>& gameHistory) {
     std::lock_guard<std::mutex> lock(engineMutex);
     
     thinking = true;
@@ -40,7 +41,7 @@ Move ChessBotEngine::findBestMove(const Board& board, int depth) {
         bestMove = ::findBestMoveIterativeDeepening(
             searchBoard,
             SearchLimits(depth > 0 ? depth : searchDepth.load(), moveTimeMs.load()),
-            stopSearch, *transpositionTable);
+            stopSearch, *transpositionTable, gameHistory);
     }
     
     thinking = false;
@@ -83,7 +84,8 @@ int ChessBotEngine::getMoveTimeMs() const {
     return moveTimeMs;
 }
 
-void ChessBotEngine::findBestMoveAsync(const Board& board, MoveCallback callback) {
+void ChessBotEngine::findBestMoveAsync(const Board& board, MoveCallback callback,
+                                       const std::vector<uint64_t>& gameHistory) {
     // Stop any existing search
     stopThinking();
     
@@ -100,7 +102,7 @@ void ChessBotEngine::findBestMoveAsync(const Board& board, MoveCallback callback
     thinking = true;
 
     // Start new search in background thread
-    searchThread = std::thread([this, board, callback]() {
+    searchThread = std::thread([this, board, callback, gameHistory]() {
         try {
             std::cout << "Engine thinking asynchronously..." << std::endl;
             
@@ -113,7 +115,7 @@ void ChessBotEngine::findBestMoveAsync(const Board& board, MoveCallback callback
                 std::lock_guard<std::mutex> ttLock(ttMutex);
                 bestMove = ::findBestMoveIterativeDeepening(
                     searchBoard, SearchLimits(searchDepth.load(), moveTimeMs.load()),
-                    stopSearch, *transpositionTable);
+                    stopSearch, *transpositionTable, gameHistory);
             }
             
             // Deliver the result even when interrupted: iterative deepening

@@ -118,6 +118,24 @@ def main():
     out = e.until("bestmove")
     check("promotion move accepted", not any("illegal move" in l for l in out))
 
+    # Repetition: the engine must see the game's past, not just the position.
+    #
+    # This is Crimsy_Bot vs sargon-2ply, lichess CTGzqoeY, at the move where the
+    # engine drew a rook-up position by giving the check that made the threefold
+    # — its own evaluation reading +5.16 the whole way. The position had already
+    # occurred twice; nothing about the board alone says so, which is exactly
+    # why the bug survived every other test in this repo.
+    #
+    # Asserting "not c6a8" rather than "plays c6c3" on purpose: the fix is that
+    # the draw is off the table, and pinning the replacement move would turn any
+    # future evaluation change into a failure here.
+    rep = ("g1f3 d7d5 e2e3 c8g4 b1c3 b8c6 h2h3 g4f3 d1f3 d5d4 f1b5 d4c3 "
+           "b5c6 b7c6 f3c6 d8d7 c6a8 d7d8 a8c6 d8d7 c6a8 d7d8 a8c6 d8d7")
+    e.send(f"position startpos moves {rep}")
+    e.send("go movetime 3000")
+    out = e.until("bestmove", timeout=30)
+    check("declines a threefold while winning", out[-1] != "bestmove c6a8", out[-1])
+
     # An unknown command must be ignored, not fatal.
     e.send("nonsense command")
     e.send("isready")

@@ -122,6 +122,16 @@ public:
     std::string savePgn(const std::string& directory = "games") const;
     int getCurrentEvaluation() const;
     const std::vector<Move>& getMoveHistory() const { return moveHistory; }
+
+    // Zobrist keys of the positions before the current one, back to the last
+    // irreversible move — what a search needs in order to see a repetition
+    // rather than only the ones it invents inside its own tree (BUGS.md 1).
+    //
+    // Derived from gameHistory rather than tracked beside it. gameHistory is
+    // already kept correct across undo and redo; a second list would be correct
+    // only until the first time the two drifted, and this is rebuilt once per
+    // engine move against a search that then thinks for seconds.
+    std::vector<uint64_t> repetitionHistory() const;
     std::string getCurrentFEN() const { return board.getFEN(); }
     
     // Engine control

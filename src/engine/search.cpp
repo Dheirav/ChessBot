@@ -277,6 +277,25 @@ static int quiescence(Board& board, int ply, int alpha, int beta,
     return alpha;
 }
 
+// Positions the game reached before the root, back to the last irreversible
+// move. Set once per search from the caller's history.
+//
+// A file-static rather than a parameter threaded through every recursive call,
+// for the same reason g_searchNodes is: one search runs at a time, this is read
+// once per node in the hottest loop in the engine, and widening the recursive
+// signature to carry a value that never changes during a search buys nothing.
+// If the search is ever made concurrent, this becomes shared read-only state,
+// which is what it already is in practice.
+static std::vector<uint64_t> g_gameHistory;
+
+void recordGamePosition(std::vector<uint64_t>& history, uint64_t hashBefore,
+                        const Board& after) {
+    history.push_back(hashBefore);
+    // An irreversible move partitions the game: nothing before it can recur,
+    // including the position just recorded.
+    if (after.halfmoveClock == 0) history.clear();
+}
+
 // Minimax with transposition table support. `pathHashes` holds the zobrist
 // keys of the positions on the current search path (root to parent) and is
 // used to score in-search repetitions as draws.
@@ -291,13 +310,31 @@ static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
 
     uint64_t hash = board.getHash();
 
-    // Draw detection. Both checks run before the TT probe: a repetition
-    // score is path-dependent, and a cached score must not override it.
+    // Draw detection. All of it runs before the TT probe: a repetition score is
+    // path-dependent, and a cached score must not override it.
     if (board.halfmoveClock >= 100) {
         return 0; // Fifty-move rule
     }
-    if (ply > 0 && std::find(pathHashes.begin(), pathHashes.end(), hash) != pathHashes.end()) {
-        return 0; // Repetition within the search line: treat as a draw
+    if (ply > 0) {
+        // Two rules, because a repetition inside the tree and a repetition of
+        // something the game already played are not equally conclusive.
+        //
+        // Inside the tree, one match is enough. Both sides are choosing moves
+        // here, so a line that can reach the same position twice can normally
+        // reach it a third time, and treating the second occurrence as a draw
+        // is the standard, and much cheaper, approximation.
+        if (std::find(pathHashes.begin(), pathHashes.end(), hash) != pathHashes.end()) {
+            return 0;
+        }
+        // Against the actual game, one match is *not* enough: it makes this
+        // only the second occurrence, and a second occurrence is not a draw.
+        // Scoring it 0 would have the engine decline winning lines and claim
+        // draws that do not exist. Two prior occurrences make this the third,
+        // which is the one that ends the game — and is exactly the position
+        // the engine used to walk into while a rook up.
+        if (std::count(g_gameHistory.begin(), g_gameHistory.end(), hash) >= 2) {
+            return 0;
+        }
     }
 
     int originalAlpha = alpha;
@@ -456,8 +493,15 @@ static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
 // since there is always a completed result to fall back on.
 Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
                                    const std::atomic<bool>& shouldStop,
-                                   TranspositionTable& tt) {
+                                   TranspositionTable& tt,
+                                   const std::vector<uint64_t>& gameHistory) {
     const int maxDepth = limits.maxDepth;
+
+    // Copied, not referenced: the caller owns its history and may edit it the
+    // moment this returns, and a search reading a half-updated list would score
+    // draws that are not there. It is at most fifty-odd entries by
+    // construction, so the copy is not worth avoiding.
+    g_gameHistory = gameHistory;
 
     // Clear move ordering data for new search
     g_moveOrderer.clear();
@@ -712,6 +756,8 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
 // existed before time control.
 Move findBestMoveIterativeDeepening(Board& board, int maxDepth,
                                    const std::atomic<bool>& shouldStop,
-                                   TranspositionTable& tt) {
-    return findBestMoveIterativeDeepening(board, SearchLimits(maxDepth), shouldStop, tt);
+                                   TranspositionTable& tt,
+                                   const std::vector<uint64_t>& gameHistory) {
+    return findBestMoveIterativeDeepening(board, SearchLimits(maxDepth), shouldStop, tt,
+                                          gameHistory);
 }

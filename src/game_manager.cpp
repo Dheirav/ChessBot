@@ -180,7 +180,7 @@ void GameManager::requestEngineMove() {
         }
         pendingEngineMove = move;
         hasPendingEngineMove = true;
-    });
+    }, repetitionHistory());
 }
 
 void GameManager::processPendingEngineMove() {
@@ -443,6 +443,23 @@ static std::string repetitionKey(const std::string& fen) {
         pos = fen.find(' ', pos + 1);
     }
     return (pos == std::string::npos) ? fen : fen.substr(0, pos);
+}
+
+std::vector<uint64_t> GameManager::repetitionHistory() const {
+    std::vector<uint64_t> hashes;
+    // gameHistory's last entry is the position the engine is about to search.
+    // A position is not part of its own past, so it is excluded here.
+    if (gameHistory.size() < 2) return hashes;
+
+    Board replay;
+    for (size_t i = 0; i + 1 < gameHistory.size(); ++i) {
+        if (!replay.setFromFEN(gameHistory[i])) return {};  // say nothing rather than something wrong
+        // A zero halfmove clock means the move into this position was
+        // irreversible, so nothing before it can ever recur.
+        if (replay.halfmoveClock == 0) hashes.clear();
+        hashes.push_back(replay.getHash());
+    }
+    return hashes;
 }
 
 bool GameManager::isThreefoldRepetition() const {

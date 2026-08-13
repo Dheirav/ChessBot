@@ -128,7 +128,16 @@ static GameOutcome playGame(const std::vector<Move>& opening, bool aPlaysWhite,
                             int maxPlies) {
     Board board;
     board.setFromFEN(Board::INITIAL_FEN);
-    for (const Move& m : opening) board.makeMove(m);
+    // Positions the game has visited, handed to each search so the engines can
+    // see repetitions rather than only the ones they invent inside their own
+    // trees. Without this a gate on repetition handling would be two blind
+    // engines playing each other, which measures nothing.
+    std::vector<uint64_t> history;
+    for (const Move& m : opening) {
+        const uint64_t before = board.getHash();
+        board.makeMove(m);
+        recordGamePosition(history, before, board);
+    }
 
     ttA.clear();
     ttB.clear();
@@ -170,7 +179,7 @@ static GameOutcome playGame(const std::vector<Move>& opening, bool aPlaysWhite,
         g_searchOptions = cfg.opts;
         g_searchOptions.quiet = true;
         g_haveScore = false;
-        Move best = findBestMoveIterativeDeepening(board, cfg.limits, stop, tt);
+        Move best = findBestMoveIterativeDeepening(board, cfg.limits, stop, tt, history);
 
         // Defensive: a search that returns nothing usable would otherwise
         // corrupt the game; fall back to the first legal move.
@@ -190,7 +199,9 @@ static GameOutcome playGame(const std::vector<Move>& opening, bool aPlaysWhite,
             whiteWinning = blackWinning = level = 0;
         }
 
+        const uint64_t before = board.getHash();
         board.makeMove(best);
+        recordGamePosition(history, before, board);
         if (++seen[board.getHash()] >= 3) return {DRAW, ply, "repetition"};
 
         if (whiteWinning >= RESIGN_PLIES || blackWinning >= RESIGN_PLIES) {

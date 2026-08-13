@@ -59,10 +59,22 @@ bool parseUciMove(const Board& board, const std::string& text, Move& out) {
     return false;
 }
 
+// Positions this game has already visited, rebuilt from every "position"
+// command. A GUI re-sends the whole move list each move rather than telling the
+// engine what was played, so this is the only place the engine ever learns that
+// its position has a past — which is why the search was blind to repetitions
+// until it was collected here (BUGS.md 1).
+std::vector<uint64_t> g_gameHistory;
+
 // "position [startpos | fen <6 fields>] [moves <m1> <m2> ...]"
 void handlePosition(std::istringstream& is) {
     std::string token;
     is >> token;
+
+    // Rebuilt from scratch on every command. A "position" line is a complete
+    // statement of the game, not a delta, so accumulating across calls would
+    // add the same positions again on every move.
+    g_gameHistory.clear();
 
     if (token == "startpos") {
         g_board.setFromFEN(Board::INITIAL_FEN);
@@ -91,7 +103,9 @@ void handlePosition(std::istringstream& is) {
                       << moveText << std::endl;
             return;
         }
+        const uint64_t before = g_board.getHash();
         g_board.makeMove(m);
+        recordGamePosition(g_gameHistory, before, g_board);
     }
 }
 
@@ -181,10 +195,14 @@ void handleGo(std::istringstream& is) {
     // cannot become unsafe if that ordering is ever relaxed.
     Board searchBoard = g_board.copyForSearch();
 
-    g_searchThread = std::thread([limits, searchBoard]() mutable {
+    // History copied into the thread for the same reason the board is: the next
+    // "position" command rebuilds it, and it must not do so under a live search.
+    std::vector<uint64_t> history = g_gameHistory;
+
+    g_searchThread = std::thread([limits, searchBoard, history]() mutable {
         g_searchOptions.quiet = true;   // the search's own logging is not UCI
         g_searchInfo = onSearchInfo;
-        Move best = findBestMoveIterativeDeepening(searchBoard, limits, g_stop, *g_tt);
+        Move best = findBestMoveIterativeDeepening(searchBoard, limits, g_stop, *g_tt, history);
         g_searchInfo = nullptr;
         std::cout << "bestmove " << toUci(best) << std::endl;
     });
@@ -265,6 +283,7 @@ int uciLoop() {
             stopSearch();
             g_tt->clear();
             g_board.setFromFEN(Board::INITIAL_FEN);
+            g_gameHistory.clear();
         } else if (command == "position") {
             stopSearch();
             handlePosition(is);

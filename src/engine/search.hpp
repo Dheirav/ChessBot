@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 // Search heuristics. Unlike alpha-beta these are not exact: they trade a small
 // risk of missing a line for a much smaller tree, so they are toggleable both
@@ -130,6 +131,23 @@ struct SearchLimits {
 // than quality per node — a faster evaluation, say — is invisible to a
 // node-limited match, and must be gated on the clock instead.
 
+// Positions the game already visited, for repetition detection.
+//
+// A search that is handed only a Board cannot see a repetition, because a
+// board is a position and a repetition is a property of a *game*. Without this
+// the engine detects only the repetitions it invents inside its own tree and
+// is blind to the ones it is actually walking into: it once drew a rook-up
+// position by playing the move that made the threefold, its own evaluation
+// reading +5.16 the whole way (BUGS.md 1).
+//
+// Callers replaying a game call this after each makeMove. `hashBefore` is the
+// hash of the position the move was made from, and `after` is the board once
+// the move has been played. Everything before an irreversible move is dropped,
+// because no position across a capture or a pawn move can ever recur — which
+// also keeps the list short enough for the linear scan the search does on it.
+void recordGamePosition(std::vector<uint64_t>& history, uint64_t hashBefore,
+                        const Board& after);
+
 // The engine's only search entry point. Iterative deepening over a
 // transposition table, with the heuristics in SearchOptions above.
 //
@@ -140,12 +158,18 @@ struct SearchLimits {
 // With a time budget the search returns the best move from the last *completed*
 // iteration. A partial iteration is never used: its move list is only partly
 // searched, so its "best" move is just the best of an arbitrary prefix.
+//
+// `gameHistory` defaults to empty, which means "this position has no past" —
+// correct for a bench or a test position, and wrong for anything playing a
+// game. Every caller that plays games passes it.
 Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
                                    const std::atomic<bool>& shouldStop,
-                                   TranspositionTable& tt);
+                                   TranspositionTable& tt,
+                                   const std::vector<uint64_t>& gameHistory = {});
 
 // Depth-only convenience overload, for tests and for callers with no clock.
 Move findBestMoveIterativeDeepening(Board& board, int maxDepth,
                                    const std::atomic<bool>& shouldStop,
-                                   TranspositionTable& tt);
+                                   TranspositionTable& tt,
+                                   const std::vector<uint64_t>& gameHistory = {});
 
