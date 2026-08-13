@@ -124,16 +124,15 @@ point estimate barely moved; the interval is what shrank. One shard is a
 - **`TTEntry.depth` is `int8_t` on purpose.** Entry size divides into
   `ENTRIES_PER_MB`, so widening it changes the table length, the index
   distribution, and every node count the search produces.
-- **A header-only change does not rebuild the test binaries.** They are built
-  from `$(ENGINE_SRC)` in one `g++` call per binary, and `-MMD` with many
-  sources but a single `-o` overwrites the `.d` once per translation unit, so
-  `tests/bench.d` ends up listing only the last file compiled. Editing
-  `search.hpp` and running `make tests` prints *"Nothing to be done"* and leaves
-  you testing the old engine. `rm -f tests/{perft,match,gamestate,evalref,bench,timecontrol,see_test,bitboard_test,guiinput,pgn}`
-  and rebuild, or `make clean`. This is silent and it will fool you.
-- **`make tests` also says "Nothing to be done" for the innocent reason** that
-  `tests/` is a directory — the target is `.PHONY`, so that is not the cause,
-  but the two look identical from the terminal.
+- **Test binaries link `$(ENGINE_OBJ)`; do not go back to listing sources.**
+  Until 2026-08-13 each test rule handed every engine `.cpp` to one `g++` call,
+  and `-MMD` with many sources but a single `-o` rewrites the `.d` once per
+  translation unit — so `tests/bench.d` described only the last file compiled
+  and named no headers. Editing `search.hpp` then printed *"Nothing to be done
+  for 'tests'"* and left ten stale binaries testing the previous engine: a green
+  suite proving nothing. If you ever see that message after a header edit,
+  suspect this first. (A full clean build is now ~7 s, down from recompiling 21
+  sources ten times over.)
 - **UCI advertises its defaults from a default-constructed `SearchOptions`.**
   Do not hand-write `option name ... default ...` lines; the hand-written list
   said `SeeOrdering default false` for as long as it took someone to notice.

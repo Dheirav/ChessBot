@@ -42,51 +42,70 @@ GM_SRC = src/game_manager.cpp
 GUI_SRC = $(wildcard src/gui/*.cpp)
 TESTS = tests/perft tests/match tests/gamestate tests/evalref tests/bench tests/timecontrol tests/see_test tests/bitboard_test tests/guiinput tests/pgn
 
+# Test binaries LINK these objects rather than recompiling the sources.
+#
+# They used to name $(ENGINE_SRC) as prerequisites and hand every .cpp to one
+# g++ call. That silently broke header dependency tracking: -MMD writes its .d
+# per translation unit, and with a single -o every source overwrote the last,
+# so tests/bench.d ended up describing whichever file happened to compile last
+# and listed none of the headers. Editing a header then printed "Nothing to be
+# done for 'tests'" and left ten stale binaries testing the previous engine —
+# a green suite proving nothing. One object per source restores a correct .d
+# for each, and stops rebuilding 21 engine sources ten times over.
+ENGINE_OBJ = $(ENGINE_SRC:.cpp=.o)
+GM_OBJ = $(GM_SRC:.cpp=.o)
+GUI_OBJ = $(GUI_SRC:.cpp=.o)
+
+TEST_SRC = $(wildcard tests/*.cpp)
+TEST_OBJ = $(TEST_SRC:.cpp=.o)
+TEST_DEP = $(TEST_OBJ:.o=.d)
+-include $(TEST_DEP)
+
 # perft guards move generation: leaf counts must match published references.
-tests/perft: tests/perft.cpp $(ENGINE_SRC)
-	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
+tests/perft: tests/perft.o $(ENGINE_OBJ)
+	$(CXX) $^ -o $@ $(LDFLAGS)
 
 # match plays two search configurations against each other to measure strength.
-tests/match: tests/match.cpp $(ENGINE_SRC)
-	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
+tests/match: tests/match.o $(ENGINE_OBJ)
+	$(CXX) $^ -o $@ $(LDFLAGS)
 
 # gamestate guards that a finished game actually stops accepting moves.
-tests/gamestate: tests/gamestate.cpp $(ENGINE_SRC) $(GM_SRC)
-	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
+tests/gamestate: tests/gamestate.o $(ENGINE_OBJ) $(GM_OBJ)
+	$(CXX) $^ -o $@ $(LDFLAGS)
 
 # evalref guards every evaluation term against unintended change.
-tests/evalref: tests/evalref.cpp $(ENGINE_SRC)
-	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
+tests/evalref: tests/evalref.o $(ENGINE_OBJ)
+	$(CXX) $^ -o $@ $(LDFLAGS)
 
 # bench produces the search's node-count signature.
-tests/bench: tests/bench.cpp $(ENGINE_SRC)
-	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
+tests/bench: tests/bench.o $(ENGINE_OBJ)
+	$(CXX) $^ -o $@ $(LDFLAGS)
 
 # timecontrol guards that a search with a budget returns inside it.
-tests/timecontrol: tests/timecontrol.cpp $(ENGINE_SRC)
-	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
+tests/timecontrol: tests/timecontrol.o $(ENGINE_OBJ)
+	$(CXX) $^ -o $@ $(LDFLAGS)
 
 # see_test checks static exchange evaluation against hand-computed positions.
-tests/see_test: tests/see_test.cpp $(ENGINE_SRC)
-	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
+tests/see_test: tests/see_test.o $(ENGINE_OBJ)
+	$(CXX) $^ -o $@ $(LDFLAGS)
 
 # bitboard_test validates the magic tables exhaustively and cross-checks the
 # attack, checker and pin queries against the mailbox engine.
-tests/bitboard_test: tests/bitboard_test.cpp $(ENGINE_SRC)
-	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
+tests/bitboard_test: tests/bitboard_test.o $(ENGINE_OBJ)
+	$(CXX) $^ -o $@ $(LDFLAGS)
 
 # guiinput drives the board input state machine headlessly: click-to-move,
 # drag-and-drop, and the promotion dialog's hitboxes. The dialog's hitboxes and
 # its drawing were computed separately once, and drifted apart the moment the
 # side panel widened the window; this pins them to the same geometry.
-tests/guiinput: tests/guiinput.cpp $(ENGINE_SRC) $(GM_SRC) $(GUI_SRC)
-	$(CXX) $(CXXFLAGS) $^ -o $@ $(SFML_LIBS) $(LDFLAGS)
+tests/guiinput: tests/guiinput.o $(ENGINE_OBJ) $(GM_OBJ) $(GUI_OBJ)
+	$(CXX) $^ -o $@ $(SFML_LIBS) $(LDFLAGS)
 
 # pgn guards the SAN export. Notation is unambiguous only if the writer does
 # the disambiguation work, and a viewer handed "Nf3" where it needed "Nbd2"
 # replays a different game than the one that was played.
-tests/pgn: tests/pgn.cpp $(ENGINE_SRC)
-	$(CXX) $(CXXFLAGS) $^ -o $@ $(LDFLAGS)
+tests/pgn: tests/pgn.o $(ENGINE_OBJ)
+	$(CXX) $^ -o $@ $(LDFLAGS)
 
 tests: $(TESTS)
 
@@ -160,7 +179,7 @@ lichess:
 
 # Clean up build files
 clean:
-	rm -f $(OBJ) $(DEP) $(EXEC) $(TESTS)
+	rm -f $(OBJ) $(DEP) $(TEST_OBJ) $(TEST_DEP) $(EXEC) $(TESTS)
 
 # Clean and rebuild the project
 remake:
