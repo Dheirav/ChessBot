@@ -44,12 +44,13 @@ neutral at equal nodes, which is what a change that buys *speed* per node rather
 than *quality* per node looks like when both sides are paid the same nodes. Its
 open gate is a timed one. Do not read +2.2 as "SEE pruning does nothing".
 
-The bench signature is **1,725,755 nodes** at depth 6. Any change claiming to
+The bench signature is **1,759,990 nodes** at depth 6. Any change claiming to
 preserve search behaviour must reproduce it exactly. It has moved twice this
 week — 2,056,371 until `seeordering` was turned on (2026-08-13), then 1,465,771
 until the evaluation symmetry fixes (2026-08-14, `BUGS.md` 2 and 3, +17.7% with
-no best move changed). Older documents quoting either figure are describing the
-baseline of their day, not a regression.
+no best move changed), then 1,725,755 until "defended" was fixed the same day
+(`BUGS.md` 5, +2.0%). Older documents quoting an earlier figure are describing
+the baseline of their day, not a regression.
 
 ---
 
@@ -137,17 +138,12 @@ point estimate barely moved; the interval is what shrank. One shard is a
 
 ## Next, in order
 
-1. **Make "defended" mean defended** (`BUGS.md` 5 — `PLAN.md` 4.3), the last of
-   the evaluation-correctness items. `attackedBy[own][sq]` already exists and is
-   the right predicate; the term currently counts any adjacent friendly piece.
-2. **A gate for the evaluation symmetry fixes** (`BUGS.md` 2 and 3). They are
-   shipped ungated on correctness grounds, but they cost +17.7% nodes at bench 6,
-   so whether they are worth Elo is genuinely open:
-   ```bash
-   ./tests/shard-gate.sh 14 120 -N 100000 --optA <...> --optB <...>
-   ```
-   There is no toggle for them, which is the awkward part — measuring them means
-   building two binaries rather than flipping a flag.
+1. **Gate Phase 4.** `BUGS.md` 2, 3 and 5 are all shipped ungated on correctness
+   grounds, and together they cost +20.1% nodes at bench 6 (1 465 771 ->
+   1 759 990). Whether that is worth Elo is genuinely open, and one match covers
+   all three since they landed together. There is no toggle for them, which is
+   the awkward part: measuring them means building two binaries and pointing the
+   harness at both, rather than flipping a flag.
 3. **A timed gate for `seepruning`** (`PLAN.md` 3.2), on a quiet machine:
    ```bash
    ./tests/shard-gate.sh 14 120 -t 3000 --optA seepruning=on --optB seepruning=off

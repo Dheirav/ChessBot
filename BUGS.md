@@ -199,13 +199,36 @@ delta pruning, both of which PLAN 3.1 already specifies.
 
 ---
 
-## 5. "Defended" does not mean defended
+## 5. "Defended" does not mean defended — **FIXED 2026-08-14**
 
-**PLAN.md 4.3.** The undefended-pieces term counts a piece as defended if any
-friendly piece stands on an *adjacent square*, which measures how pawn-chain-ish
-a position is, not whether anything is actually protected. `attackedBy[own][sq]`
-is already built by `forEachAttackedSquare` for the threat term and is exactly
-the right predicate. Nearly free at runtime.
+**PLAN.md 4.3.** The undefended-pieces term counted a piece as defended if any
+friendly piece stood on an *adjacent square*. That is a different property from
+the one the term is named after: it scored a knight beside its own rook as
+defended when neither could recapture on the other's square, and a rook defended
+down an open file as undefended because the defender was five squares away.
+What it measured was how clumped the pieces were.
+
+Replaced by `attackedBy[own][sq]`, which was already built by
+`forEachAttackedSquare` for the threat term, so the fix also deleted a
+nine-square scan per piece.
+
+**Diff review.** Only `undefended` and `total` moved, on 18 994 of 23 603
+positions, and `total` moved by exactly the `undefended` delta on every one of
+them — checked rather than assumed, along with every delta being a multiple of
+the term's own 5. Mirror symmetry still holds.
+
+**bench: 1 725 755 → 1 759 990** (+2.0%), with two best moves changed:
+
+- `open-sicil` `d7d5` → `b8c6`. An improvement, and a resolution: this is
+  `1.e4 c5 2.Nf3`, where `2...d5 3.exd5 Qxd5` costs Black time and `2...Nc6` is
+  the main line. `d7d5` appeared when `seeordering` was gated on and was
+  recorded then as unexplained (`PLAN.md` 3.2). It is gone.
+- `midgame-2` `c1c2` → `c3b5`. Unremarkable. White is a bishop down in that
+  position (`material` −335, correctly), and at depth 9 the engine plays `f3d2`
+  from both builds — the depth-6 difference is shuffling in a lost position.
+
+Ungated, on the same reasoning as 2 and 3, and it should be measured in the same
+match rather than a separate one.
 
 ---
 

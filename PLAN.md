@@ -33,7 +33,7 @@ the time; it now builds ten, and CI runs eleven test steps. `test-perft`,
 signature bit-identically — 2,056,371 nodes and the same best move in all 12
 positions — which is the strongest evidence available that it was an exact
 restatement rather than a rewrite. (That figure is the signature *as it stood
-then*; it is 1 725 755 today. The claim here is about matching the baseline of
+then*; it is 1 759 990 today. The claim here is about matching the baseline of
 the day, so the old number is the right one to keep.)
 
 **0.1 Remove dead eval fields and constants first** (§3.3)
@@ -504,7 +504,10 @@ It is the strongest cheap invariant an evaluation has, it needs no reference
 file, and it would have caught this the day the term was written. Add it as
 part of this fix rather than before it, since it fails today.
 
-**4.3 Make "defended" mean defended** (§2.3)
+**4.3 Make "defended" mean defended** (§2.3) — **DONE 2026-08-14.** Swapped to
+`attackedBy[own][sq]`, which also removed a nine-square scan per piece. bench
+1 725 755 -> 1 759 990; `open-sicil` returns to `b8c6`, resolving the unexplained
+best-move change 3.2 recorded when `seeordering` landed. See `BUGS.md` 5.
 The undefended-pieces term counts a piece as defended if any friendly piece
 stands on an adjacent square — that measures pawn-chain-ness, not protection.
 `attackedBy[own][sq]`, already built by `forEachAttackedSquare` for the threat
@@ -519,7 +522,7 @@ split at depth 5: evaluation 34.1%, legality filter 19.4%, `makeMove` 10.4%.
 
 **Status: 5.1, 5.2 and 5.3 are DONE** — 1.45× together, all verified by the
 bench signature staying at 2 056 371, which was the baseline at the time (it is
-1 725 755 now). Remaining: 5.4 (lazy eval, needs a match)
+1 759 990 now). Remaining: 5.4 (lazy eval, needs a match)
 and 5.5 (pin-aware movegen). See `BACKLOG.md §7` for the measurements.
 
 **5.1 Cache the static eval in the TT entry** (§4.3) — repeated visits skip
@@ -654,9 +657,9 @@ is conclusive, and 1.5 needed 136 games where the fixed-N plan wanted ~800.
 ./tests/bench 6 --opt <feature>=on
 ```
 
-Compare against the current baseline, **1 725 755** nodes at depth 6 (2 056 371
-until `seeordering` was gated on 2026-08-13, then 1 465 771 until the evaluation
-symmetry fixes on 2026-08-14). A feature that barely moves the
+Compare against the current baseline, **1 759 990** nodes at depth 6 (2 056 371
+until `seeordering` was gated on 2026-08-13; then 1 465 771, 1 725 755 and
+1 759 990 as the three Phase 4 evaluation fixes landed on 2026-08-14). A feature that barely moves the
 count, or moves it the wrong way, is wired in wrong or is not doing what you
 think; find that out now rather than a day into a match. This is how 3.2's
 classify-don't-order bug was caught.
