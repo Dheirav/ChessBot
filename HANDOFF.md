@@ -1,4 +1,4 @@
-# Handoff — 2026-08-13
+# Handoff — 2026-08-14
 
 Current state, what is in flight, and what to pick up. This is the file to read
 first; it is meant to be rewritten as state changes, unlike `BACKLOG.md`, which
@@ -10,6 +10,7 @@ is a frozen archive of the 2026-08-10 profiling session.
 | `README.md` | features, UCI, build, controls | yes |
 | `src/README.md` | architecture | yes |
 | `tests/README.md` | test suite and gate methodology | yes |
+| `BUGS.md` | known defects, ordered by what fixing them is worth | yes |
 | `PLAN.md` | phased plan, with status lines per item | mostly — status lines are current |
 | `BACKLOG.md` | 2026-08-10 findings | **archive; §2.1 is wrong, §4 and §7 still good** |
 
@@ -50,10 +51,65 @@ are describing the baseline of their day, not a regression.
 
 ---
 
+## Measured playing strength — the external baseline
+
+Every gate in this project so far has been the engine against itself. Self-play
+says whether a change helped; it cannot say how strong the result is, because
+both sides share every blind spot. This is the first measurement against a field
+that does not.
+
+**Baseline, frozen 2026-08-14 00:04, on the build at `62d1043`:**
+
+| | |
+|---|---|
+| account | [`Crimsy_Bot`](https://lichess.org/@/Crimsy_Bot) |
+| Lichess rapid | **2198**, rd=121, still provisional |
+| record | **16-6-2** over 24 games (23 rated rapid) |
+| time control | 900+10, rated, vs bots |
+| PGNs | `/home/dheirav/Code/lichess-bot/game_records/` |
+
+Every move in those games is this engine's own: every book, cloud-analysis and
+tablebase source in `lichess/config.yml` is `enabled: false`.
+
+**What the number is worth.** `rd=121` puts the 95% interval at roughly
+**1960-2440**. It is a point estimate on a rating that has not settled, and it
+was earned against a lopsided field — mostly 1200-1800, with nothing at all
+between 2072 and 2199, which is the band the rating itself claims.
+
+**The one clean signal** is that the results separate almost perfectly by
+opponent strength: every loss is to an opponent rated **≥2199**, every win is
+against **≤2072**, and the single honest draw is 2145. Practical strength is
+therefore around **2100-2200**, which is where this feature set — alpha-beta,
+quiescence, TT, null move, LMR, aspiration, SEE ordering, hand-written PST
+evaluation — is expected to land.
+
+Three things to keep straight when this baseline is next compared against:
+
+- **Do not translate self-play Elo into pool Elo.** The +246, +140 and +25.6
+  from the gates are real statements about this engine relative to itself. None
+  of them is a prediction about Lichess.
+- **The 08-12 games are a different engine** (pre-`seeordering`) and a much
+  stronger field. Split at the 11:25 rebuild on 08-13 before comparing anything.
+- **Wins over 1300-rated bots cannot move the ceiling.** The test of any Phase 3
+  or Phase 4 work is whether the engine starts taking points off the 2200-2500
+  tier, not whether the rating drifts up.
+
+Two of the eight non-wins were self-inflicted and are written up in `BUGS.md`:
+a drawn win against a 1404 (−48) and a time forfeit caused by restarting the bot
+mid-game (−120).
+
+---
+
 ## In flight
 
-**Nothing is running.** Three gates completed overnight on 2026-08-13 and are
-pooled and recorded above; their logs are kept:
+**The Lichess bot is running** (`./lichess/run.sh`), playing rated 900+10 games
+against bots continuously — `allow_matchmaking: true` means it challenges when
+idle rather than waiting. It is the source of the baseline above, and it keeps
+moving that baseline while it runs. Stop it **between** games, never during one
+(`BUGS.md` 7), and stop it entirely before any timed gate.
+
+**No gate is running.** Three completed overnight on 2026-08-13 and are pooled
+and recorded above; their logs are kept:
 
 | directory | gate | pooled result |
 |---|---|---|
@@ -73,19 +129,29 @@ point estimate barely moved; the interval is what shrank. One shard is a
 
 ## Next, in order
 
-1. **A timed gate for `seepruning`** (`PLAN.md` 3.2), on a quiet machine:
+1. **Give the search the game's move history** (`BUGS.md` 1). The engine cannot
+   see repetitions that happened in the actual game, only ones it creates inside
+   its own tree, and it has already drawn a won position against a 1404 because
+   of it. Smallest fix on this list with a proven cost attached.
+2. **Evaluation correctness** (`BUGS.md` 2, 3, 5 — `PLAN.md` 4.1-4.3), in that
+   order: `tempoBonus` truncates the total, so it has to land before the −4 king
+   safety asymmetry can be read cleanly. Add the mirror-symmetry check to
+   `tests/evalref.cpp` as part of the king-safety fix.
+3. **A timed gate for `seepruning`** (`PLAN.md` 3.2), on a quiet machine:
    ```bash
    ./tests/shard-gate.sh 14 120 -t 3000 --optA seepruning=on --optB seepruning=off
    ```
    This is the documented exception to gating on nodes. Its baseline is now the
    engine as shipped, with `seeordering` on — which is also the harder test for
    it, since ordering already removes some of the tree pruning would have cut.
-2. **Phase 3 remainder:** bound quiescence and delta pruning (3.1), check
-   extensions (3.3), futility/razoring (3.4), IID (3.5), retune LMR (3.6).
-   3.1 and 3.3 are the cheap ones and neither is implemented yet.
-3. **Phase 4** (evaluation correctness) has a known concrete bug waiting: king
-   safety is **−4** in the mirror-symmetric starting position, where every term
-   must be 0. See `PLAN.md` 4.2.
+   **Nothing else may run on the machine while it does**, including the Lichess
+   bot: a timed match silently measures whatever else was competing for the CPU.
+4. **Phase 3 remainder:** bound quiescence and delta pruning (3.1 — also
+   `BUGS.md` 4), check extensions (3.3), futility/razoring (3.4), IID (3.5),
+   retune LMR (3.6). 3.1 and 3.3 are the cheap ones and neither is implemented.
+
+`BUGS.md` is the list to read before picking any of these up; it carries the
+evidence, the file and line, and what each defect has actually cost.
 
 ---
 

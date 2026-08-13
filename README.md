@@ -285,6 +285,8 @@ statistically valid.
 - [tests/README.md](tests/README.md) — the test suite and match methodology
 - [lichess/README.md](lichess/README.md) — playing online, and why the config
   says what it says
+- [BUGS.md](BUGS.md) — known defects, ordered by what fixing them is worth, each
+  with the game or line of code that demonstrates it
 - [PLAN.md](PLAN.md) — ordered plan of work, phase by phase
 - [BACKLOG.md](BACKLOG.md) — the 2026-08-10 profiling session, kept as a dated
   archive; its measured ceilings and baselines are still the reference, but read
