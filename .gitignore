@@ -1,3 +1,8 @@
+# Local agent instructions. Deliberately untracked: HANDOFF.md and the READMEs
+# are the shared, reviewable docs, and this one is a per-machine convenience
+# that would otherwise drift from them without anyone reviewing it.
+CLAUDE.md
+
 # Build artifacts
 *.o
 *.d
