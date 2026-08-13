@@ -21,6 +21,7 @@
 #include "engine/move_lookup.hpp"
 #include "engine/evaluation.hpp"
 
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -49,36 +50,43 @@ static uint64_t rngNext() {
     return rngState;
 }
 
-// One CSV line per position: FEN first, then every EvalDetails field in
-// declaration order. Keep this in sync with EvalDetails — a field added
-// without a column here is a field the test cannot protect.
+// Every EvalDetails field in declaration order, as names and as values. Keep
+// both in sync with EvalDetails — a field added without an entry here is a
+// field the test cannot protect. They are a pair on purpose: the CSV writer,
+// the diff reporter and the symmetry check all read them, so a new term becomes
+// covered by all three at once or by none.
+static const char* FIELD_NAMES[] = {
+    "total", "material", "mobility", "kingSafety", "centerControl",
+    "bishopPair", "doubledPawn", "isolatedPawn", "passedPawn",
+    "backwardPawn", "connectedPawn", "pawnChain", "rooksOpenFile",
+    "rooksSemiOpenFile", "rooks7thRank", "pst", "outpost", "trapped",
+    "kingActivity", "threats", "undefended", "space", "drawish"
+};
+static const int NUM_FIELDS = (int)(sizeof(FIELD_NAMES) / sizeof(FIELD_NAMES[0]));
+
+static void fieldsOf(const EvalDetails& e, int out[NUM_FIELDS]) {
+    int i = 0;
+    out[i++] = e.total;             out[i++] = e.material;
+    out[i++] = e.mobility;          out[i++] = e.kingSafety;
+    out[i++] = e.centerControl;     out[i++] = e.bishopPair;
+    out[i++] = e.doubledPawn;       out[i++] = e.isolatedPawn;
+    out[i++] = e.passedPawn;        out[i++] = e.backwardPawn;
+    out[i++] = e.connectedPawn;     out[i++] = e.pawnChain;
+    out[i++] = e.rooksOpenFile;     out[i++] = e.rooksSemiOpenFile;
+    out[i++] = e.rooks7thRank;      out[i++] = e.pst;
+    out[i++] = e.outpost;           out[i++] = e.trapped;
+    out[i++] = e.kingActivity;      out[i++] = e.threats;
+    out[i++] = e.undefended;        out[i++] = e.space;
+    out[i++] = e.drawish;
+}
+
+// One CSV line per position: FEN first, then every field in declaration order.
 static void writeLine(std::ostream& out, const Board& board) {
-    EvalDetails e = evaluate_details(board);
-    out << board.getFEN()
-        << ',' << e.total
-        << ',' << e.material
-        << ',' << e.mobility
-        << ',' << e.kingSafety
-        << ',' << e.centerControl
-        << ',' << e.bishopPair
-        << ',' << e.doubledPawn
-        << ',' << e.isolatedPawn
-        << ',' << e.passedPawn
-        << ',' << e.backwardPawn
-        << ',' << e.connectedPawn
-        << ',' << e.pawnChain
-        << ',' << e.rooksOpenFile
-        << ',' << e.rooksSemiOpenFile
-        << ',' << e.rooks7thRank
-        << ',' << e.pst
-        << ',' << e.outpost
-        << ',' << e.trapped
-        << ',' << e.kingActivity
-        << ',' << e.threats
-        << ',' << e.undefended
-        << ',' << e.space
-        << ',' << e.drawish
-        << '\n';
+    int v[NUM_FIELDS];
+    fieldsOf(evaluate_details(board), v);
+    out << board.getFEN();
+    for (int i = 0; i < NUM_FIELDS; ++i) out << ',' << v[i];
+    out << '\n';
 }
 
 static void generate(std::ostream& out) {
@@ -100,14 +108,11 @@ static void generate(std::ostream& out) {
 // "files differ" — the point of storing every term separately is to be told
 // which term moved.
 static int compare(const std::string& produced) {
-    static const char* COLS[] = {
-        "fen", "total", "material", "mobility", "kingSafety", "centerControl",
-        "bishopPair", "doubledPawn", "isolatedPawn", "passedPawn",
-        "backwardPawn", "connectedPawn", "pawnChain", "rooksOpenFile",
-        "rooksSemiOpenFile", "rooks7thRank", "pst", "outpost", "trapped",
-        "kingActivity", "threats", "undefended", "space", "drawish"
+    // Column 0 is the FEN; the rest line up with FIELD_NAMES.
+    auto columnName = [](size_t i) {
+        return (i == 0) ? "fen"
+             : (i <= (size_t)NUM_FIELDS) ? FIELD_NAMES[i - 1] : "?";
     };
-    static const int NUM_COLS = (int)(sizeof(COLS) / sizeof(COLS[0]));
 
     std::ifstream ref(REF_PATH);
     if (!ref) {
@@ -158,8 +163,8 @@ static int compare(const std::string& produced) {
             size_t n = r.size() < c.size() ? r.size() : c.size();
             for (size_t i = 1; i < n; ++i) {
                 if (r[i] == c[i]) continue;
-                const char* name = (i < (size_t)NUM_COLS) ? COLS[i] : "?";
-                std::cerr << "  " << name << ": " << r[i] << " -> " << c[i] << "\n";
+                std::cerr << "  " << columnName(i) << ": "
+                          << r[i] << " -> " << c[i] << "\n";
             }
         }
     }
@@ -224,6 +229,126 @@ static int checkEvalCache() {
     return 0;
 }
 
+// --- Mirror symmetry ---
+//
+// Reflect a position top to bottom and swap the colours: White to move on rank
+// 1 becomes Black to move on rank 8, with every piece, castling right and en
+// passant square carried across. Chess is symmetric under that reflection, so
+// every white-perspective evaluation term must come back exactly negated.
+//
+// This is the strongest cheap invariant an evaluation has. It needs no
+// reference file, so it cannot go stale and cannot be regenerated into
+// agreement — unlike the comparison above, which will happily bless a bug the
+// moment someone runs --regen without reading the diff. It is also absolute
+// rather than relative: it says the evaluation is *wrong*, not merely changed.
+//
+// It is here because it failed. King safety measured distance from the centre
+// as |rank - 3|, and on an eight-rank board the centre lies between 3 and 4, so
+// White's king on rank 7 was charged four while Black's on rank 0 was charged
+// three. Every position, from move one, in every game the engine ever played.
+static std::string mirrorFen(const std::string& fen) {
+    std::vector<std::string> f;
+    std::istringstream in(fen);
+    std::string part;
+    while (in >> part) f.push_back(part);
+    if (f.size() != 6) return "";
+
+    // Piece placement: reverse the rank order, swap each piece's colour.
+    std::vector<std::string> ranks;
+    size_t start = 0;
+    for (size_t i = 0; i <= f[0].size(); ++i) {
+        if (i == f[0].size() || f[0][i] == '/') {
+            ranks.push_back(f[0].substr(start, i - start));
+            start = i + 1;
+        }
+    }
+    if (ranks.size() != 8) return "";
+    std::string placement;
+    for (int r = 7; r >= 0; --r) {
+        for (char c : ranks[r]) {
+            placement += std::isalpha((unsigned char)c)
+                       ? (std::islower((unsigned char)c) ? (char)std::toupper(c)
+                                                         : (char)std::tolower(c))
+                       : c;
+        }
+        if (r > 0) placement += '/';
+    }
+
+    const std::string side = (f[1] == "w") ? "b" : "w";
+
+    // Castling rights follow their owners, re-emitted in canonical order so the
+    // mirrored FEN is comparable as text as well as parseable.
+    std::string castling;
+    if (f[2].find('k') != std::string::npos) castling += 'K';
+    if (f[2].find('q') != std::string::npos) castling += 'Q';
+    if (f[2].find('K') != std::string::npos) castling += 'k';
+    if (f[2].find('Q') != std::string::npos) castling += 'q';
+    if (castling.empty()) castling = "-";
+
+    std::string ep = f[3];
+    if (ep != "-" && ep.size() == 2) ep[1] = (char)('1' + '8' - ep[1]);
+
+    return placement + ' ' + side + ' ' + castling + ' ' + ep + ' ' + f[4] + ' ' + f[5];
+}
+
+static int checkMirrorSymmetry() {
+    rngSeed(SEED);
+    long checked = 0, badPositions = 0;
+    long perField[NUM_FIELDS] = {0};
+    const long REPORT_LIMIT = 5;
+
+    for (int game = 0; game < 40; ++game) {
+        Board board;
+        for (int ply = 0; ply < MAX_PLIES; ++ply) {
+            MoveList moves = generateLegalMoves(board, board.activeColor);
+            if (moves.empty() || board.halfmoveClock >= 100) break;
+
+            const std::string fen = board.getFEN();
+            const std::string flipped = mirrorFen(fen);
+            Board other;
+            if (!flipped.empty() && other.setFromFEN(flipped)) {
+                int a[NUM_FIELDS], b[NUM_FIELDS];
+                fieldsOf(evaluate_details(board), a);
+                fieldsOf(evaluate_details(other), b);
+
+                bool bad = false;
+                for (int i = 0; i < NUM_FIELDS; ++i) {
+                    if (a[i] != -b[i]) { ++perField[i]; bad = true; }
+                }
+                ++checked;
+                if (bad && ++badPositions <= REPORT_LIMIT) {
+                    std::cerr << "asymmetric: " << fen << "\n"
+                              << "  mirrored: " << flipped << "\n";
+                    for (int i = 0; i < NUM_FIELDS; ++i) {
+                        if (a[i] == -b[i]) continue;
+                        std::cerr << "  " << FIELD_NAMES[i] << ": " << a[i]
+                                  << " vs " << b[i] << " (expected "
+                                  << -a[i] << ")\n";
+                    }
+                }
+            }
+            board.makeMove(moves[rngNext() % moves.size()]);
+        }
+    }
+
+    if (badPositions) {
+        std::cerr << "\nFAILED: " << badPositions << " of " << checked
+                  << " positions evaluate asymmetrically";
+        if (badPositions > REPORT_LIMIT)
+            std::cerr << " (first " << REPORT_LIMIT << " shown)";
+        std::cerr << ".\n        Terms at fault:";
+        for (int i = 0; i < NUM_FIELDS; ++i)
+            if (perField[i]) std::cerr << ' ' << FIELD_NAMES[i]
+                                       << '(' << perField[i] << ')';
+        std::cerr << "\n        This is a bug in the evaluation, not a change "
+                     "to it. Do not regenerate the reference.\n";
+        return 1;
+    }
+    std::cout << "PASSED: evaluation is mirror-symmetric across "
+              << checked << " positions\n";
+    return 0;
+}
+
 int main(int argc, char** argv) {
     // Without this every lookup table is empty and move generation silently
     // returns no moves — which looks like "every game ended immediately"
@@ -249,5 +374,6 @@ int main(int argc, char** argv) {
     generate(produced);
     int rc = compare(produced.str());
     if (checkEvalCache() != 0) rc = 1;
+    if (checkMirrorSymmetry() != 0) rc = 1;
     return rc;
 }

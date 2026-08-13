@@ -216,6 +216,25 @@ static int countMobility(const Board& board, PieceColor color, int kingSq) {
 }
 
 // Returns a detailed breakdown of evaluation for logging
+// How far a square is from the centre of the board, measured symmetrically.
+//
+// The obvious |x - 3| is wrong, and wrong in a way that survived every test in
+// this repo: a board has eight files and eight ranks, so its centre lies
+// *between* 3 and 4. |x - 3| charges 4 at one edge and 3 at the other, which
+// makes it asymmetric under the reflection that chess itself is symmetric
+// under. King safety used it, so White's king on rank 7 was penalised one more
+// than Black's identical king on rank 0 — the −4 in the mirror-symmetric
+// starting position, present in every position the engine ever evaluated.
+//
+// Measuring to the nearer of the two central coordinates restores the symmetry
+// and keeps the same units. Range is 0..6 rather than the old 0..7, so king
+// safety is slightly smaller in magnitude than before; the multiplier is a
+// tuning question and a separate, gated one.
+static int centreDistance(int file, int rank) {
+    return std::min(std::abs(file - 3), std::abs(file - 4)) +
+           std::min(std::abs(rank - 3), std::abs(rank - 4));
+}
+
 EvalDetails evaluate_details(const Board& board) {
     EvalDetails e{};
     // Copy feature extraction logic from evaluate()
@@ -230,8 +249,10 @@ EvalDetails evaluate_details(const Board& board) {
     int outpostBonus = 0;
     int trappedPiecePenalty = 0;
     int kingActivityBonus = 0;
+    // Blends the king's midgame and endgame piece-square tables below. It is a
+    // property of the position as a whole, not of either side, so it belongs in
+    // a weight and never in the score — see the note on e.total.
     float gamePhaseFactor = 1.0f;
-    float tempoBonus = 0.01f;
     int threatScore = 0, undefendedPenalty = 0;
     int spaceScore = 0;
 
@@ -386,7 +407,7 @@ EvalDetails evaluate_details(const Board& board) {
 
     // King safety
     if (whiteKingFile != -1 && whiteKingRank != -1) {
-        int distFromCenter = std::abs(whiteKingFile - 3) + std::abs(whiteKingRank - 3);
+        int distFromCenter = centreDistance(whiteKingFile, whiteKingRank);
         whiteKingSafety = -distFromCenter * 4; // Reduced from 5 to 4
         if (whiteKingRank == 7) {
             for (int df = -1; df <= 1; ++df) {
@@ -399,7 +420,7 @@ EvalDetails evaluate_details(const Board& board) {
         }
     }
     if (blackKingFile != -1 && blackKingRank != -1) {
-        int distFromCenter = std::abs(blackKingFile - 3) + std::abs(blackKingRank - 3);
+        int distFromCenter = centreDistance(blackKingFile, blackKingRank);
         blackKingSafety = -distFromCenter * 4; // Reduced from 5 to 4
         if (blackKingRank == 0) {
             for (int df = -1; df <= 1; ++df) {
@@ -574,7 +595,25 @@ EvalDetails evaluate_details(const Board& board) {
     }
 
     // Assign to EvalDetails
-    e.total = materialScore + mobilityScore + kingSafetyScore + centerControlScore + bishopPairBonus + doubledPawnPenalty + isolatedPawnPenalty + passedPawnBonus + backwardPawnPenalty + connectedPawnBonus + pawnChainBonus + rooksOpenFileBonus + rooksSemiOpenFileBonus + rooks7thRankBonus + pstScore + outpostBonus + trappedPiecePenalty + kingActivityBonus + (int)(gamePhaseFactor * 1.5f) + tempoBonus + threatScore + undefendedPenalty + spaceScore;
+    // Every term here is colour-relative: positive favours white, and mirroring
+    // the position must negate it. Two addends used to violate that and were
+    // removed on 2026-08-14 (BUGS.md 2):
+    //
+    //   (int)(gamePhaseFactor * 1.5f)  — the game phase is a property of the
+    //       position, identical for both sides, so adding it handed white a
+    //       centipawn in every position with roughly a full opening's material.
+    //       It is still used, correctly, as a weight for the king PST blend.
+    //
+    //   tempoBonus                     — declared `float 0.01f`, which promoted
+    //       this whole sum to float and truncated it toward zero, turning −5
+    //       into −4. It was also a constant rather than a bonus to the side to
+    //       move, so it was not measuring tempo at all. An honest tempo bonus is
+    //       a real idea and a separate one: it changes evaluation, so it needs
+    //       its own gate rather than a free ride on a bug fix.
+    //
+    // The sum is int throughout. Keep it that way — a single float addend
+    // silently truncates every score the engine produces.
+    e.total = materialScore + mobilityScore + kingSafetyScore + centerControlScore + bishopPairBonus + doubledPawnPenalty + isolatedPawnPenalty + passedPawnBonus + backwardPawnPenalty + connectedPawnBonus + pawnChainBonus + rooksOpenFileBonus + rooksSemiOpenFileBonus + rooks7thRankBonus + pstScore + outpostBonus + trappedPiecePenalty + kingActivityBonus + threatScore + undefendedPenalty + spaceScore;
     e.material = materialScore;
     e.mobility = mobilityScore;
     e.kingSafety = kingSafetyScore;
