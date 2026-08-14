@@ -38,6 +38,17 @@ could only be displaced by something deeper still, and the live search got a
 shrinking share of the table. The gate has now confirmed that default rather
 than merely assuming it.
 
+**Phase 4's evaluation fixes are gated and stay in.** 3 360 games at
+`-N 100000`, two binaries over UCI: **+6.1 Elo, 95% CI [−3.9, +16.1]**. The
+interval spans zero, so this does not demonstrate a gain — but it was never
+going to be reverted on a bad number, and what it does rule out is a *loss*:
+the corrected evaluation is at least as good per node as the broken one, and
+probably slightly better. Note carefully what it cannot say. The fixes cost
++20.1% nodes at bench 6, and a node budget pays both sides the same nodes, so
+this measured quality per node and deliberately divided out the price. Whether
+the corrected evaluation is worth its extra nodes *on a clock* is not answered
+here.
+
 **`seepruning` is settled: it stays off.** The argument for it was that it buys
 *speed* per node — it cuts the most nodes of anything in Phase 3, −41.1% at
 bench 6 — so a node budget, which pays both sides the same nodes, divides out
@@ -139,6 +150,7 @@ and recorded above; their logs are kept:
 | `shard-20260813-015757/` | `seepruning` | +2.2 [−7.2, +11.6] |
 | `shard-20260813-034736/` | `seeordering` | +25.6 [+16.1, +35.2] |
 | `gate-seepruning-timed.log` | `seepruning`, **timed** `-t 100` | +4 [−7, +14] |
+| `shard-20260814-122546/` | Phase 4 evaluation, two binaries | +6.1 [−3.9, +16.1] |
 
 Re-pool any of them with `./tests/pool-shards.sh <dir>/`.
 
@@ -152,15 +164,14 @@ point estimate barely moved; the interval is what shrank. One shard is a
 
 ## Next, in order
 
-1. **Gate Phase 4** — *blocked on `BUGS.md` 8.* `BUGS.md` 2, 3 and 5 are shipped
-   ungated on correctness grounds and together cost +20.1% nodes at bench 6
-   (1 465 771 -> 1 759 990), so whether that is worth Elo is genuinely open. One
-   match would cover all three, since they landed together. But `tests/match`
-   runs both configurations in one process and shares a process-global eval
-   cache between them, so it cannot measure an evaluation change at all until
-   that is fixed. Note this would not reverse the fixes if it came back
-   negative — it would call for retuning king-safety magnitude against the
-   corrected baseline, which is a change that gates normally.
+1. **Decide what to do about Phase 4's node cost.** The gate is done and the
+   fixes are *not* in question — see below — but they buy their quality at
+   +20.1% nodes, and an equal-nodes gate divides that out by construction. The
+   open question is whether the extra nodes pay for themselves on a clock. The
+   cheap move is not another gate: it is to find out *why* the tree grew, since
+   a symmetric evaluation returning exact ties more often is a hypothesis nobody
+   has checked. Retuning king-safety magnitude against the corrected baseline
+   gates normally if it turns out to be that.
 
 2. **Phase 3 remainder:** bound quiescence and delta pruning (3.1 — also
    `BUGS.md` 4), check extensions (3.3), futility/razoring (3.4), IID (3.5),

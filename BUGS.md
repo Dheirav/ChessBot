@@ -178,10 +178,15 @@ symmetric evaluation returns exact ties more often, and proving equality costs
 alpha-beta more than proving superiority — but that is a hypothesis, not a
 measurement.
 
-**This fix is correct and ungated.** It is shipped on the grounds that an
-evaluation which contradicts the symmetry of the game is a defect regardless of
-what a match says. Whether it is worth Elo is a separate question and wants a
-node-budgeted gate.
+**Gated 2026-08-14, after the fact.** 3 360 games at `-N 100000`, driving the
+two binaries over UCI (the capability entry 8 exists for): **+6.1 Elo, 95% CI
+[−3.9, +16.1]** for the corrected evaluation over `56c41d9`. The interval spans
+zero, so no gain is demonstrated — but the fixes were shipped on correctness
+grounds and a bad number would not have reversed them. What the gate does rule
+out is a loss.
+
+It measured quality per node and says nothing about the +17.7% node cost, since
+a node budget pays both sides the same nodes.
 
 ---
 
