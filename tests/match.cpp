@@ -516,18 +516,22 @@ int main(int argc, char** argv) {
     // Started once and reused across games via "ucinewgame", rather than
     // spawned per game: a process launch per game would be most of the wall
     // clock at short time controls.
+    // Same size as the in-process tables below, so switching a gate between
+    // in-process and two-binary mode does not silently change the hash each
+    // side gets — and so a sharded run's memory stays bounded.
+    const int EXT_HASH_MB = 32;
     UciEngine extEngineA, extEngineB;
     UciEngine* extA = nullptr;
     UciEngine* extB = nullptr;
     if (!A.binary.empty()) {
-        if (!extEngineA.start(A.binary)) {
+        if (!extEngineA.start(A.binary, EXT_HASH_MB)) {
             std::printf("could not start engine A: %s\n", A.binary.c_str());
             return 1;
         }
         extA = &extEngineA;
     }
     if (!B.binary.empty()) {
-        if (!extEngineB.start(B.binary)) {
+        if (!extEngineB.start(B.binary, EXT_HASH_MB)) {
             std::printf("could not start engine B: %s\n", B.binary.c_str());
             return 1;
         }

@@ -45,7 +45,14 @@ public:
     // cannot be run or never answers, which is worth failing the run over: a
     // gate that silently fell back to one engine would compare a build to
     // itself and report a clean +0.
-    bool start(const std::string& path) {
+    //
+    // `hashMb` is not optional in practice. UCI engines pick their own default
+    // hash — this one takes 256 MB — and a sharded gate runs two of them per
+    // shard. Twelve shards inheriting that default asked for 6 GB of
+    // transposition table on a 7.7 GB machine and took WSL down with it, twice,
+    // on 2026-08-14. Sizing it here also makes an external gate comparable to
+    // an in-process one, which uses 32 MB a side.
+    bool start(const std::string& path, int hashMb = 32) {
         int toChild[2], fromChild[2];
         if (pipe(toChild) != 0) return false;
         if (pipe(fromChild) != 0) { close(toChild[0]); close(toChild[1]); return false; }
@@ -74,6 +81,7 @@ public:
 
         send("uci");
         if (!waitFor("uciok")) return false;
+        send("setoption name Hash value " + std::to_string(hashMb));
         send("isready");
         return waitFor("readyok");
     }

@@ -314,7 +314,18 @@ such gate would have had to be a timed one — the expensive, unshardable kind.
 
 Verified by playing an external binary against the in-process engine: same
 build both sides, games completing by mate and adjudication, 2-0-2 over four
-games. `tests/uci_smoke.py` covers `go nodes`, and takes a `CHESSBOT` override
+games.
+
+**One thing the driver got wrong first, because it is easy to miss.** A UCI
+engine picks its own default hash — this one takes 256 MB — and the driver did
+not set it. A twelve-shard gate runs two external engines per shard, so it
+quietly asked for 6 GB of transposition table on a 7.7 GB machine and took WSL
+down twice on 2026-08-14, the second time 44 minutes into a run. `start()` now
+takes a `hashMb` and sends `setoption name Hash` during the handshake, defaulted
+to the 32 MB a side that the in-process path uses, so the two modes are
+comparable as well as bounded: 46 MB resident per engine, measured. Sharded
+memory is roughly `2 x shards x (hash + 15 MB)` — budget it before raising the
+shard count. `tests/uci_smoke.py` covers `go nodes`, and takes a `CHESSBOT` override
 so a build that is not `./chessbot` can be smoke-tested — needed whenever the
 Lichess bot is live and relinking `./chessbot` would swap the engine mid-game.
 
