@@ -48,6 +48,10 @@ struct SearchOptions {
     bool qBound = true;        // cap how far past the horizon quiescence may recurse
     bool deltaPruning = false; // skip captures that cannot raise alpha
 
+    // Check extensions (PLAN.md 3.3): search one ply deeper when in check.
+    // Off until gated, like every other feature here.
+    bool checkExtension = false;
+
     // Age the transposition table once per search, so entries left by earlier
     // searches lose their depth-preference and can be displaced.
     //

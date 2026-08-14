@@ -105,6 +105,7 @@ const SearchOptionEntry SEARCH_OPTIONS[] = {
     {"ttaging",     "ttage",    "TtAging",     &SearchOptions::ttAging},
     {"qbound",      "qbound",   "QBound",      &SearchOptions::qBound},
     {"deltapruning","delta",    "DeltaPruning",&SearchOptions::deltaPruning},
+    {"checkext",    "checkext", "CheckExt",    &SearchOptions::checkExtension},
 };
 const size_t SEARCH_OPTION_COUNT = sizeof(SEARCH_OPTIONS) / sizeof(SEARCH_OPTIONS[0]);
 
@@ -409,12 +410,37 @@ static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
         }
     }
 
+    const PieceColor side = board.activeColor;
+    const bool inCheck = LegalMoveValidator::isInCheck(board, side);
+
+    // --- Check extension (PLAN.md 3.3) ---
+    //
+    // Being in check is not a quiet position, and the reply is usually forced.
+    // Spending one more ply there is cheap — few evasions exist — and it is
+    // where the horizon effect does the most damage: a search that stops while
+    // in check evaluates a position whose material is about to change.
+    //
+    // This has to happen *before* the depth == 0 drop below, not inside the
+    // move loop. A check that arrives exactly at the horizon is the case worth
+    // extending, and by the time depth has hit zero the node has already been
+    // handed to quiescence — which searches evasions but cannot search the
+    // quiet consolidating move that follows them.
+    //
+    // The ply ceiling is insurance rather than the real bound. A run of checks
+    // repeats positions, and the repetition rule above scores that 0, so a
+    // perpetual cannot extend forever on its own. The ceiling only catches a
+    // long forcing sequence that never repeats.
+    if (g_searchOptions.checkExtension && inCheck && ply < 64) {
+        ++depth;
+    }
+
     int originalAlpha = alpha;
     int originalBeta = beta;
     Move ttMove;
     int ttScore;
 
-    // Probe transposition table
+    // Probed after the extension so the entry asked for matches the depth about
+    // to be searched; tt.store() below uses the same extended value.
     if (tt.probe(hash, depth, ply, alpha, beta, ttScore, ttMove)) {
         return ttScore;
     }
@@ -437,9 +463,6 @@ static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
         }
         return score;
     }
-
-    PieceColor side = board.activeColor;
-    bool inCheck = LegalMoveValidator::isInCheck(board, side);
 
     // --- Null-move pruning ---
     // Hand the opponent a free move. If the position still fails high even

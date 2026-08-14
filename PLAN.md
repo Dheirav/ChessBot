@@ -459,7 +459,21 @@ feature before gating it.** It is refused with `--check`, since the stored
 signature describes the defaults.
 
 **3.3 Check extensions** (§5.2) — extend a ply when in check. Small, standard,
-usually worth 10–20 Elo.
+usually worth 10–20 Elo. **Implemented 2026-08-14** behind `checkext`, off until
+gated.
+
+Placed before the `depth == 0` drop into quiescence rather than inside the move
+loop, which is the whole decision: a check arriving exactly at the horizon is
+the case worth extending, and by the time depth hits zero the node has already
+been handed to quiescence — which searches evasions but cannot search the quiet
+consolidating move after them. The TT probe moved below the extension so the
+entry asked for matches the depth about to be searched.
+
+Bench with it on: 1 464 599 → **1 599 675, +9.2%**, and two best moves change.
+`open-sicil` returns to `d7d5`, which 3.2 and 4.3 both moved *away* from and
+which is dubious on principle (`2...d5 3.exd5 Qxd5` costs black time), and
+`zugzwang` moves `e1e5` → `e1e6` at +61% nodes for that position. Neither is a
+verdict at depth 6, but both are worth remembering if the gate disappoints.
 
 **3.4 Futility pruning and razoring at shallow depths** (§5.2) — needs the
 lazy-eval margins to be sane; keep it after 3.2 so SEE already removes the worst
