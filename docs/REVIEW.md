@@ -189,25 +189,50 @@ the tool is for, which is why the core landed without them.
 
 ---
 
-## R3. Term attribution — where this could be better than Chess.com
+## R3. Term attribution — **DONE 2026-08-15**
 
-`EvalDetails` exposes **25 named terms**. Chess.com says "Blunder, −3.5" and
-draws a graph. This could say *which part of the position changed*:
+`--explain` adds a line under each criticised move naming which of this
+engine's evaluation terms changed:
 
-> **Mistake** (−1.8). King safety −45: the pawn shield is gone. Mobility −22.
+```
+  6...dxc3     Blunder     -25.1 win%  (-414 cp, best Qd6, eval -157)
+        threats -750 material +200 piece placement -75
+ 13. Qa8+      Blunder     -36.8 win%  (-511 cp, best Qxd7+, eval +511)
+        threats -750 material -100 piece placement +75
+```
 
-That falls out of infrastructure that already exists, and it is the one place
-where a weaker engine is least of a handicap — attributing a change to named
-terms is *descriptive*, not a judgement about best play.
+### The trap, and how it is handled
 
-**The trap:** `evaluate_details` returns a *static* evaluation, and the score
-being explained comes from a *search*. Explaining a tactical blunder in terms of
-king safety would be actively misleading — the position at the root did not
-change much; the position at the end of the principal variation did. Attribution
-must be computed at the end of the PV, not at the move.
+This plan warned that `evaluate_details` is *static* while the score being
+explained comes from a *search*, so comparing the two starting positions would
+explain a hanging queen as a change in centre control. Attribution therefore
+happens **at the end of each principal variation**, not at the move —
+`UciEngine` now captures the PV for that purpose.
 
-If that turns out to be hard, say nothing rather than something plausible and
-wrong. A confident wrong explanation is worse than a bare number.
+That introduced a second problem the plan did not anticipate. Two lines starting
+from *different* moves diverge, and the deeper they run the more a term diff
+measures the divergence rather than the move: a 55-centipawn inaccuracy was
+being explained by a 397-point swing in threats, which is two different
+positions talking. Both lines are now walked a bounded **6 plies**, far enough
+for a tactic to resolve and no further. The same inaccuracy now reads
+`bishop pair -50, piece placement +45`.
+
+### What this actually is, stated plainly
+
+It explains a move **in the vocabulary of this engine's evaluation**, which is
+not the same as explaining why the *analysing* engine scored it that way. The
+two can disagree, and when they do the tool says so — "no term accounts for it"
+rather than inventing something.
+
+That disagreement is the most useful output here, and not for players: **it
+points at what this engine's evaluation is blind to.** A move Stockfish prices
+at −500 that moves no term is a position this engine cannot see. That is a
+direct feed into evaluation work, which is the project's binding constraint.
+
+Trust it most when **material** dominates the list — `6...dxc3 → material +200`
+is exactly what happened. Trust it least on quiet positional moves, and not at
+all for losses that are not positional in nature: `13. Qa8+` threw away a won
+game by *repetition*, and no static term expresses "you agreed to a draw".
 
 ---
 
@@ -257,7 +282,7 @@ would silently corrupt the games it was asked to explain. `tests/pgn` checks it.
 
 ## Order, and the honest prerequisite
 
-R0, R1, R2 and R4 are done. R3 is the only piece left, and it is the interesting one. Each is independently
+R0 through R4 are all done. The tool is complete; what is left is using it. Each is independently
 demonstrable.
 
 But the prerequisite is not on this list: **the engine's evaluation is the

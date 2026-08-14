@@ -18,10 +18,12 @@
 
 #include "engine/move_lookup.hpp"
 #include "engine/board.hpp"
+#include "engine/evaluation.hpp"
 #include "engine/movegen.hpp"
 #include "engine/pgn.hpp"
 #include "engine/uci_engine.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <fstream>
 #include <cstdio>
@@ -87,6 +89,77 @@ const char* classify(double wpLoss) {
     return "Best";
 }
 
+// Walk a principal variation to its end and return the position it reaches.
+// Stops early on any move that is not legal, which should not happen with a
+// well-behaved engine but must not be allowed to corrupt the board if it does.
+// How far down a principal variation to walk before comparing.
+//
+// Far enough that a tactic has resolved, and no further. Two lines from
+// *different* moves diverge, and the deeper they run the more a term diff
+// measures that divergence rather than what the move cost — a 55-centipawn
+// inaccuracy was being "explained" by a 397-point swing in threats, which is
+// two different positions talking, not an explanation.
+constexpr size_t PV_ATTRIBUTION_PLIES = 6;
+
+Board atEndOfPv(const Board& from, const std::vector<std::string>& pv) {
+    Board b = from.copyForSearch();
+    size_t used = 0;
+    for (const std::string& mv : pv) {
+        if (used++ >= PV_ATTRIBUTION_PLIES) break;
+        bool played = false;
+        Board probe = b.copyForSearch();
+        for (const Move& cand : generateLegalMoves(probe, probe.activeColor)) {
+            if (toUciMove(cand) == mv) { b.makeMove(cand); played = true; break; }
+        }
+        if (!played) break;
+    }
+    return b;
+}
+
+// Which named evaluation terms differ between two positions, largest first.
+//
+// This explains a move *in the vocabulary of this engine's evaluation*, which
+// is not the same as explaining why the analysing engine scored it that way.
+// When the two disagree — Stockfish says a move lost 500 centipawns and every
+// term here is unchanged — that disagreement is the finding: it means this
+// evaluation is blind to whatever decided the position. Reported as "no term
+// accounts for it" rather than dressed up.
+struct TermDelta { const char* name; int delta; };
+
+std::vector<TermDelta> termDiff(const Board& before, const Board& after) {
+    const EvalDetails a = evaluate_details(before);
+    const EvalDetails b = evaluate_details(after);
+    const std::vector<TermDelta> all = {
+        {"material", b.material - a.material},
+        {"mobility", b.mobility - a.mobility},
+        {"king safety", b.kingSafety - a.kingSafety},
+        {"centre control", b.centerControl - a.centerControl},
+        {"bishop pair", b.bishopPair - a.bishopPair},
+        {"doubled pawns", b.doubledPawn - a.doubledPawn},
+        {"isolated pawns", b.isolatedPawn - a.isolatedPawn},
+        {"passed pawns", b.passedPawn - a.passedPawn},
+        {"backward pawns", b.backwardPawn - a.backwardPawn},
+        {"connected pawns", b.connectedPawn - a.connectedPawn},
+        {"pawn chains", b.pawnChain - a.pawnChain},
+        {"rooks on open files", b.rooksOpenFile - a.rooksOpenFile},
+        {"rooks on semi-open", b.rooksSemiOpenFile - a.rooksSemiOpenFile},
+        {"rooks on the 7th", b.rooks7thRank - a.rooks7thRank},
+        {"piece placement", b.pst - a.pst},
+        {"outposts", b.outpost - a.outpost},
+        {"trapped pieces", b.trapped - a.trapped},
+        {"king activity", b.kingActivity - a.kingActivity},
+        {"threats", b.threats - a.threats},
+        {"undefended pieces", b.undefended - a.undefended},
+        {"space", b.space - a.space},
+    };
+    std::vector<TermDelta> out;
+    for (const TermDelta& t : all) if (t.delta != 0) out.push_back(t);
+    std::sort(out.begin(), out.end(), [](const TermDelta& x, const TermDelta& y) {
+        return std::abs(x.delta) > std::abs(y.delta);
+    });
+    return out;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -99,6 +172,7 @@ int main(int argc, char** argv) {
     //   --engine ./chessbot --engine-arg --uci
     std::vector<std::string> engineArgs;
     std::string annotateOut;
+    bool explain = false;
 
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
@@ -108,12 +182,13 @@ int main(int argc, char** argv) {
         else if (a == "--hash")   hashMb = std::atoi(next());
         else if (a == "--engine-arg") engineArgs.push_back(next());
         else if (a == "--annotate")   annotateOut = next();
+        else if (a == "--explain")    explain = true;
         else if (a[0] != '-')     pgnPath = a;
         else { std::printf("unknown option: %s\n", a.c_str()); return 1; }
     }
     if (pgnPath.empty()) {
         std::printf("usage: review <game.pgn> [--engine <path>] [--engine-arg <a>]\n"
-                    "                 [--depth N] [--hash MB] [--annotate out.pgn]\n"
+                    "                 [--depth N] [--hash MB] [--annotate out.pgn] [--explain]\n"
                     "  default engine is /usr/games/stockfish; ChessBot needs --engine-arg --uci\n");
         return 1;
     }
@@ -143,6 +218,16 @@ int main(int argc, char** argv) {
     std::vector<std::string> uci;
     std::vector<std::string> san(game.moves.size());
     std::vector<std::string> bestSan(game.moves.size());
+    std::vector<std::vector<std::string>> pv(game.moves.size() + 1);
+    std::vector<Board> position(game.moves.size() + 1);
+    {
+        Board b;
+        if (!game.tags.startFen.empty()) b.setFromFEN(game.tags.startFen);
+        for (size_t i = 0; i <= game.moves.size(); ++i) {
+            position[i] = b.copyForSearch();
+            if (i < game.moves.size()) b.makeMove(game.moves[i]);
+        }
+    }
     {
         Board b;
         if (!game.tags.startFen.empty()) b.setFromFEN(game.tags.startFen);
@@ -159,6 +244,7 @@ int main(int argc, char** argv) {
         if (!engine.haveScore()) break;          // terminal position: nothing to search
         score[i] = clampScore(engine.lastScore());
         best[i] = mv;
+        pv[i] = engine.lastPv();
         if (i < game.moves.size()) {
             // The engine answers in UCI; name it the way the game does.
             Board at;
@@ -230,6 +316,28 @@ int main(int argc, char** argv) {
             std::printf("%3zu.%s%-8s %-11s -%4.1f win%%  (-%d cp, best %s, eval %+d)\n",
                         i / 2 + 1, white ? " " : "..", san[i].c_str(),
                         label, wpLoss, cpLoss, b.c_str(), score[i]);
+
+            // Attribution, at the end of each line rather than at the move.
+            // A tactic's point is that the material changes several plies
+            // later, so comparing the static evaluation of the two *starting*
+            // positions would explain a hanging queen as a change in centre
+            // control.
+            if (explain) {
+                const Board wouldBe = atEndOfPv(position[i], pv[i]);
+                const Board didGo   = atEndOfPv(position[i + 1], pv[i + 1]);
+                const std::vector<TermDelta> d = termDiff(wouldBe, didGo);
+                if (d.empty() || std::abs(d[0].delta) < 20) {
+                    std::printf("        no term accounts for it — this engine's "
+                                "evaluation does not see what was lost\n");
+                } else {
+                    std::printf("       ");
+                    for (size_t k = 0; k < d.size() && k < 3; ++k) {
+                        if (std::abs(d[k].delta) < 20) break;
+                        std::printf(" %s %+d", d[k].name, d[k].delta);
+                    }
+                    std::printf("  (white's point of view, at the end of each line)\n");
+                }
+            }
         }
     }
 

@@ -26,6 +26,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -123,6 +124,7 @@ public:
         send(go);
 
         haveScore_ = false;
+        pv_.clear();
         std::string line;
         while (readLine(line)) {
             if (line.compare(0, 10, "info depth") == 0) {
@@ -145,6 +147,14 @@ public:
     bool haveScore() const { return haveScore_; }
     int  lastScore() const { return lastScore_; }
 
+    // The principal variation of the last completed iteration, in UCI moves.
+    //
+    // Needed because a static evaluation cannot explain a search score at the
+    // position where the search started: the point of a tactic is that the
+    // material changes several plies later. Anything attributing a score to
+    // named evaluation terms has to walk to the end of this line first.
+    const std::vector<std::string>& lastPv() const { return pv_; }
+
     void quit() {
         if (pid_ <= 0) return;
         if (out_) { send("quit"); fclose(out_); out_ = nullptr; }
@@ -165,6 +175,7 @@ private:
     FILE* out_ = nullptr;
     int  lastScore_ = 0;
     bool haveScore_ = false;
+    std::vector<std::string> pv_;
 
     void send(const std::string& s) {
         if (!out_) return;
@@ -193,7 +204,17 @@ private:
     // "info depth 7 score cp -338 nodes ..." or "score mate 3". A mate is
     // mapped onto the same scale the in-process search reports, so the resign
     // adjudicator treats both modes identically.
+    void capturePv(const std::string& line) {
+        const size_t p = line.find(" pv ");
+        if (p == std::string::npos) return;
+        pv_.clear();
+        std::istringstream in(line.substr(p + 4));
+        std::string mv;
+        while (in >> mv) pv_.push_back(mv);
+    }
+
     void captureScore(const std::string& line) {
+        capturePv(line);
         size_t p = line.find(" score ");
         if (p == std::string::npos) return;
         p += 7;
