@@ -130,6 +130,6 @@ The headers carry the reasoning, not just the declarations. Read these first:
 `transposition_table.hpp` (aging and replacement), `config.hpp` (why each
 default is what it is).
 
-Then check [PLAN.md](../PLAN.md) — the work is phased so each piece is
+Then check [PLAN.md](../docs/PLAN.md) — the work is phased so each piece is
 verifiable when it lands, and many surprising choices are a phase boundary
 rather than an oversight.
