@@ -190,17 +190,37 @@ a node budget pays both sides the same nodes.
 
 ---
 
-## 4. Quiescence has no depth bound
+## 4. Quiescence has no depth bound — **FIXED 2026-08-14**
 
 **PLAN.md 3.1, still unimplemented.** `quiescence()` (`search.cpp:166`) takes a
 `ply` but never caps it. When in check it generates *all* legal moves rather
 than captures (`search.cpp:184`), which is correct — stand-pat is illegal in
 check — but it means a long forcing sequence of checks recurses without limit.
 
-No game has demonstrably blown up on this yet, which is why it sits below the
-proven defects. But the failure mode is a search that overruns its budget in a
-sharp position, and an overrun is a forfeit. The cheap fix is a ply cap plus
-delta pruning, both of which PLAN 3.1 already specifies.
+No game had demonstrably blown up on this, which is why it sat below the proven
+defects. But the failure mode is a search that overruns its budget in a sharp
+position, and an overrun is a forfeit.
+
+**Fixed** with a `QS_MAX_DEPTH` of 8 plies past the horizon, behind a `qbound`
+toggle that defaults **on** — a repair rather than a feature, on the same
+reasoning that put `ttAging` on, and still a toggle so the repair can be
+measured rather than assumed.
+
+The diff is the right shape for a horizon bound: six of the twelve bench
+positions are byte-identical, and the two pathological ones absorb nearly all of
+it — kiwipete −26.0%, tactical −23.4%, everything else between 0 and −1.4%. No
+best move changed. Bench **1 759 990 → 1 464 599, −16.8%**.
+
+**It also settles the open question from the Phase 4 gate.** Those evaluation
+fixes cost +20.1% nodes, and an equal-nodes gate divides that out by
+construction, so whether they were affordable on a clock was unanswered. They
+now cost nothing: 1 464 599 against the 1 465 771 that preceded them. The
+quiescence bound paid the whole bill, and no timed gate was needed to find that
+out — a bench run of a few seconds did it.
+
+Delta pruning, the other half of PLAN 3.1, is implemented alongside it but
+defaults **off**: it is a feature, it changed a best move, and it ships only if
+a gate says so. See PLAN 3.1.
 
 ---
 

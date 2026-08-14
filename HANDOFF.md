@@ -30,6 +30,8 @@ Phase 3 is in progress. What is wired in:
 | TT aging | **on** | **accepted**, +11.5 Elo [+3.2, +19.8] |
 | `seeordering` | **on** | **accepted**, +25.6 Elo [+16.1, +35.2] — on by default since 2026-08-13 |
 | `seepruning` | off | **resolved, stays off** — +2.2 [−7.2, +11.6] at equal nodes, +4 [−7, +14] on the clock |
+| `qbound` | **on** | quiescence capped 8 plies past the horizon; −16.8% nodes, no best move changed. Ungated repair |
+| `deltapruning` | off | a further −37.5% nodes; a feature, awaiting a gate |
 
 All three gates ran 2026-08-13 at 14 shards × 120 pairs (3 360 games each,
 `-N 100000`). TT aging defaults on because it is a repair, not a feature — the
@@ -63,12 +65,12 @@ plays 900+10, where it spends 15-25 *seconds*. Nothing here rules out
 `seepruning` mattering at long time controls. Testing that is not affordable —
 see the throughput note under Next.
 
-The bench signature is **1,759,990 nodes** at depth 6. Any change claiming to
-preserve search behaviour must reproduce it exactly. It has moved twice this
-week — 2,056,371 until `seeordering` was turned on (2026-08-13), then 1,465,771
-until the evaluation symmetry fixes (2026-08-14, `BUGS.md` 2 and 3, +17.7% with
-no best move changed), then 1,725,755 until "defended" was fixed the same day
-(`BUGS.md` 5, +2.0%). Older documents quoting an earlier figure are describing
+The bench signature is **1,464,599 nodes** at depth 6. Any change claiming to
+preserve search behaviour must reproduce it exactly. It has moved four times this
+week — 2,056,371 until `seeordering` was turned on (2026-08-13); then 1,465,771,
+1,725,755 and 1,759,990 as the three Phase 4 evaluation fixes landed
+(2026-08-14); then back down to 1,464,599 when the quiescence bound landed the
+same day, which paid the whole of Phase 4's +20.1% back. Older documents quoting an earlier figure are describing
 the baseline of their day, not a regression.
 
 ---
@@ -164,7 +166,22 @@ point estimate barely moved; the interval is what shrank. One shard is a
 
 ## Next, in order
 
-1. **Decide what to do about Phase 4's node cost.** The gate is done and the
+1. **Gate `deltapruning`** (`PLAN.md` 3.1). It is implemented and off by
+   default. −37.5% nodes on top of `qbound`, kiwipete −63.6%, wall clock nearly
+   halved — but it changed a best move, so it is a feature and not a repair.
+   Read `seepruning` first before choosing the instrument: delta pruning is
+   speed-per-node in character, so an equal-nodes gate may divide out most of
+   what it buys, and that is exactly the trap `seepruning` cost two gates to
+   learn.
+
+   ```bash
+   ./tests/shard-gate.sh 12 140 -N 100000 --optA deltapruning=on --optB deltapruning=off
+   ```
+
+2. **Check extensions** (`PLAN.md` 3.3) — small, standard, unimplemented, and
+   quality-per-node, so it gates normally on nodes.
+
+3. ~~Phase 4's node cost~~ — **answered.** The gate is done and the
    fixes are *not* in question — see below — but they buy their quality at
    +20.1% nodes, and an equal-nodes gate divides that out by construction. The
    open question is whether the extra nodes pay for themselves on a clock. The

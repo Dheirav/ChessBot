@@ -20,6 +20,21 @@ static const int QS_PIECE_VALUES[7] = { 0, 20000, 100, 320, 330, 500, 900 };
 // two groups can never interleave.
 static constexpr int SEE_LOSING_CAPTURE_BAND = 100000;
 
+// How far past the main search's horizon quiescence may recurse (PLAN.md 3.1).
+//
+// Eight plies is enough to resolve any exchange sequence that occurs in a real
+// game — a capture chain longer than that needs eight defenders of one square —
+// while bounding the pathological case that motivated this: in check,
+// quiescence searches every legal evasion rather than captures only, so a long
+// forcing sequence of checks had no limit at all.
+static constexpr int QS_MAX_DEPTH = 8;
+
+// Delta pruning margin: how much a capture is allowed to be behind alpha before
+// it is dismissed as unable to catch up. A capture that cannot reach alpha even
+// after winning its victim plus this much positional compensation is not going
+// to change the score of the node.
+static constexpr int QS_DELTA_MARGIN = 200;
+
 // The search is negamax: every score is from the point of view of the side to
 // move, and a child's score is negated on the way back up. evaluate() is
 // white-perspective, so the single conversion happens in scoreForSideToMove()
@@ -70,6 +85,8 @@ const SearchOptionEntry SEARCH_OPTIONS[] = {
     {"seeordering", "seeord",   "SeeOrdering", &SearchOptions::seeOrdering},
     {"seepruning",  "seeprune", "SeePruning",  &SearchOptions::seePruning},
     {"ttaging",     "ttage",    "TtAging",     &SearchOptions::ttAging},
+    {"qbound",      "qbound",   "QBound",      &SearchOptions::qBound},
+    {"deltapruning","delta",    "DeltaPruning",&SearchOptions::deltaPruning},
 };
 const size_t SEARCH_OPTION_COUNT = sizeof(SEARCH_OPTIONS) / sizeof(SEARCH_OPTIONS[0]);
 
@@ -163,11 +180,23 @@ static MoveList generateCaptures(Board& board, PieceColor side) {
 
 // Quiescence search: avoids the horizon effect by searching captures and
 // promotions at the leaves of the main search. Negamax, like the main search.
-static int quiescence(Board& board, int ply, int alpha, int beta,
+// `ply` is absolute depth from the root, used for mate scoring. `qDepth` counts
+// only how deep *this* quiescence descent has gone, which is what the bound
+// below applies to — the two differ because quiescence starts at whatever ply
+// the main search stopped at.
+static int quiescence(Board& board, int ply, int qDepth, int alpha, int beta,
                       const std::atomic<bool>& shouldStop) {
     ++g_searchNodes;
     if (searchAborted(shouldStop)) {
         return 0;
+    }
+
+    // Hard horizon. Returning the static evaluation here is an approximation —
+    // the position may still be tactically live — but an unbounded search is
+    // not an alternative: it is a budget overrun, and on a clock that is a
+    // forfeit rather than a bad move.
+    if (g_searchOptions.qBound && qDepth >= QS_MAX_DEPTH) {
+        return scoreForSideToMove(board);
     }
 
     PieceColor side = board.activeColor;
@@ -176,8 +205,12 @@ static int quiescence(Board& board, int ply, int alpha, int beta,
     // If in check, we must search every evasion (stand-pat is illegal).
     bool inCheck = LegalMoveValidator::isInCheck(board, side);
 
+    // Kept in scope past this block because delta pruning below needs it: the
+    // question "can this capture reach alpha" is asked relative to where the
+    // position already stands.
+    int standPat = 0;
     if (!inCheck) {
-        int standPat = scoreForSideToMove(board);
+        standPat = scoreForSideToMove(board);
         if (standPat >= beta) return beta;
         if (standPat > alpha) alpha = standPat;
     }
@@ -256,12 +289,33 @@ static int quiescence(Board& board, int ply, int alpha, int beta,
             continue;
         }
 
+        // Delta pruning: a capture that cannot reach alpha even after winning
+        // its victim outright, plus a margin for whatever positional
+        // compensation the exchange might bring, cannot change this node's
+        // score. Skipping it removes a subtree that was only ever going to
+        // confirm what stand-pat already said.
+        //
+        // Three exclusions, each load-bearing. In check there is no valid
+        // stand-pat to measure against, so the arithmetic is meaningless.
+        // Promotions are excluded because the victim is not what they gain — a
+        // queen appears on the board, and pricing them by the captured piece
+        // would prune exactly the moves most likely to swing the score. And a
+        // mate score for alpha would make every capture look hopeless, which
+        // is the one case where the tree must still be searched.
+        if (g_searchOptions.deltaPruning && !inCheck &&
+            move.flag != PROMOTION && std::abs(alpha) < MATE_SCORE - 1000) {
+            const int victim = (move.flag == EN_PASSANT)
+                             ? QS_PIECE_VALUES[PAWN]
+                             : QS_PIECE_VALUES[move.capturedPiece.type()];
+            if (standPat + victim + QS_DELTA_MARGIN <= alpha) continue;
+        }
+
         if (searchAborted(shouldStop)) {
             break;
         }
 
         UndoInfo undo = board.makeMove(move);
-        int score = -quiescence(board, ply + 1, -beta, -alpha, shouldStop);
+        int score = -quiescence(board, ply + 1, qDepth + 1, -beta, -alpha, shouldStop);
         board.unmakeMove(undo);
 
         if (searchAborted(shouldStop)) {
@@ -348,7 +402,7 @@ static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
     }
 
     if (depth == 0) {
-        int score = quiescence(board, ply, alpha, beta, shouldStop);
+        int score = quiescence(board, ply, 0, alpha, beta, shouldStop);
         // Quiescence is fail-hard: a result clipped to the window is only a
         // bound, not an exact score. Never store anything from a stopped
         // search — it returns fake neutral values.

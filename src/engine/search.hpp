@@ -32,6 +32,22 @@ struct SearchOptions {
     bool seeOrdering = true;   // sort captures by the exchange result, not the victim
     bool seePruning = false;   // quiescence skips captures that lose material
 
+    // Quiescence bounds (PLAN.md 3.1, BUGS.md 4).
+    //
+    // qBound defaults ON because it is a repair, not a feature — the same
+    // reasoning that put ttAging on. quiescence() takes a ply and never capped
+    // it, and while in check it generates every legal evasion, so a long
+    // forcing sequence recursed without limit. The failure mode is a search
+    // that overruns its budget, and an overrun on a clock is a forfeit. It is
+    // still a toggle so the repair can be measured rather than assumed.
+    //
+    // deltaPruning defaults OFF because it *is* a feature: it changes which
+    // captures get searched, so it ships only if a gate says it earns its
+    // place. Shipping an unmeasured default is the habit these toggles exist
+    // to break.
+    bool qBound = true;        // cap how far past the horizon quiescence may recurse
+    bool deltaPruning = false; // skip captures that cannot raise alpha
+
     // Age the transposition table once per search, so entries left by earlier
     // searches lose their depth-preference and can be displaced.
     //
