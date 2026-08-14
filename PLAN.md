@@ -311,7 +311,25 @@ margin). Bounds worst-case node counts and is close to free in strength.
 and **wired into the search** as of `1c0c6d6`. Both gated 2026-08-13:
 `seeordering` **accepted** (+25.6 Elo) and **now on by default**, which moved the
 bench signature to 1 465 771; `seepruning` **not demonstrated at equal nodes**
-(+2.2, CI spans zero) and still off — see the gate results below.*
+(+2.2, CI spans zero). Re-gated on the clock 2026-08-14 and **still not
+demonstrated** (+4, CI [−7, +14]): this item is now closed and `seepruning`
+stays off. See the gate results below.*
+
+**The timed gate, and what it settles.** The case for a second gate was that
+`seepruning` buys speed per node rather than quality per node, and a node budget
+pays both sides the same nodes, so the equal-nodes result could not see it. That
+reasoning was sound; the measurement did not support the conclusion. 3 360 games
+at `-t 100`, sequential on an otherwise idle machine, returned +4 Elo with a
+95% interval of [−7, +14] — overlapping the equal-nodes interval almost exactly.
+Two instruments chosen to disagree, agreeing.
+
+What is *not* settled is long time controls. `-t 100` is 100 ms per move; the
+Lichess bot spends 15-25 seconds. A timed gate is sequential (`shard-gate.sh`
+refuses anything without `-N`, since shards under a clock compete for the CPU),
+so this one cost 6 h 36 m of wall clock, and halving the interval costs four
+times the games. A gate at a realistic time control is days of machine time for
+one question, which is why this one was run at 100 ms and why the answer is
+qualified rather than universal.
 
 Standard swap-off algorithm over the attacker sets, in two independently
 toggleable uses:

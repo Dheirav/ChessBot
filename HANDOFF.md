@@ -29,7 +29,7 @@ Phase 3 is in progress. What is wired in:
 | null-move pruning, LMR, aspiration windows | **on** | accepted by gate 1.5, +140 Elo |
 | TT aging | **on** | **accepted**, +11.5 Elo [+3.2, +19.8] |
 | `seeordering` | **on** | **accepted**, +25.6 Elo [+16.1, +35.2] — on by default since 2026-08-13 |
-| `seepruning` | off | equal-nodes gate neutral: +2.2 [−7.2, +11.6]; needs a **timed** gate |
+| `seepruning` | off | **resolved, stays off** — +2.2 [−7.2, +11.6] at equal nodes, +4 [−7, +14] on the clock |
 
 All three gates ran 2026-08-13 at 14 shards × 120 pairs (3 360 games each,
 `-N 100000`). TT aging defaults on because it is a repair, not a feature — the
@@ -38,11 +38,19 @@ could only be displaced by something deeper still, and the live search got a
 shrinking share of the table. The gate has now confirmed that default rather
 than merely assuming it.
 
-**`seepruning` was not rejected; it was measured with the wrong instrument.** It
-cuts the most nodes of anything in Phase 3 (−41.1% at bench 6) and scored
-neutral at equal nodes, which is what a change that buys *speed* per node rather
-than *quality* per node looks like when both sides are paid the same nodes. Its
-open gate is a timed one. Do not read +2.2 as "SEE pruning does nothing".
+**`seepruning` is settled: it stays off.** The argument for it was that it buys
+*speed* per node — it cuts the most nodes of anything in Phase 3, −41.1% at
+bench 6 — so a node budget, which pays both sides the same nodes, divides out
+exactly the thing it is good for. That argument was right to make and it did not
+survive the measurement. A timed gate on 2026-08-14 returned **+4 Elo, 95% CI
+[−7, +14]** over 3 360 games at `-t 100`, an interval that overlaps the
+equal-nodes result almost exactly. Two instruments, two intervals containing
+zero.
+
+The one caveat worth carrying: `-t 100` is 100 ms per move, and the Lichess bot
+plays 900+10, where it spends 15-25 *seconds*. Nothing here rules out
+`seepruning` mattering at long time controls. Testing that is not affordable —
+see the throughput note under Next.
 
 The bench signature is **1,759,990 nodes** at depth 6. Any change claiming to
 preserve search behaviour must reproduce it exactly. It has moved twice this
@@ -111,11 +119,16 @@ makes it usable as a comparison later.
 
 ## In flight
 
-**The Lichess bot is running** (`./lichess/run.sh`), playing rated 900+10 games
-against bots continuously — `allow_matchmaking: true` means it challenges when
-idle rather than waiting. It is the source of the baseline above, and it keeps
-moving that baseline while it runs. Stop it **between** games, never during one
-(`BUGS.md` 7), and stop it entirely before any timed gate.
+**Nothing is running.** The Lichess bot was stopped at 01:22 on 2026-08-14 so
+the timed `seepruning` gate could have the machine, and has not been restarted:
+
+```bash
+./lichess/run.sh   # token comes from the environment
+```
+
+It plays rated 900+10 continuously once up — `allow_matchmaking: true` means it
+challenges when idle rather than waiting. Stop it **between** games, never
+during one (`BUGS.md` 7).
 
 **No gate is running.** Three completed overnight on 2026-08-13 and are pooled
 and recorded above; their logs are kept:
@@ -125,6 +138,7 @@ and recorded above; their logs are kept:
 | `shard-20260813-000634/` | `ttaging` | +11.5 [+3.2, +19.8] |
 | `shard-20260813-015757/` | `seepruning` | +2.2 [−7.2, +11.6] |
 | `shard-20260813-034736/` | `seeordering` | +25.6 [+16.1, +35.2] |
+| `gate-seepruning-timed.log` | `seepruning`, **timed** `-t 100` | +4 [−7, +14] |
 
 Re-pool any of them with `./tests/pool-shards.sh <dir>/`.
 
@@ -138,27 +152,7 @@ point estimate barely moved; the interval is what shrank. One shard is a
 
 ## Next, in order
 
-1. **A timed gate for `seepruning`** (`PLAN.md` 3.2), on a quiet machine:
-   ```bash
-   ./tests/match -n 1680 -t 100 --optA seepruning=on --optB seepruning=off
-   ```
-   This is the documented exception to gating on nodes, and the only measurement
-   currently ready to run. Its baseline is now the engine as shipped, with
-   `seeordering` on — the harder test for it, since ordering already removes some
-   of the tree pruning would have cut. **Nothing else may run on the machine
-   while it does**, including the Lichess bot: a timed match silently measures
-   whatever else was competing for the CPU.
-
-   It is `tests/match` directly and **not** `shard-gate.sh`, which refuses
-   anything without `-N` — sharding a timed gate is what its header exists to
-   forbid. One core, therefore, and that is what sets the time control: `-t` is
-   a budget *per move*, and measured throughput is ~3.5 s per game at `-t 50`,
-   so 3 360 games (the volume of the other three gates) is about 3.3 h there and
-   an estimated 6-7 h at `-t 100`. The `-t 3000` this file used to recommend
-   would have been roughly nineteen days, on a command that exits immediately
-   (`BUGS.md` 9).
-
-2. **Gate Phase 4** — *blocked on `BUGS.md` 8.* `BUGS.md` 2, 3 and 5 are shipped
+1. **Gate Phase 4** — *blocked on `BUGS.md` 8.* `BUGS.md` 2, 3 and 5 are shipped
    ungated on correctness grounds and together cost +20.1% nodes at bench 6
    (1 465 771 -> 1 759 990), so whether that is worth Elo is genuinely open. One
    match would cover all three, since they landed together. But `tests/match`
@@ -168,9 +162,21 @@ point estimate barely moved; the interval is what shrank. One shard is a
    negative — it would call for retuning king-safety magnitude against the
    corrected baseline, which is a change that gates normally.
 
-3. **Phase 3 remainder:** bound quiescence and delta pruning (3.1 — also
+2. **Phase 3 remainder:** bound quiescence and delta pruning (3.1 — also
    `BUGS.md` 4), check extensions (3.3), futility/razoring (3.4), IID (3.5),
    retune LMR (3.6). 3.1 and 3.3 are the cheap ones and neither is implemented.
+
+3. **More Lichess games.** With `BUGS.md` 1, 2, 3 and 5 all fixed since the
+   baseline was frozen, the 24-game record above describes an engine that no
+   longer exists. Re-measuring it is free and needs no decisions.
+
+**On gate throughput.** A timed gate is sequential — `shard-gate.sh` refuses
+anything without `-N`, because shards under a clock compete for the CPU. The
+`seepruning` gate took 6 h 36 m of wall clock for 3 360 games at `-t 100`. That
+sets the exchange rate for any future timed gate: halving a confidence interval
+costs four times the games, so resolving an effect smaller than about 10 Elo on
+the clock is a full day of machine time per question. Gate on nodes unless the
+change is specifically about speed.
 
 `BUGS.md` is the list to read before picking any of these up; it carries the
 evidence, the file and line, and what each defect has actually cost.
