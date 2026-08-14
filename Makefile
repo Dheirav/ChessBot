@@ -172,6 +172,37 @@ test-pgn: tests/pgn
 test-uci: $(EXEC)
 	python3 tests/uci_smoke.py
 
+# --- Profiling ---
+#
+# gprof rather than perf: perf is unavailable under WSL, which is why gmon.out
+# has been in .gitignore since the 2026-08-10 session.
+#
+#   make profile                 profile tests/bench at depth 6
+#   make profile PROF_DEPTH=7    deeper, if the shape is depth-dependent
+#
+# Compiled on its own and deliberately *without* -MMD -MP. This is one g++ call
+# with many sources and a single -o, which is exactly the shape that rewrites
+# the .d once per translation unit and leaves it describing only whichever file
+# compiled last. That is what left ten stale test binaries passing in silence
+# (see the tests/ rules above); it must not be reintroduced here.
+#
+# -O2 is kept so the profile describes the binary that actually runs. Inlining
+# therefore charges a callee's time to its caller within a translation unit —
+# fine at the granularity this is used for, since evaluate(), generateLegalMoves()
+# and makeMove() live in different ones and are not inlined across them.
+PROF_FLAGS = -std=c++17 -O2 -pg -Wall -pthread -I./src
+PROF_BIN   = tests/bench-prof
+PROF_DEPTH ?= 6
+
+$(PROF_BIN): tests/bench.cpp $(ENGINE_SRC)
+	$(CXX) $(PROF_FLAGS) $^ -o $@ $(LDFLAGS) -pg
+
+profile: $(PROF_BIN)
+	@rm -f gmon.out
+	./$(PROF_BIN) $(PROF_DEPTH) > /dev/null
+	@echo "--- flat profile, depth $(PROF_DEPTH) ---"
+	@gprof -b -p $(PROF_BIN) gmon.out | head -22
+
 # Play on Lichess. Needs LICHESS_BOT_TOKEN in the environment and a lichess-bot
 # checkout (external, AGPL-3.0) — see lichess/README.md.
 lichess:
@@ -179,7 +210,7 @@ lichess:
 
 # Clean up build files
 clean:
-	rm -f $(OBJ) $(DEP) $(TEST_OBJ) $(TEST_DEP) $(EXEC) $(TESTS)
+	rm -f $(OBJ) $(DEP) $(TEST_OBJ) $(TEST_DEP) $(EXEC) $(TESTS) $(PROF_BIN) gmon.out
 
 # Clean and rebuild the project
 remake:
@@ -187,4 +218,4 @@ remake:
 	$(MAKE) all
 
 # Mark these targets as not actual files
-.PHONY: all clean remake lichess tests test-perft test-match test-gamestate test-evalref evalref-regen bench test-bench bench-regen test-timecontrol test-see test-bitboard test-guiinput test-pgn test-uci
+.PHONY: all clean remake lichess profile tests test-perft test-match test-gamestate test-evalref evalref-regen bench test-bench bench-regen test-timecontrol test-see test-bitboard test-guiinput test-pgn test-uci

@@ -628,14 +628,41 @@ square** (§4.2, ceiling ~1.05×) — touches `fen.cpp`, `zobrist_hash.cpp`,
 when already far outside the alpha-beta window. *Changes results*, so it needs
 a match, not just `evalref`.
 
+**Its premise has largely collapsed — re-profile before starting it.** `BACKLOG`
+§7 put evaluation at 34.1% of search time on 2026-08-10, and that is the number
+this item was justified by. A gprof run on 2026-08-15 (`make profile`) puts
+`evaluate_details` at 12.4% and `evaluate` at 4.3%, about **16.7% together**.
+5.1's evaluation cache already took most of what 5.4 was going to take, and the
+two overlap by construction — both avoid work the cache may already be avoiding.
+Whatever is left is worth less than half what the plan assumed, against a change
+that alters results and so costs a full gate.
+
 **5.5 Pin-aware legal move generation** (§4.1, ceiling 1.24× ideal / ~1.15×
-real — note this ceiling was measured against the *old* profile; with the
-legality filter now a larger share of a faster search, re-measure before
-committing to it) — last, deliberately. It is the most notorious source of engine bugs
+real — the ceiling was measured against the *old* profile, and re-measuring on
+2026-08-15 **confirmed the instinct behind that warning**: move generation and
+the legality filter are now the largest real cost in the search, at roughly
+**27.6%** — `isSquareAttacked` 13.8%, `generatePseudoLegalMoves` 10.6%,
+`Board::isSquareAttacked` 2.2%, `generateLegalMoves` 1.0%. That is where the
+time is, and it is what this item removes) — last, deliberately. It is the most notorious source of engine bugs
 (en-passant discovered check along a rank, pinned pawns capturing en passant,
 king moves that stay on a slider's ray). Only attempt with `test-perft` and
 perft divide (0.3) in place, and only after Phases 1–4 have banked their much
 larger strength gains.
+
+**5.6 Inline the `Piece` accessors** — **DONE 2026-08-15, 1.87×.** Not in the
+original plan, and found only by profiling. `Piece::type()`, `Piece::color()`
+and the default constructor are each a single instruction, and each lived in
+`piece.cpp`, so every use was a real cross-translation-unit call: 1.87 billion
+calls to `type()`, 381 million to `color()`, 545 million to the constructor —
+about 21% of runtime, essentially all overhead. Moved into the header as
+`constexpr`. Bench **7 173 ms → ~3 830 ms** on an identical 1 599 675-node
+search, and the signature is unchanged, which is the proof it changed nothing
+but speed. `piece.cpp` is deleted.
+
+The lesson is worth more than the speedup: this was the single largest
+performance win in the project, it took five lines, and no amount of reasoning
+about algorithms would have found it. Profile before choosing what to optimise —
+and `make profile` now exists so there is no excuse not to.
 
 **Explicitly not doing:** bitboard move generation (§4.0, ~1.02× ceiling) and
 incremental material/PST updates (§4.3, ~1 µs against real drift risk).
