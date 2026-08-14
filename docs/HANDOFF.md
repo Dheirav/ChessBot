@@ -11,6 +11,8 @@ is a frozen archive of the 2026-08-10 profiling session.
 | `src/README.md` | architecture | yes |
 | `tests/README.md` | test suite and gate methodology | yes |
 | `BUGS.md` | known defects, ordered by what fixing them is worth | yes |
+| `ROADMAP.md` | what to do next and why — the layer above `PLAN.md` | yes |
+| `REVIEW.md` | the game-review tool, and what it is honestly good for | yes |
 | `PLAN.md` | phased plan, with status lines per item | mostly — status lines are current |
 | `BACKLOG.md` | 2026-08-10 findings | **archive; §2.1 is wrong, §4 and §7 still good** |
 
