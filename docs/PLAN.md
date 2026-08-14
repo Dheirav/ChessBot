@@ -637,17 +637,34 @@ two overlap by construction — both avoid work the cache may already be avoidin
 Whatever is left is worth less than half what the plan assumed, against a change
 that alters results and so costs a full gate.
 
-**5.5 Pin-aware legal move generation** (§4.1, ceiling 1.24× ideal / ~1.15×
-real — the ceiling was measured against the *old* profile, and re-measuring on
-2026-08-15 **confirmed the instinct behind that warning**: move generation and
-the legality filter are now the largest real cost in the search, at roughly
-**27.6%** — `isSquareAttacked` 13.8%, `generatePseudoLegalMoves` 10.6%,
-`Board::isSquareAttacked` 2.2%, `generateLegalMoves` 1.0%. That is where the
-time is, and it is what this item removes) — last, deliberately. It is the most notorious source of engine bugs
-(en-passant discovered check along a rank, pinned pawns capturing en passant,
-king moves that stay on a slider's ray). Only attempt with `test-perft` and
-perft divide (0.3) in place, and only after Phases 1–4 have banked their much
-larger strength gains.
+**5.5 Pin-aware legal move generation** — **DONE 2026-08-15, measured 1.28×.**
+
+The ceiling recorded here was 1.24× ideal / ~1.15× real, with a warning that it
+had been measured against the *old* profile. Re-profiling confirmed the warning
+was right to exist: move generation and the legality filter were ~40% of real
+search time. The result came in at **1.28×** — above the "ideal" figure, because
+the profile it was estimated from no longer described the engine.
+
+Measured by interleaving against the parent commit, six rounds, won all six:
+median **4 095 ms → 3 188 ms**. The first attempt at measuring it suggested a
+*regression*, which was noise — the machine hit load 19 mid-run and identical
+runs ranged 4.6 s to 158 s. Interleaving makes load drift hit both arms equally,
+for the same reason a gate alternates colours within a pair.
+
+It was the most notorious source of engine bugs in the plan (en-passant
+discovered check along a rank, pinned pawns capturing en passant, king moves
+that stay on a slider's ray), and all three were avoided rather than solved —
+see the comment on `filterLegal` in `movegen.cpp`. Verified by `test-perft`, by
+`test-bench` being **byte-identical**, and by a 609 115-position differential
+against the implementation it replaced.
+
+One trap it did spring: the new filter depends on the bitboard attack tables,
+and nothing outside the bitboard tests initialised them. `test-perft` caught it
+immediately — 38 moves generated where 6 were legal. `initMoveLookupTables()`
+now initialises them, so the dependency cannot be forgotten. The differential
+harness had missed it by initialising them itself, which is worth remembering:
+a harness that sets up differently from production validates a configuration
+that does not exist.
 
 **5.6 Inline the `Piece` accessors** — **DONE 2026-08-15, 1.87×.** Not in the
 original plan, and found only by profiling. `Piece::type()`, `Piece::color()`
