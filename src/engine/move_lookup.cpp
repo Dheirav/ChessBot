@@ -1,5 +1,6 @@
 
 #include "move_lookup.hpp"
+#include "bitboard_attacks.hpp"
 #include "gui/constants.hpp"
 #include <fstream>
 #include <filesystem>
@@ -70,6 +71,13 @@ static const int KNIGHT_DELTAS[8][2]     = { {1,2}, {2,1}, {2,-1}, {1,-2}, {-1,-
 static const int KING_DELTAS[8][2]       = { {1,1}, {1,0}, {1,-1}, {0,-1}, {-1,-1}, {-1,0}, {-1,1}, {0,1} };
 
 void initMoveLookupTables() {
+    // The legality filter in movegen.cpp is pin-aware (PLAN.md 5.5) and so
+    // depends on the bitboard attack tables. Initialising them here rather than
+    // asking every entry point to remember means the dependency cannot be
+    // forgotten — and it was: perft returned 38 moves where 6 were legal,
+    // because the tables were all zero. initBitboardAttacks() is idempotent.
+    initBitboardAttacks();
+
     clearTables();
     std::string dir = lookupDataDir();
 

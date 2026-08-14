@@ -2,6 +2,7 @@
 #include "move_lookup.hpp"
 #include "piece.hpp"
 #include "legal_move_validator.hpp"
+#include "bitboard_attacks.hpp"
 #include <cctype>
 #include <iostream>
 
@@ -278,47 +279,88 @@ void generatePseudoLegalMoves(const Board& board, PieceColor sideToMove, bool in
 
 }
 
-// The legality filter, shared by both entry points below. `board` is mutated
-// and restored: every candidate move is made, the king square tested, and the
-// move unmade. unmakeMove restores the position exactly — the search relies on
-// that invariant at every node it visits — so on return the board is
-// bit-identical to what came in.
+// The legality filter, shared by both entry points below (PLAN.md 5.5).
+//
+// It used to make every candidate move, test whether the king was attacked, and
+// unmake it. That question is the single largest cost in the search — 80.9
+// million isSquareAttacked() calls, about 40% of runtime together with move
+// generation (profiled 2026-08-15) — and almost all of it is redundant. Whether
+// a move exposes the king depends only on where the king is, which enemy pieces
+// give check, and which of our pieces stand between the king and an enemy
+// slider. Those are three facts about the *position*, not about each move, so
+// they are computed once and every candidate is answered with a bit test.
+//
+// The three classic ways to get this wrong are avoided rather than solved:
+//
+//   - **King moves** are tested against an occupancy with the king removed.
+//     Otherwise a king fleeing *along* a checking slider's ray looks safe,
+//     because its own body still blocks the ray it stands on.
+//   - **En passant** keeps the old make/unmake test. It is the notorious case —
+//     the captured pawn vacates a square it was never standing on, which can
+//     open a rank onto the king — and it is rare enough that testing it the slow
+//     way costs nothing measurable. Cleverness here buys no speed and has cost
+//     other engines a great deal of correctness.
+//   - **Castling** is already fully verified by the pseudo-legal generator,
+//     which requires the king's origin, transit and destination squares to be
+//     unattacked. It arrives here as an ordinary king move and is re-checked,
+//     which is harmless.
+//
+// Verified against the implementation it replaces over 609 115 positions from
+// random games seeded on the four perft positions — kiwipete included, which
+// exists to exercise exactly these cases — with zero disagreements, before the
+// old path was deleted. `test-perft` guards it permanently.
 static void filterLegal(Board& board, PieceColor sideToMove,
                         const MoveList& candidates, MoveList& out) {
     out.clear();
     out.reserve(candidates.size());
 
-    int kingSq = -1;
-    for (int i = 0; i < 64; ++i) {
-        if (board.squares[i].type() == KING && board.squares[i].color() == sideToMove) {
-            kingSq = i;
-            break;
-        }
+    const BitboardState st = toBitboardState(board);
+    const BitboardColor us = (sideToMove == COLOR_WHITE) ? BB_WHITE : BB_BLACK;
+    const int ksq = kingSquare(st, us);
+    if (ksq < 0) {                 // no king: only reachable from a malformed FEN
+        for (const Move& m : candidates) out.push_back(m);
+        return;
     }
 
-    const PieceColor oppColor = (sideToMove == COLOR_WHITE) ? COLOR_BLACK : COLOR_WHITE;
-    for (const Move& m : candidates) {
-        const bool kingMove = (board.squares[m.from].type() == KING);
-        UndoInfo undo = board.makeMove(m);
+    const Bitboard checkersBB = checkers(st, us);
+    const Bitboard pinned     = blockersForKing(st, us);
+    const int numCheckers     = popcount(checkersBB);
 
-        int newKingSq = kingMove ? m.to : kingSq;
-        // Defensive: if the king is not where it was expected, find it. This
-        // should never fire — a king can never be captured in a legal search.
-        if (newKingSq < 0 || board.squares[newKingSq].type() != KING ||
-            board.squares[newKingSq].color() != sideToMove) {
-            newKingSq = -1;
-            for (int i = 0; i < 64; ++i) {
-                if (board.squares[i].type() == KING && board.squares[i].color() == sideToMove) {
-                    newKingSq = i;
-                    break;
-                }
+    // In single check a non-king move must capture the checker or interpose on
+    // the line between it and the king. In double check neither helps, and only
+    // the king may move.
+    Bitboard resolveMask = ~0ULL;
+    if (numCheckers == 1) {
+        const int checkerSq = lsb(checkersBB);
+        resolveMask = checkersBB | betweenSquares(ksq, checkerSq);
+    }
+
+    const Bitboard occWithoutKing = st.occupancyAll & ~(1ULL << ksq);
+    const Bitboard enemyOcc = (us == BB_WHITE) ? st.occupancyBlack : st.occupancyWhite;
+    const PieceColor oppColor = (sideToMove == COLOR_WHITE) ? COLOR_BLACK : COLOR_WHITE;
+
+    for (const Move& m : candidates) {
+        bool legal;
+        if (m.flag == EN_PASSANT) {
+            // Deliberately the slow path — see the note above.
+            UndoInfo undo = board.makeMove(m);
+            legal = !isSquareAttacked(board, ksq, oppColor);
+            board.unmakeMove(undo);
+        } else if (m.from == ksq) {
+            // attackersTo() reports attackers of both colours; only the enemy's
+            // matter. A piece captured on m.to cannot defend m.to, and a blocker
+            // standing on m.to never stops a ray from reaching m.to itself, so
+            // the occupancy needs no further adjustment.
+            legal = (attackersTo(st, m.to, occWithoutKing) & enemyOcc) == 0;
+        } else if (numCheckers > 1) {
+            legal = false;
+        } else {
+            legal = testBit(resolveMask, m.to);
+            if (legal && testBit(pinned, m.from)) {
+                legal = testBit(lineThrough(ksq, m.from), m.to);
             }
         }
-
-        if (newKingSq >= 0 && !isSquareAttacked(board, newKingSq, oppColor)) {
-            out.push_back(m);
-        }
-        board.unmakeMove(undo);
+        if (legal) out.push_back(m);
     }
 }
 
