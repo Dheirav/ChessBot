@@ -3,6 +3,7 @@
 #include "legal_move_validator.hpp"
 #include "movegen.hpp"
 
+#include <cctype>
 #include <cstdio>
 #include <ctime>
 #include <fstream>
@@ -176,4 +177,143 @@ bool writePgn(const std::string& path, const std::vector<Move>& moves,
     if (!file.is_open()) return false;
     file << toPgn(moves, tags);
     return file.good();
+}
+
+// --- Reading ---
+
+namespace {
+
+// Two SAN spellings mean the same move if they differ only in the decoration
+// PGN allows. Normalising both sides is cheaper and far more forgiving than
+// generating every spelling toSan() might not have chosen:
+//
+//   "0-0"     castling written with zeros, which many programs emit
+//   "e8Q"     promotion without the '=', which the standard permits
+//   "Nf3+"    check and mate suffixes
+//   "Nf3!?"   annotation glyphs
+std::string normalizeSan(const std::string& s) {
+    std::string out;
+    for (char c : s) {
+        if (c == '+' || c == '#' || c == '!' || c == '?' || c == '=') continue;
+        out += (c == '0') ? 'O' : c;
+    }
+    return out;
+}
+
+}  // namespace
+
+Move fromSan(Board& board, const std::string& san) {
+    const std::string want = normalizeSan(san);
+    MoveList legal = generateLegalMoves(board, board.activeColor);
+    for (const Move& m : legal) {
+        if (normalizeSan(toSan(board, m)) == want) return m;
+    }
+    Move none;
+    return none;   // from == -1
+}
+
+bool parsePgn(const std::string& text, PgnGame& out, std::string* error) {
+    out = PgnGame{};
+
+    // --- tag pairs ---
+    size_t i = 0;
+    while (i < text.size()) {
+        while (i < text.size() && std::isspace((unsigned char)text[i])) ++i;
+        if (i >= text.size() || text[i] != '[') break;
+        size_t close = text.find(']', i);
+        if (close == std::string::npos) break;
+        const std::string tag = text.substr(i + 1, close - i - 1);
+        i = close + 1;
+
+        size_t q1 = tag.find('"'), q2 = tag.rfind('"');
+        if (q1 == std::string::npos || q2 == q1) continue;
+        std::string key = tag.substr(0, tag.find(' '));
+        std::string val = tag.substr(q1 + 1, q2 - q1 - 1);
+        if      (key == "Event")  out.tags.event  = val;
+        else if (key == "Site")   out.tags.site   = val;
+        else if (key == "Date")   out.tags.date   = val;
+        else if (key == "Round")  out.tags.round  = val;
+        else if (key == "White")  out.tags.white  = val;
+        else if (key == "Black")  out.tags.black  = val;
+        else if (key == "Result") out.tags.result = val;
+        else if (key == "FEN")    out.tags.startFen = val;
+    }
+
+    Board board;
+    if (!out.tags.startFen.empty()) {
+        if (!board.setFromFEN(out.tags.startFen)) {
+            if (error) *error = "unreadable FEN tag: " + out.tags.startFen;
+            return false;
+        }
+    }
+
+    // --- movetext ---
+    int moveNo = 0;
+    while (i < text.size()) {
+        const char c = text[i];
+
+        if (std::isspace((unsigned char)c)) { ++i; continue; }
+
+        // Comments and variations nest; NAGs run to whitespace.
+        if (c == '{') { size_t e = text.find('}', i); i = (e == std::string::npos) ? text.size() : e + 1; continue; }
+        if (c == ';') { size_t e = text.find('\n', i); i = (e == std::string::npos) ? text.size() : e + 1; continue; }
+        if (c == '$') { while (i < text.size() && !std::isspace((unsigned char)text[i])) ++i; continue; }
+        if (c == '(') {
+            int depth = 0;
+            while (i < text.size()) {
+                if (text[i] == '(') ++depth;
+                else if (text[i] == ')' && --depth == 0) { ++i; break; }
+                ++i;
+            }
+            continue;
+        }
+
+        size_t end = i;
+        while (end < text.size() && !std::isspace((unsigned char)text[end])) ++end;
+        std::string token = text.substr(i, end - i);
+        i = end;
+
+        // Castling written with zeros starts with a digit and is emphatically
+        // not a move number. Without this it was classified as one and dropped
+        // *silently*, producing a game two moves shorter than the record — the
+        // exact failure this parser refuses to commit for illegal moves.
+        // "0-1" is a result and must not be caught here, which "0-0" prefix
+        // matching gets right.
+        const bool castlingWithZeros = (token.rfind("0-0", 0) == 0);
+
+        // Move numbers ("12." / "12...") and the result terminator are not moves.
+        if (!castlingWithZeros && std::isdigit((unsigned char)token[0])) {
+            if (token == "1-0" || token == "0-1" || token.rfind("1/2", 0) == 0) break;
+            const size_t dot = token.find('.');
+            if (dot == std::string::npos) continue;          // a bare number
+            token = token.substr(dot);
+            while (!token.empty() && token[0] == '.') token.erase(0, 1);
+            if (token.empty()) continue;                     // "12." or "12..."
+        }
+        if (token == "*" || token.empty()) break;
+
+        ++moveNo;
+        const Move m = fromSan(board, token);
+        if (m.from < 0) {
+            if (error) {
+                *error = "move " + std::to_string(moveNo) + " (\"" + token +
+                         "\") is not legal in " + board.getFEN();
+            }
+            return false;
+        }
+        out.moves.push_back(m);
+        board.makeMove(m);
+    }
+    return true;
+}
+
+bool readPgn(const std::string& path, PgnGame& out, std::string* error) {
+    std::ifstream file(path);
+    if (!file.is_open()) {
+        if (error) *error = "cannot open " + path;
+        return false;
+    }
+    std::ostringstream buf;
+    buf << file.rdbuf();
+    return parsePgn(buf.str(), out, error);
 }

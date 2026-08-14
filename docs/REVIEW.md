@@ -36,7 +36,26 @@ authoritative until it has a demonstrated reason to be believed.
 
 ---
 
-## R0. A PGN reader
+## R0. A PGN reader — **DONE 2026-08-15**
+
+`fromSan()`, `parsePgn()` and `readPgn()` in `pgn.cpp`. **All 48 games in
+`game_records/` parse and round-trip, 3 738 moves**, and `tests/pgn` now
+round-trips 200 seeded random games (23 669 moves) with no external files, so
+the property is guarded in CI.
+
+Implemented by generating the legal moves and asking `toSan()` which one spells
+that way, rather than by parsing the notation. SAN's hard part is
+disambiguation, `toSan()` already solves it, and a second implementation would
+be a second place for it to be wrong. Decoration PGN permits but `toSan()` never
+emits — `0-0`, `e8Q` without the `=`, `+`/`#`, `!?` — is handled by normalising
+both sides before comparing.
+
+**It found one real bug on the way in.** `0-0-0` begins with a digit, so the
+movetext loop classified it as a move number and skipped it *silently* — a game
+two moves shorter than the record, with no error. That is precisely the failure
+this parser refuses to commit for illegal moves, and it took a test to notice.
+
+The original note follows.
 
 **The hard prerequisite.** `pgn.cpp` writes and does not read: `toSan`,
 `toPgn`, `writePgn` and nothing in the other direction.
@@ -149,7 +168,7 @@ there is a reason not to.
 
 ## Order, and the honest prerequisite
 
-R0 → R1 → R2 → R4, with R3 whenever it is wanted. Each is independently
+R0 is done. R1 → R2 → R4 next, with R3 whenever it is wanted. Each is independently
 demonstrable.
 
 But the prerequisite is not on this list: **the engine's evaluation is the

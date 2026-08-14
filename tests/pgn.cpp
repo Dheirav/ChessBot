@@ -10,6 +10,7 @@
 #include "engine/movegen.hpp"
 #include "engine/pgn.hpp"
 
+#include <cstdint>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -181,6 +182,82 @@ int main() {
         check(pgn.find("[FEN \"" + fen + "\"]") != std::string::npos, "and carries its FEN");
         check(pgn.find("23... Kd8 24. e4 *") != std::string::npos,
               "numbering follows the board, and Black-to-move opens with ...");
+    }
+
+    // --- Reading ---
+    //
+    // The reader resolves SAN by asking toSan() which legal move spells that
+    // way, so these cases are really about the decoration PGN permits that
+    // toSan() would never produce.
+    {
+        std::cout << "\nreading\n";
+
+        PgnGame g;
+        std::string err;
+        check(parsePgn("1. e4 e5 2. Nf3 *", g, &err) && g.moves.size() == 3,
+              "a bare movetext parses");
+
+        check(parsePgn("1. e4 { a comment } e5 ; to end of line\n2. Nf3 *", g, &err)
+                  && g.moves.size() == 3,
+              "comments are skipped, both kinds");
+
+        check(parsePgn("1. e4 e5 (1... c5 2. Nf3) 2. Nf3 *", g, &err) && g.moves.size() == 3,
+              "variations are skipped, not played");
+
+        check(parsePgn("1. e4 $1 e5 $146 *", g, &err) && g.moves.size() == 2,
+              "NAGs are skipped");
+
+        check(parsePgn("1. e4 e5 2. Bc4 Nc6 3. Qh5 Nf6 4. Qxf7# 1-0", g, &err)
+                  && g.moves.size() == 7 && g.tags.result.empty() == false,
+              "a mate suffix does not confuse the match");
+
+        // Zeros for castling and a promotion without '=' are both legal PGN and
+        // neither is what toSan() emits.
+        check(parsePgn("[FEN \"4k3/P7/8/8/8/8/8/R3K3 w Q - 0 1\"]\n1. a8=Q+ Kd7 2. 0-0-0 *",
+                       g, &err) && g.moves.size() == 3,
+              "zeros castle and '=' is optional");
+        check(parsePgn("[FEN \"4k3/P7/8/8/8/8/8/R3K3 w Q - 0 1\"]\n1. a8Q+ *", g, &err)
+                  && g.moves.size() == 1,
+              "promotion without '=' parses");
+
+        check(!parsePgn("1. e4 e5 2. Ke2xq9 *", g, &err) && !err.empty(),
+              "an impossible move fails loudly rather than being skipped");
+
+        // The property that matters: anything this writes, it can read back.
+        // Seeded random games cover promotions, castling, en passant and
+        // disambiguation without anyone curating them.
+        {
+            uint64_t rs = 0x9E3779B97F4A7C15ULL;
+            auto rnd = [&]() { rs ^= rs << 13; rs ^= rs >> 7; rs ^= rs << 17; return rs; };
+            int games = 0, tripped = 0;
+            long totalMoves = 0;
+            for (int gi = 0; gi < 200; ++gi) {
+                Board b;
+                std::vector<Move> played;
+                for (int ply = 0; ply < 120; ++ply) {
+                    MoveList legal = generateLegalMoves(b, b.activeColor);
+                    if (legal.empty() || b.halfmoveClock >= 100) break;
+                    const Move m = legal[rnd() % legal.size()];
+                    played.push_back(m);
+                    b.makeMove(m);
+                }
+                ++games;
+                totalMoves += (long)played.size();
+                PgnTags tags;
+                PgnGame back;
+                std::string e2;
+                if (!parsePgn(toPgn(played, tags), back, &e2)) continue;
+                if (back.moves.size() != played.size()) continue;
+                bool same = true;
+                for (size_t k = 0; k < played.size(); ++k)
+                    if (!(played[k] == back.moves[k])) { same = false; break; }
+                if (same) ++tripped;
+            }
+            check(tripped == games,
+                  "every written game reads back identically (" +
+                      std::to_string(tripped) + "/" + std::to_string(games) +
+                      " games, " + std::to_string(totalMoves) + " moves)");
+        }
     }
 
     std::cout << (failures ? "\nFAILED: " + std::to_string(failures) + " checks\n"
