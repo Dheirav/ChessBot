@@ -13,11 +13,15 @@ so it needs a guard of its own.
 Run:  make test-uci
 """
 
+import os
 import subprocess
 import sys
 import time
 
-ENGINE = ["./chessbot", "--uci"]
+# Overridable so a build that is not ./chessbot can be smoke-tested — which is
+# what happens whenever the Lichess bot is live and relinking ./chessbot under
+# it would swap the engine mid-game.
+ENGINE = [os.environ.get("CHESSBOT", "./chessbot"), "--uci"]
 failures = []
 
 
@@ -117,6 +121,22 @@ def main():
     e.send("go depth 4")
     out = e.until("bestmove")
     check("promotion move accepted", not any("illegal move" in l for l in out))
+
+    # A node budget, which is what makes a match between two binaries
+    # reproducible: milliseconds are worth whatever the machine had spare.
+    e.send("position startpos")
+    e.send("go nodes 50000")
+    out = e.until("bestmove")
+    nodes = [int(l.split(" nodes ")[1].split()[0])
+             for l in out if l.startswith("info depth") and " nodes " in l]
+    check("go nodes returns a move", out[-1].split()[1] not in ("0000", "invalid"),
+          out[-1])
+    # Iterative deepening only stops between iterations, so it overshoots by at
+    # most the last one. Assert the budget is respected in order of magnitude,
+    # not exactly: an exact bound would be asserting a search property the
+    # engine does not claim.
+    check("go nodes respects the budget", bool(nodes) and nodes[-1] < 200000,
+          f"reached {nodes[-1] if nodes else '?'} nodes")
 
     # Repetition: the engine must see the game's past, not just the position.
     #

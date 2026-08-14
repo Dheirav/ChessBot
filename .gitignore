@@ -13,6 +13,7 @@ chessbot
 # and `git add -A` committed them. Sources and fixtures are re-included below.
 tests/*
 !tests/*.cpp
+!tests/*.hpp
 !tests/*.py
 !tests/*.sh
 !tests/*.md

@@ -137,6 +137,7 @@ SearchLimits parseGo(std::istringstream& is) {
     SearchLimits limits;
     long wtime = 0, btime = 0, winc = 0, binc = 0, movetime = 0;
     int movestogo = 0, depth = 0;
+    uint64_t nodes = 0;
     bool infinite = false;
 
     std::string token;
@@ -148,10 +149,19 @@ SearchLimits parseGo(std::istringstream& is) {
         else if (token == "movestogo") is >> movestogo;
         else if (token == "movetime")  is >> movetime;
         else if (token == "depth")     is >> depth;
+        else if (token == "nodes")     is >> nodes;
         else if (token == "infinite")  infinite = true;
     }
 
     if (depth > 0) limits.maxDepth = depth;
+
+    // A node budget is independent of the clock: whichever binds first ends the
+    // search. It is here because it is what makes an *external* match
+    // reproducible — a gate driving two binaries over UCI cannot use
+    // tests/match's in-process node budget, and a millisecond is worth whatever
+    // the machine had spare. Without this, every cross-binary gate would have
+    // to be a timed one.
+    if (nodes > 0) limits.maxNodes = nodes;
 
     if (infinite) {
         limits.moveTimeMs = 0;              // ends only on "stop"
@@ -172,8 +182,9 @@ SearchLimits parseGo(std::istringstream& is) {
         limits.moveTimeMs = budget;
     }
     // Nothing specified: fall back to a depth-limited search rather than
-    // thinking forever.
-    if (limits.moveTimeMs == 0 && !infinite && depth <= 0) limits.maxDepth = 8;
+    // thinking forever. A node budget counts as something specified.
+    if (limits.moveTimeMs == 0 && !infinite && depth <= 0 && nodes == 0)
+        limits.maxDepth = 8;
 
     return limits;
 }

@@ -39,7 +39,18 @@
 //   --da/--db <d>   per-side depth, for comparing two depth settings
 //   --ta/--tb <ms>  per-side time budget
 //   --na/--nb <n>   per-side node budget
-//   --ha/--hb on|off  all three search heuristics at once (default A on, B off)
+//   --ha/--hb on|off  all three search heuristics at once. Both default to ON:
+//                     each side starts from the shipped configuration and a
+//                     gate states its one difference. Asking for nothing is an
+//                     error, not a match against itself.
+//   --engineA/--engineB <path>   drive an engine *binary* over UCI instead of
+//                     searching in this process. The only way to A/B anything
+//                     that is not a SearchOption — an evaluation change, most
+//                     of all, since evaluate_details() reads the board and no
+//                     options at all. Two processes also share no eval cache
+//                     and no transposition table, which one process cannot
+//                     honestly claim (BUGS.md 8). Build the two commits you
+//                     want to compare and pass both paths.
 //   --optA/--optB     individual options, e.g. --optA nullmove=on,lmr=off
 //                     Applied after --ha/--hb, so they refine that baseline.
 //                     This is how a single feature gets its own A/B: the two
@@ -59,6 +70,7 @@
 #include "engine/move_lookup.hpp"
 #include "engine/transposition_table.hpp"
 #include "engine/piece.hpp"
+#include "uci_engine.hpp"
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -73,7 +85,33 @@ struct EngineConfig {
     const char* name;
     SearchOptions opts;
     SearchLimits limits;
+    // Empty means "search in this process with `opts`". Otherwise the path to
+    // an engine binary driven over UCI, which is the only way to A/B anything
+    // that is not a SearchOption — evaluation, most of all (BUGS.md 8).
+    std::string binary;
 };
+
+// UCI long algebraic: "e2e4", "e7e8q". Move::toString() writes "e7e8=Q" for
+// humans and that spelling is baked into the bench signature, so the wire
+// format lives here rather than changing it.
+static std::string toUciMove(const Move& m) {
+    if (m.from < 0 || m.to < 0) return "0000";
+    std::string s;
+    s += (char)('a' + (m.from % 8));
+    s += (char)('8' - (m.from / 8));
+    s += (char)('a' + (m.to % 8));
+    s += (char)('8' - (m.to / 8));
+    if (m.flag == PROMOTION) {
+        switch (m.promotionPiece.type()) {
+            case QUEEN:  s += 'q'; break;
+            case ROOK:   s += 'r'; break;
+            case BISHOP: s += 'b'; break;
+            case KNIGHT: s += 'n'; break;
+            default: break;
+        }
+    }
+    return s;
+}
 
 enum Result { A_WINS, DRAW, B_WINS };
 
@@ -125,7 +163,8 @@ static bool insufficientMaterial(const Board& b) {
 static GameOutcome playGame(const std::vector<Move>& opening, bool aPlaysWhite,
                             const EngineConfig& A, const EngineConfig& B,
                             TranspositionTable& ttA, TranspositionTable& ttB,
-                            int maxPlies) {
+                            int maxPlies,
+                            UciEngine* extA, UciEngine* extB) {
     Board board;
     board.setFromFEN(Board::INITIAL_FEN);
     // Positions the game has visited, handed to each search so the engines can
@@ -133,11 +172,18 @@ static GameOutcome playGame(const std::vector<Move>& opening, bool aPlaysWhite,
     // trees. Without this a gate on repetition handling would be two blind
     // engines playing each other, which measures nothing.
     std::vector<uint64_t> history;
+    // The same game in UCI notation, for whichever side is an external binary.
+    // A "position" command states the whole game, so this is the full move list
+    // from the initial position, not a delta.
+    std::vector<std::string> uciMoves;
     for (const Move& m : opening) {
         const uint64_t before = board.getHash();
+        uciMoves.push_back(toUciMove(m));
         board.makeMove(m);
         recordGamePosition(history, before, board);
     }
+    if (extA) extA->newGame();
+    if (extB) extB->newGame();
 
     ttA.clear();
     ttB.clear();
@@ -176,10 +222,32 @@ static GameOutcome playGame(const std::vector<Move>& opening, bool aPlaysWhite,
         const EngineConfig& cfg = aToMove ? A : B;
         TranspositionTable& tt = aToMove ? ttA : ttB;
 
-        g_searchOptions = cfg.opts;
-        g_searchOptions.quiet = true;
-        g_haveScore = false;
-        Move best = findBestMoveIterativeDeepening(board, cfg.limits, stop, tt, history);
+        UciEngine* ext = aToMove ? extA : extB;
+        Move best;
+        if (ext) {
+            // External binary: it keeps its own board, transposition table and
+            // eval cache, so nothing crosses between the two sides.
+            std::string mv = ext->bestMove(uciMoves, cfg.limits.moveTimeMs,
+                                           cfg.limits.maxNodes, cfg.limits.maxDepth);
+            g_haveScore = ext->haveScore();
+            g_lastScore = ext->lastScore();
+            bool matched = false;
+            for (const Move& m : legal)
+                if (toUciMove(m) == mv) { best = m; matched = true; break; }
+            if (!matched) {
+                // An engine that answers with an illegal move is broken, and
+                // quietly substituting a legal one would turn that into a
+                // mysteriously weak score instead of an error.
+                std::printf("engine %s returned unusable move \"%s\"\n",
+                            cfg.name, mv.c_str());
+                std::exit(1);
+            }
+        } else {
+            g_searchOptions = cfg.opts;
+            g_searchOptions.quiet = true;
+            g_haveScore = false;
+            best = findBestMoveIterativeDeepening(board, cfg.limits, stop, tt, history);
+        }
 
         // Defensive: a search that returns nothing usable would otherwise
         // corrupt the game; fall back to the first legal move.
@@ -200,6 +268,7 @@ static GameOutcome playGame(const std::vector<Move>& opening, bool aPlaysWhite,
         }
 
         const uint64_t before = board.getHash();
+        uciMoves.push_back(toUciMove(best));
         board.makeMove(best);
         recordGamePosition(history, before, board);
         if (++seen[board.getHash()] >= 3) return {DRAW, ply, "repetition"};
@@ -302,6 +371,9 @@ int main(int argc, char** argv) {
     // compared four differences instead of one. The old comparison is still
     // available, it just has to be asked for: `--hb off`.
     bool heurA = true, heurB = true;
+    // Paths to engine binaries, for comparing two *builds* instead of two
+    // option sets. Empty means "search in this process" (BUGS.md 8).
+    std::string binA, binB;
     unsigned seed = 20260810u;
     bool depthGiven = false;
     bool useSprt = false;
@@ -334,6 +406,20 @@ int main(int argc, char** argv) {
         pairs = std::atoi(argv[1]);
         if (argc > 2) depth = std::atoi(argv[2]);
         if (argc > 3) seed = (unsigned)std::atoi(argv[3]);
+        // It used to read three arguments and ignore the rest in silence, so
+        // `./tests/match 2 4 <seed> --hb off` dropped the --hb and
+        // `./tests/match 100 6 <seed> -N 100000` quietly ran a depth match.
+        // A misconfigured measurement that runs is worse than one that refuses.
+        if (argc > 4) {
+            std::string rest;
+            for (int i = 4; i < argc; ++i) rest += std::string(i > 4 ? " " : "") + argv[i];
+            std::printf("the positional form takes at most [pairs] [depth] [seed], "
+                        "so \"%s\" would be ignored.\n"
+                        "Use the flag form to combine them:\n"
+                        "  ./tests/match -n %d -d %d -s %u %s\n",
+                        rest.c_str(), pairs, depth, seed, rest.c_str());
+            return 1;
+        }
     } else {
         for (int i = 1; i < argc; ++i) {
             std::string a = argv[i];
@@ -353,6 +439,8 @@ int main(int argc, char** argv) {
             else if (a == "--hb")    heurB = onOff(next());
             else if (a == "--optA")  optsA = splitOpts(next());
             else if (a == "--optB")  optsB = splitOpts(next());
+            else if (a == "--engineA") binA = next();
+            else if (a == "--engineB") binB = next();
             else if (a == "--sprt")  useSprt = true;
             else if (a == "--elo0")  elo0 = std::atof(next());
             else if (a == "--elo1")  elo1 = std::atof(next());
@@ -416,10 +504,35 @@ int main(int argc, char** argv) {
     if      (nodeB > 0)   nameB += " @" + std::to_string(nodeB) + "n";
     else if (budgetB > 0) nameB += " @" + std::to_string(budgetB) + "ms";
     else                  nameB += " @d" + std::to_string(ceilB);
+    A.binary = binA;
+    B.binary = binB;
+    if (!binA.empty()) nameA = binA + " " + nameA;
+    if (!binB.empty()) nameB = binB + " " + nameB;
     A.name = nameA.c_str();
     B.name = nameB.c_str();
 
     std::printf("%s  vs  %s\n", A.name, B.name);
+
+    // Started once and reused across games via "ucinewgame", rather than
+    // spawned per game: a process launch per game would be most of the wall
+    // clock at short time controls.
+    UciEngine extEngineA, extEngineB;
+    UciEngine* extA = nullptr;
+    UciEngine* extB = nullptr;
+    if (!A.binary.empty()) {
+        if (!extEngineA.start(A.binary)) {
+            std::printf("could not start engine A: %s\n", A.binary.c_str());
+            return 1;
+        }
+        extA = &extEngineA;
+    }
+    if (!B.binary.empty()) {
+        if (!extEngineB.start(B.binary)) {
+            std::printf("could not start engine B: %s\n", B.binary.c_str());
+            return 1;
+        }
+        extB = &extEngineB;
+    }
 
     // Say out loud what actually differs. A gate is only interpretable if
     // exactly one thing changed, and the cheapest moment to notice otherwise is
@@ -437,6 +550,10 @@ int main(int argc, char** argv) {
         if (budgetA != budgetB) {
             if (!diff.empty()) diff += ", ";
             diff += "time budget";
+        }
+        if (A.binary != B.binary) {
+            if (!diff.empty()) diff += ", ";
+            diff += "engine binary";
         }
         if (nodeA != nodeB) {
             if (!diff.empty()) diff += ", ";
@@ -486,7 +603,8 @@ int main(int argc, char** argv) {
         int pairScore = 0;  // twice A's score over the pair: 0..4
         for (int side = 0; side < 2; ++side) {
             bool aWhite = (side == 0);
-            GameOutcome g = playGame(opening, aWhite, A, B, ttA, ttB, MAX_PLIES);
+            GameOutcome g = playGame(opening, aWhite, A, B, ttA, ttB, MAX_PLIES,
+                                     extA, extB);
 
             if (g.result == A_WINS)      { ++wins;   pairScore += 2; }
             else if (g.result == B_WINS) { ++losses; }

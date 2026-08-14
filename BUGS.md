@@ -276,7 +276,7 @@ have.
 
 ---
 
-## 8. The harness cannot gate an evaluation change
+## 8. The harness cannot gate an evaluation change — **FIXED 2026-08-14**
 
 Not an engine defect — an instrument one, and it surfaced only when Phase 4
 became the first evaluation change this project has tried to measure.
@@ -292,22 +292,35 @@ is not harmless now, and `PLAN.md` 5.4 (lazy evaluation) will meet the same wall
 There is also no way to point the harness at two *binaries*, which is the other
 way this is normally done.
 
-Fixing it is one of:
+One correction to the original wording: the shared cache is *latent*, not
+active. `evaluate_details()` reads no options at all, so both sides compute the
+same evaluation today and the cache is harmless. It would have become harmful
+the moment anyone added an eval toggle to gate Phase 4 — which is the obvious
+way to attempt it, and would have failed silently.
 
-- fold a per-configuration id into the eval cache's lock, so entries written by
-  one side never validate for the other — cheap, and it keeps the node-budget
-  methodology the rest of the gates rely on;
-- teach `tests/match` to drive two external UCI binaries — more work, but it
-  removes the need to keep a superseded implementation behind a flag purely so a
-  match can see it.
+### The fix
 
-Not urgent: the Phase 4 fixes are correctness repairs that a bad match result
-would not reverse. This entry exists so the limitation is known before someone
-plans a gate that cannot run.
+`tests/match --engineA <path> --engineB <path>` drives engine *binaries* over
+UCI instead of searching in-process. Two processes share no eval cache, no
+transposition table and no globals, so the problem is gone structurally rather
+than patched around. It also means a gate compares the binary that actually
+ships rather than a flag approximating it — and nothing has to keep superseded
+code alive just so a match can see it. Build the two commits and pass both
+paths.
+
+`go nodes <n>` was added to the UCI layer to go with it (`uci.cpp`), because a
+cross-binary gate cannot use the in-process node budget, and without it every
+such gate would have had to be a timed one — the expensive, unshardable kind.
+
+Verified by playing an external binary against the in-process engine: same
+build both sides, games completing by mate and adjudication, 2-0-2 over four
+games. `tests/uci_smoke.py` covers `go nodes`, and takes a `CHESSBOT` override
+so a build that is not `./chessbot` can be smoke-tested — needed whenever the
+Lichess bot is live and relinking `./chessbot` would swap the engine mid-game.
 
 ---
 
-## 9. `shard-gate.sh` cannot run the gate this repo told you to run
+## 9. Commands that were never run: `shard-gate.sh`, CI, and a silent parser
 
 `HANDOFF.md` carried, as its top next step, a command that exits immediately:
 
@@ -322,9 +335,32 @@ nobody chose. `-t` is also a budget per *move*, so 3 000 ms was roughly nineteen
 days for the volume the other gates used. Corrected on 2026-08-14 to sequential
 `tests/match` at a time control sized from measured throughput.
 
-The lesson is the cheap one: a documented command that has never been run is a
-guess. This one sat at the top of the file and was carried forward through two
-separate edits before anyone tried it.
+The same day, two more of the same shape turned up.
+
+**CI had been failing since 2026-08-11 — twenty commits.** `e2b2269` (08-10)
+added the smoke step `./tests/match 2 4 20260810`; `9961b55` (08-11) made both
+sides default to the shipped configuration and taught the harness to refuse an
+A/B that differs in nothing. The guard is right and the step was not updated
+with it, so every push mailed a failure. Fixed in `3fc24e0` by asking for the
+old comparison explicitly: `-n 2 -d 4 -s 20260810 --hb off`.
+
+**The positional parser ignored everything after the third argument.** That is
+how the CI fix was nearly wrong twice: `./tests/match 2 4 <seed> --hb off`
+dropped the `--hb` in silence, and `./tests/match 100 6 <seed> -N 100000` would
+have quietly run a depth match instead of a node-budgeted one — a
+misconfigured measurement that runs and reports. It now refuses and prints the
+flag-form equivalent.
+
+**`pgrep -f 'tests/match'` matches its own command line.** It is the check
+`CLAUDE.md` and `HANDOFF.md` both recommend before `make tests`, and on
+2026-08-14 it produced three false positives in a single session: a gate that
+was not running, a poll loop that could never terminate, and a watcher reported
+alive after it had exited. Use `pgrep -x` on the command name.
+
+The lesson is the cheap one, and it cost a day to learn three times: a
+documented command that has never been run is a guess. The `shard-gate.sh` one
+sat at the top of `HANDOFF.md` and was carried forward through two separate
+edits before anyone tried it.
 
 ---
 
