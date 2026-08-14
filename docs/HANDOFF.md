@@ -68,6 +68,30 @@ plays 900+10, where it spends 15-25 *seconds*. Nothing here rules out
 `seepruning` mattering at long time controls. Testing that is not affordable —
 see the throughput note under Next.
 
+### Speed, and the tools that found it
+
+The engine is **~2.5× faster than it was on 2026-08-14**, at an identical
+search — every one of these was verified by the bench signature staying
+byte-identical, so none needed a gate:
+
+| change | gain |
+|---|---|
+| inline the `Piece` accessors (`PLAN` 5.6) | 1.87× |
+| inline `Move`'s constructors and `operator==` | 1.04× |
+| pin-aware legality filter (`PLAN` 5.5) | 1.28× |
+| count mobility instead of collecting it (`PLAN` 5.7) | 1.04× |
+
+`make profile` exists now and found all of them. The largest was five lines, and
+no amount of reasoning about algorithms would have suggested it — **re-profile
+before optimising anything**, since the 2026-08-10 profile has been wrong twice
+about where the time goes.
+
+`make review` builds `tools/review`, which reads a PGN and analyses it with any
+UCI engine (`docs/REVIEW.md`). It is complete: classification in win
+probability, accuracy, annotated-PGN output, and `--explain` naming which
+evaluation terms changed. Stockfish 16 is installed at `/usr/games/stockfish`;
+ChessBot needs `--engine-arg --uci`.
+
 The bench signature is **1,599,675 nodes** at depth 6. Any change claiming to
 preserve search behaviour must reproduce it exactly. It has moved four times this
 week — 2,056,371 until `seeordering` was turned on (2026-08-13); then 1,465,771,
@@ -173,16 +197,18 @@ rating will move for reasons that have nothing to do with the engine.
 
 ## In flight
 
-**Nothing is running.** The Lichess bot was stopped at 01:22 on 2026-08-14 so
-the timed `seepruning` gate could have the machine, and has not been restarted:
+**The Lichess bot is running**, playing rated 900+10 continuously. Stop it
+**between** games, never during one (`BUGS.md` 7):
 
 ```bash
-./lichess/run.sh   # token comes from the environment
+pgrep -x chessbot     # a PID means a game is live — wait
+pkill -INT -f lichess-bot.py
+./lichess/run.sh      # to restart; token comes from the environment
 ```
 
-It plays rated 900+10 continuously once up — `allow_matchmaking: true` means it
-challenges when idle rather than waiting. Stop it **between** games, never
-during one (`BUGS.md` 7).
+Note that `run.sh` builds first, so restarting deploys whatever is in the
+working tree. Do not restart it on top of unverified changes.
+
 
 **No gate is running.** Three completed overnight on 2026-08-13 and are pooled
 and recorded above; their logs are kept:
@@ -210,46 +236,24 @@ point estimate barely moved; the interval is what shrank. One shard is a
 
 ## Next, in order
 
-1. **Phase 3 remainder:** futility pruning and razoring (3.4), IID (3.5),
-   retune LMR (3.6). Read 3.1 before 3.4 — see the warning below.
+**`ROADMAP.md` is now the answer to this question.** It was written on
+2026-08-15 because measurement moved the priorities twice and `PLAN.md`'s
+ordering no longer reflects what is worth doing. In one line: **the evaluation
+is the ceiling and no phase of the plan addresses it**, so `ROADMAP.md` proposes
+a Phase 6 and puts it first.
 
-2. **Optionally resolve `deltapruning`.** At the spec margin it reads +7.1
-   [−2.9, +17.2] and stays off because that is not a demonstrated gain. Roughly
-   twice the games would settle it — about four hours at the observed rate.
-   Vary the seeds if you do: `shard-gate.sh` uses `20260810 + i*1000`, so a
-   second run at the same shard count replays the same games.
+The cheapest first step is 6.1 — run `./tools/review --explain` over the game
+archive and collect every large loss where no evaluation term accounts for it.
+That names this engine's blind spots directly, is a scripted afternoon, and
+needs no engine changes.
 
-3. **Read 3.1 before starting 3.4.** Futility pruning and razoring make the same
-   bet delta pruning does — discarding a subtree on the strength of a static
-   score. A 200cp delta margin cost −50 Elo on this engine and a 900cp one cost
-   nothing, a 57-Elo swing from the margin alone. Expect 3.4 to be similarly
-   margin-sensitive, and pick the conservative end first. The gate is done and the
-   fixes are *not* in question — see below — but they buy their quality at
-   +20.1% nodes, and an equal-nodes gate divides that out by construction. The
-   open question is whether the extra nodes pay for themselves on a clock. The
-   cheap move is not another gate: it is to find out *why* the tree grew, since
-   a symmetric evaluation returning exact ties more often is a hypothesis nobody
-   has checked. Retuning king-safety magnitude against the corrected baseline
-   gates normally if it turns out to be that.
+Still open in the existing plan: 3.4 (futility/razoring — **read 3.1's result
+first**, the same bet swung 57 Elo on one constant), 3.5 (IID, the safe one),
+3.6 (retune LMR, deliberately last), 5.4 (lazy evaluation). `deltapruning` is
+one gate short of a verdict at +7.1 [−2.9, +17.2]; settling it needs twice the
+games and **different seeds**, since `shard-gate.sh` derives them from a fixed
+base and would otherwise replay the same games.
 
-2. **Phase 3 remainder:** bound quiescence and delta pruning (3.1 — also
-   `BUGS.md` 4), check extensions (3.3), futility/razoring (3.4), IID (3.5),
-   retune LMR (3.6). 3.1 and 3.3 are the cheap ones and neither is implemented.
-
-3. **More Lichess games.** With `BUGS.md` 1, 2, 3 and 5 all fixed since the
-   baseline was frozen, the 24-game record above describes an engine that no
-   longer exists. Re-measuring it is free and needs no decisions.
-
-**On gate throughput.** A timed gate is sequential — `shard-gate.sh` refuses
-anything without `-N`, because shards under a clock compete for the CPU. The
-`seepruning` gate took 6 h 36 m of wall clock for 3 360 games at `-t 100`. That
-sets the exchange rate for any future timed gate: halving a confidence interval
-costs four times the games, so resolving an effect smaller than about 10 Elo on
-the clock is a full day of machine time per question. Gate on nodes unless the
-change is specifically about speed.
-
-`BUGS.md` is the list to read before picking any of these up; it carries the
-evidence, the file and line, and what each defect has actually cost.
 
 ---
 
