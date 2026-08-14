@@ -301,4 +301,8 @@ evidence, the file and line, and what each defect has actually cost.
 - **`test-evalref` and `test-bench` fail on any change they cover, by design.**
   Review the diff, then `make evalref-regen` / `make bench-regen`. Regenerating
   without reading the diff throws away the only thing they do.
-- **`LICENSE` is empty.** No licence has been chosen; default copyright applies.
+- **The project is MIT licensed** since 2026-08-15 (`48183d1`). It was an empty
+  file before that, which meant default copyright — worth knowing if you read
+  any document written earlier that says so.
+  `lichess-bot` remains a separate AGPL-3.0 project and is deliberately not
+  vendored here; see `lichess/README.md`.
