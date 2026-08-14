@@ -33,7 +33,25 @@ static constexpr int QS_MAX_DEPTH = 8;
 // it is dismissed as unable to catch up. A capture that cannot reach alpha even
 // after winning its victim plus this much positional compensation is not going
 // to change the score of the node.
-static constexpr int QS_DELTA_MARGIN = 200;
+//
+// A queen, as PLAN.md 3.1 specifies. It was first implemented at 200, which is
+// the conventional figure and four and a half times more aggressive, and a
+// 3 360-game gate rejected it at **-50.0 Elo, 95% CI [-60.3, -39.7]** — all
+// twelve shards negative, -36 to -69. That is not a marginal result and it is
+// worth understanding rather than just retuning past.
+//
+// Delta pruning is a bet on the static evaluation: it discards a subtree
+// because stand-pat says the capture cannot bridge the gap to alpha. That bet
+// is only as good as the evaluation making it, and this engine's evaluation is
+// hand-written piece-square tables that carried three correctness bugs until
+// 2026-08-14 and whose quality is still unmeasured — the Phase 4 gate returned
+// +6.1 with the interval spanning zero, which is to say "not demonstrably
+// better than the broken version". A tight margin asks that evaluation to be
+// right about positions it has never been shown to judge well.
+//
+// At 900 the same rule cuts 8.3% of nodes rather than 37.5%, and prunes only
+// what almost no evaluation error could rescue.
+static constexpr int QS_DELTA_MARGIN = 900;
 
 // The search is negamax: every score is from the point of view of the side to
 // move, and a child's score is negated on the way back up. evaluate() is

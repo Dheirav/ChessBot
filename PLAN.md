@@ -309,12 +309,23 @@ as two independently toggled halves.
 on, like `ttAging`. It also pays back the entire +20.1% that the Phase 4
 evaluation fixes cost, which is what the Phase 4 gate could not measure.
 
-`deltapruning` (**off**): a further −37.5% (1 464 599 → 915 097), kiwipete
-−63.6%, wall clock 6 173 → 3 983 ms. Off by default because it is a feature and
-it changed a best move (`midgame-2`, a position where white is a bishop down and
-both builds agree at depth 9). Gate it before shipping — and note it is
-speed-per-node in character, like `seepruning`, so an equal-nodes gate may well
-divide out most of what it buys.
+`deltapruning` (**off**): gated 2026-08-14 at a 200cp margin and **rejected,
+−50.0 Elo, 95% CI [−60.3, −39.7]** over 3 360 games. All twelve shards negative,
+−36 to −69 — uniform, not one bad shard.
+
+That margin was my error: this item specifies *a queen's worth*, and 200 is four
+and a half times more aggressive. The constant is now 900 as written, where the
+same rule cuts 8.3% of nodes instead of 37.5%. **Re-gate before drawing any
+conclusion about the technique** — the rejection above is a verdict on the wrong
+margin, and leaving it as the record would be an unfair one.
+
+The result is still informative about *this* engine. Delta pruning is a bet on
+the static evaluation, and it is only as good as the evaluation making it. This
+one is hand-written piece-square tables that carried three correctness bugs
+until 2026-08-14 and whose quality remains unmeasured — Phase 4 returned +6.1
+with the interval spanning zero. A tight margin asks that evaluation to be right
+about positions it has never been shown to judge well, and 3 360 games say it is
+not.
 `quiescence()` has no ply bound, which is why kiwipete costs 200× a normal
 middlegame position. Add a ply cap (~8 beyond the horizon) and a delta-pruning
 rule (skip a capture that cannot raise alpha even with a queen's worth of

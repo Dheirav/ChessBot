@@ -31,7 +31,7 @@ Phase 3 is in progress. What is wired in:
 | `seeordering` | **on** | **accepted**, +25.6 Elo [+16.1, +35.2] — on by default since 2026-08-13 |
 | `seepruning` | off | **resolved, stays off** — +2.2 [−7.2, +11.6] at equal nodes, +4 [−7, +14] on the clock |
 | `qbound` | **on** | quiescence capped 8 plies past the horizon; −16.8% nodes, no best move changed. Ungated repair |
-| `deltapruning` | off | a further −37.5% nodes; a feature, awaiting a gate |
+| `deltapruning` | off | **rejected at a 200cp margin**, −50.0 [−60.3, −39.7]. Margin now 900 per spec; re-gate |
 
 All three gates ran 2026-08-13 at 14 shards × 120 pairs (3 360 games each,
 `-N 100000`). TT aging defaults on because it is a repair, not a feature — the
@@ -153,6 +153,7 @@ and recorded above; their logs are kept:
 | `shard-20260813-034736/` | `seeordering` | +25.6 [+16.1, +35.2] |
 | `gate-seepruning-timed.log` | `seepruning`, **timed** `-t 100` | +4 [−7, +14] |
 | `shard-20260814-122546/` | Phase 4 evaluation, two binaries | +6.1 [−3.9, +16.1] |
+| `shard-20260814-153213/` | `deltapruning`, 200cp margin | **−50.0 [−60.3, −39.7]** |
 
 Re-pool any of them with `./tests/pool-shards.sh <dir>/`.
 
