@@ -689,6 +689,27 @@ performance win in the project, it took five lines, and no amount of reasoning
 about algorithms would have found it. Profile before choosing what to optimise —
 and `make profile` now exists so there is no excuse not to.
 
+**5.7 Count mobility instead of collecting it** — **DONE 2026-08-15, 1.04×.**
+Found by profiling: 1.3 million of the engine's 1.7 million move generations
+serve the evaluation's mobility term rather than the search, each building ~35
+`Move` objects so that `.size()` can be called on them.
+
+`generatePseudoLegalMoves` is now templated on its output sink, and a counting
+sink exposes the same `emplace_back()`/`clear()` a `MoveList` does — so the
+generator body is shared *verbatim* rather than copied. That mattered more than
+the speed: a hand-maintained second copy of move generation would drift, and
+mobility would quietly stop agreeing with the moves actually available.
+
+**It returned 4%, not the ~14% the mobility term costs.** That is the useful
+part: the cost is in the *geometry*, not in building the list. Removing the rest
+means not walking the moves at all — deriving mobility from the `attackedBy`
+map the evaluation already builds a hundred lines later — which changes the
+number and so needs a gate. Weigh that against the day's evidence that
+speed-per-node changes have not converted to Elo on this engine while
+quality-per-node ones have.
+
+Behaviour-preserving: bench signature unchanged, all tests pass.
+
 **Explicitly not doing:** bitboard move generation (§4.0, ~1.02× ceiling) and
 incremental material/PST updates (§4.3, ~1 µs against real drift risk).
 

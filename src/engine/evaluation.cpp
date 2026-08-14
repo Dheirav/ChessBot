@@ -195,8 +195,6 @@ static inline void forEachAttackedSquare(const Board& board, int from, F fn) {
 // the king is in check, which is the standard trade engines make here.
 // Castling is excluded: it is not mobility, and each castling test costs three
 // more isSquareAttacked() scans.
-static thread_local MoveList mobilityScratch;
-
 // kingSq is the square of 'color's king, or -1 if it has none.
 static int countMobility(const Board& board, PieceColor color, int kingSq) {
     // In check the pseudo-legal count is not an approximation but simply
@@ -209,10 +207,11 @@ static int countMobility(const Board& board, PieceColor color, int kingSq) {
     if (kingSq >= 0 && board.isSquareAttacked(kingSq, (int)opp))
         return (int)generateLegalMoves(board, color, true).size();
 
-    // Reused across calls: clear() keeps the capacity, so this stops
-    // allocating after the first few evaluations.
-    generatePseudoLegalMoves(board, color, /*includeCastling=*/false, mobilityScratch);
-    return (int)mobilityScratch.size();
+    // Counted, not collected: this wants one integer, and materialising ~35
+    // Move objects to call .size() on them was about 14% of the engine's
+    // runtime. countPseudoLegalMoves() shares the generator body, so the number
+    // is by construction the same one the old call produced.
+    return countPseudoLegalMoves(board, color, /*includeCastling=*/false);
 }
 
 // Returns a detailed breakdown of evaluation for logging

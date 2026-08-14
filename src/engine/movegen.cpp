@@ -78,7 +78,29 @@ static bool isSquareAttacked(const Board& board, int sq, PieceColor byColor) {
     return false;
 }
 
-void generatePseudoLegalMoves(const Board& board, PieceColor sideToMove, bool includeCastling, MoveList& moves) {
+// Mobility only ever wanted the *count* of pseudo-legal moves, and paid for a
+// full MoveList to get it — 1.3 million of the engine's 1.7 million move
+// generations serve the evaluation's mobility term, not the search (profiled
+// 2026-08-15), each one constructing ~35 twenty-byte Move objects to produce a
+// single integer.
+//
+// So the generator is templated on where it puts its output. A counting sink
+// exposes the same emplace_back() and clear() a MoveList does, which means the
+// generator body below is shared *verbatim* between the two — not copied. That
+// matters more than the speed: a second hand-maintained copy of move generation
+// would drift from this one, and mobility would quietly start disagreeing with
+// the moves actually available. This project has already been bitten once by
+// two lists of the same knowledge falling out of step.
+struct MoveCounter {
+    int n = 0;
+    void clear() { n = 0; }
+    void reserve(size_t) {}
+    template <typename... Args> void emplace_back(Args&&...) { ++n; }
+    size_t size() const { return (size_t)n; }
+};
+
+template <typename Out>
+static void generatePseudoLegalImpl(const Board& board, PieceColor sideToMove, bool includeCastling, Out& moves) {
     moves.clear();
     int enPassantIdx = getEnPassantIdx(board);
 
@@ -277,6 +299,17 @@ void generatePseudoLegalMoves(const Board& board, PieceColor sideToMove, bool in
         }
     }
 
+}
+
+void generatePseudoLegalMoves(const Board& board, PieceColor sideToMove,
+                              bool includeCastling, MoveList& moves) {
+    generatePseudoLegalImpl(board, sideToMove, includeCastling, moves);
+}
+
+int countPseudoLegalMoves(const Board& board, PieceColor sideToMove, bool includeCastling) {
+    MoveCounter counter;
+    generatePseudoLegalImpl(board, sideToMove, includeCastling, counter);
+    return counter.n;
 }
 
 // The legality filter, shared by both entry points below (PLAN.md 5.5).

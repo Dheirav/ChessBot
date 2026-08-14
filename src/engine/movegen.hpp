@@ -9,6 +9,13 @@
 void generatePseudoLegalMoves(const Board& board, PieceColor sideToMove,
                               bool includeCastling, MoveList& out);
 
+// The same generation, counted rather than collected. The evaluation's mobility
+// term wants only a number, and building a MoveList to get one accounts for
+// roughly 14% of the engine's runtime. Shares the generator body with the
+// function above rather than reimplementing it.
+int countPseudoLegalMoves(const Board& board, PieceColor sideToMove,
+                          bool includeCastling);
+
 // Generate fully legal moves: the pseudo-legal set above, filtered by making
 // each move and testing whether the side's own king is left attacked.
 //
