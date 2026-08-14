@@ -319,13 +319,27 @@ same rule cuts 8.3% of nodes instead of 37.5%. **Re-gate before drawing any
 conclusion about the technique** — the rejection above is a verdict on the wrong
 margin, and leaving it as the record would be an unfair one.
 
-The result is still informative about *this* engine. Delta pruning is a bet on
-the static evaluation, and it is only as good as the evaluation making it. This
-one is hand-written piece-square tables that carried three correctness bugs
-until 2026-08-14 and whose quality remains unmeasured — Phase 4 returned +6.1
-with the interval spanning zero. A tight margin asks that evaluation to be right
-about positions it has never been shown to judge well, and 3 360 games say it is
-not.
+**Re-gated at 900 the same day: +7.1 Elo, 95% CI [−2.9, +17.2].** The interval
+spans zero, so no gain is demonstrated — but the swing from the margin alone is
+**57 Elo**, which is the finding worth carrying out of this item. The technique
+was never the problem; the number I chose for it was.
+
+It stays **off**, on the same reasoning that keeps `seepruning` off: the project
+does not ship defaults a gate has not demonstrated, and +7.1 [−2.9, +17.2] has
+not demonstrated one. It is a better candidate than `seepruning` was — the point
+estimate is higher, the interval is mostly positive, and it also cuts 8.3% of
+nodes, so it may be positive on both axes rather than neutral on both. Resolving
+it needs about twice the games, which is roughly four hours at this rate; the
+seeds are `20260810 + i*1000`, so a second run must vary them or it replays the
+same games.
+
+The rejection at 200 is still informative about *this* engine. Delta pruning is
+a bet on the static evaluation, and it is only as good as the evaluation making
+it. This one is hand-written piece-square tables that carried three correctness
+bugs until 2026-08-14 and whose quality remains unmeasured — Phase 4 returned
++6.1 with the interval spanning zero. A tight margin asks that evaluation to be
+right about positions it has never been shown to judge well, and 3 360 games say
+it is not. **Read that before 3.4**, which is the same bet.
 `quiescence()` has no ply bound, which is why kiwipete costs 200× a normal
 middlegame position. Add a ply cap (~8 beyond the horizon) and a delta-pruning
 rule (skip a capture that cannot raise alpha even with a queen's worth of

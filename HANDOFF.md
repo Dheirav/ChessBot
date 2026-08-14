@@ -31,7 +31,7 @@ Phase 3 is in progress. What is wired in:
 | `seeordering` | **on** | **accepted**, +25.6 Elo [+16.1, +35.2] — on by default since 2026-08-13 |
 | `seepruning` | off | **resolved, stays off** — +2.2 [−7.2, +11.6] at equal nodes, +4 [−7, +14] on the clock |
 | `qbound` | **on** | quiescence capped 8 plies past the horizon; −16.8% nodes, no best move changed. Ungated repair |
-| `deltapruning` | off | **rejected at a 200cp margin**, −50.0 [−60.3, −39.7]. Margin now 900 per spec; re-gate |
+| `deltapruning` | off | −50.0 [−60.3, −39.7] at 200cp; **+7.1 [−2.9, +17.2] at 900cp** — spans zero, so stays off |
 
 All three gates ran 2026-08-13 at 14 shards × 120 pairs (3 360 games each,
 `-N 100000`). TT aging defaults on because it is a repair, not a feature — the
@@ -154,6 +154,7 @@ and recorded above; their logs are kept:
 | `gate-seepruning-timed.log` | `seepruning`, **timed** `-t 100` | +4 [−7, +14] |
 | `shard-20260814-122546/` | Phase 4 evaluation, two binaries | +6.1 [−3.9, +16.1] |
 | `shard-20260814-153213/` | `deltapruning`, 200cp margin | **−50.0 [−60.3, −39.7]** |
+| `shard-20260814-175417/` | `deltapruning`, 900cp margin | +7.1 [−2.9, +17.2] |
 
 Re-pool any of them with `./tests/pool-shards.sh <dir>/`.
 
@@ -167,22 +168,21 @@ point estimate barely moved; the interval is what shrank. One shard is a
 
 ## Next, in order
 
-1. **Gate `deltapruning`** (`PLAN.md` 3.1). It is implemented and off by
-   default. −37.5% nodes on top of `qbound`, kiwipete −63.6%, wall clock nearly
-   halved — but it changed a best move, so it is a feature and not a repair.
-   Read `seepruning` first before choosing the instrument: delta pruning is
-   speed-per-node in character, so an equal-nodes gate may divide out most of
-   what it buys, and that is exactly the trap `seepruning` cost two gates to
-   learn.
+1. **Check extensions** (`PLAN.md` 3.3) — small, standard, unimplemented, and
+   quality-per-node, so it gates normally on nodes. The best remaining value per
+   hour of work.
 
-   ```bash
-   ./tests/shard-gate.sh 12 140 -N 100000 --optA deltapruning=on --optB deltapruning=off
-   ```
+2. **Optionally resolve `deltapruning`.** At the spec margin it reads +7.1
+   [−2.9, +17.2] and stays off because that is not a demonstrated gain. Roughly
+   twice the games would settle it — about four hours at the observed rate.
+   Vary the seeds if you do: `shard-gate.sh` uses `20260810 + i*1000`, so a
+   second run at the same shard count replays the same games.
 
-2. **Check extensions** (`PLAN.md` 3.3) — small, standard, unimplemented, and
-   quality-per-node, so it gates normally on nodes.
-
-3. ~~Phase 4's node cost~~ — **answered.** The gate is done and the
+3. **Read 3.1 before starting 3.4.** Futility pruning and razoring make the same
+   bet delta pruning does — discarding a subtree on the strength of a static
+   score. A 200cp delta margin cost −50 Elo on this engine and a 900cp one cost
+   nothing, a 57-Elo swing from the margin alone. Expect 3.4 to be similarly
+   margin-sensitive, and pick the conservative end first. The gate is done and the
    fixes are *not* in question — see below — but they buy their quality at
    +20.1% nodes, and an equal-nodes gate divides that out by construction. The
    open question is whether the extra nodes pay for themselves on a clock. The
