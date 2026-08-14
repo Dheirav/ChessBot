@@ -22,6 +22,7 @@
 #include "engine/pgn.hpp"
 #include "engine/uci_engine.hpp"
 
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -42,12 +43,36 @@ int clampScore(int s) {
     return s;
 }
 
-const char* classify(int loss) {
-    if (loss >= 300) return "Blunder";
-    if (loss >= 150) return "Mistake";
-    if (loss >=  50) return "Inaccuracy";
-    if (loss >=  20) return "Good";
-    if (loss >=   5) return "Excellent";
+// Centipawns are the wrong unit to judge a move in, and reviewing all 49 of
+// this bot's games proved it: average centipawn loss came out at 83.0 in games
+// it *won* and 29.8 in games it *lost*. That is not a paradox, it is the metric
+// failing. In a decided position a 300-centipawn slip changes nothing — going
+// from +900 to +600 still wins — while the same 300 from level is the game. Raw
+// loss scores them identically, so a game full of winning positions looks like
+// a badly played one.
+//
+// Win probability has the compression built in: +900 to +600 is 6.4 percentage
+// points, 0 to -300 is 25.1. Everything below is judged in those points, which
+// is the same choice Lichess and Chess.com make and for the same reason.
+double winPercent(int cp) {
+    return 50.0 + 50.0 * (2.0 / (1.0 + std::exp(-0.00368208 * cp)) - 1.0);
+}
+
+// Per-move accuracy from the win probability given up. Lichess's curve: it is
+// one defensible mapping of many, and the reason to adopt an existing one is
+// that a curve invented here would inevitably be tuned until the numbers
+// flattered whoever was being reviewed.
+double accuracy(double wpLoss) {
+    const double a = 103.1668 * std::exp(-0.04354 * wpLoss) - 3.1669;
+    return a < 0.0 ? 0.0 : (a > 100.0 ? 100.0 : a);
+}
+
+const char* classify(double wpLoss) {
+    if (wpLoss >= 20.0) return "Blunder";
+    if (wpLoss >= 10.0) return "Mistake";
+    if (wpLoss >=  5.0) return "Inaccuracy";
+    if (wpLoss >=  2.0) return "Good";
+    if (wpLoss >=  0.5) return "Excellent";
     return "Best";
 }
 
@@ -138,33 +163,60 @@ int main(int argc, char** argv) {
     // Loss for move i is the value the mover gave up. score[i+1] is from the
     // *opponent's* point of view, so it is negated to bring both onto the
     // mover's scale.
-    long lossSum[2] = {0, 0};
-    int lossCount[2] = {0, 0};
-    int blunders[2] = {0, 0};
+    long cpSum[2] = {0, 0};
+    double accSum[2] = {0.0, 0.0};
+    int count[2] = {0, 0};
+    int tally[2][6] = {};     // Blunder, Mistake, Inaccuracy, Good, Excellent, Best
+
+    auto bucket = [](const char* label) {
+        if (!std::strcmp(label, "Blunder"))    return 0;
+        if (!std::strcmp(label, "Mistake"))    return 1;
+        if (!std::strcmp(label, "Inaccuracy")) return 2;
+        if (!std::strcmp(label, "Good"))       return 3;
+        if (!std::strcmp(label, "Excellent"))  return 4;
+        return 5;
+    };
 
     for (size_t i = 0; i < game.moves.size(); ++i) {
         const int played = -score[i + 1];
-        int loss = score[i] - played;
-        if (loss < 0) loss = 0;                  // nothing beats the best move
+        int cpLoss = score[i] - played;
+        if (cpLoss < 0) cpLoss = 0;              // nothing beats the best move
+
+        double wpLoss = winPercent(score[i]) - winPercent(played);
+        if (wpLoss < 0.0) wpLoss = 0.0;
 
         const bool white = (i % 2 == 0);
-        lossSum[white ? 0 : 1] += loss;
-        ++lossCount[white ? 0 : 1];
-        if (loss >= 300) ++blunders[white ? 0 : 1];
+        const int s = white ? 0 : 1;
+        cpSum[s] += cpLoss;
+        accSum[s] += accuracy(wpLoss);
+        ++count[s];
+        const char* label = classify(wpLoss);
+        ++tally[s][bucket(label)];
 
-        if (loss >= 50) {
+        if (wpLoss >= 5.0) {
             const std::string b = bestSan[i].empty() ? best[i] : bestSan[i];
-            std::printf("%3zu.%s%-8s %-11s -%4d cp   (best %s, eval %+d)\n",
+            std::printf("%3zu.%s%-8s %-11s -%4.1f win%%  (-%d cp, best %s, eval %+d)\n",
                         i / 2 + 1, white ? " " : "..", san[i].c_str(),
-                        classify(loss), loss, b.c_str(), score[i]);
+                        label, wpLoss, cpLoss, b.c_str(), score[i]);
         }
     }
 
-    std::printf("\n%-8s %-14s %-10s %s\n", "", "avg loss", "blunders", "moves");
+    static const char* NAMES[6] = {"blunder", "mistake", "inaccuracy",
+                                   "good", "excellent", "best"};
+    std::printf("\n%-8s %-10s %-9s %s\n", "", "accuracy", "avg cp", "moves");
     for (int s = 0; s < 2; ++s) {
-        if (!lossCount[s]) continue;
-        std::printf("%-8s %-14.1f %-10d %d\n", s == 0 ? "White" : "Black",
-                    (double)lossSum[s] / lossCount[s], blunders[s], lossCount[s]);
+        if (!count[s]) continue;
+        std::printf("%-8s %-10.1f %-9.1f %d\n", s == 0 ? "White" : "Black",
+                    accSum[s] / count[s], (double)cpSum[s] / count[s], count[s]);
+    }
+    std::printf("\n%-8s", "");
+    for (int b = 0; b < 6; ++b) std::printf(" %-11s", NAMES[b]);
+    std::printf("\n");
+    for (int s = 0; s < 2; ++s) {
+        if (!count[s]) continue;
+        std::printf("%-8s", s == 0 ? "White" : "Black");
+        for (int b = 0; b < 6; ++b) std::printf(" %-11d", tally[s][b]);
+        std::printf("\n");
     }
     return 0;
 }

@@ -125,25 +125,67 @@ Two things it turned up on the way:
 
 ---
 
-## R2. Classification
+## R2. Classification — **DONE 2026-08-15**
 
-Centipawn loss into buckets: Blunder, Mistake, Inaccuracy, Good, Excellent,
-Best. The thresholds are conventional and can be copied; what makes the output
-feel right is the special cases:
+Moves are judged in **win probability**, not centipawns, and running the whole
+game archive is what forced that.
 
-| label | rule | needs |
+### The measurement that decided it
+
+Reviewed all 49 games with Stockfish 16 at depth 14, and raw average centipawn
+loss came out **83.0 in games the bot won** and **29.8 in games it lost**. That
+reads as "it plays worse when it wins", which is not a fact about the bot — it
+is the metric failing.
+
+In a decided position a 300-centipawn slip changes nothing: +900 to +600 still
+wins, and costs **6.4** percentage points of win probability. The same 300 from
+level is the whole game, and costs **25.1**. Raw loss scores them identically,
+so a game full of winning positions looks badly played. Won games contain more
+lopsided positions, so they score worst.
+
+Switching the unit fixes it, and the fix is visible in the same data:
+
+| | accuracy | avg cp loss |
 |---|---|---|
-| Book | position is in an opening database | an opening book — nothing here has one |
-| Brilliant | material sacrificed *and* still the best move | SEE, which exists |
-| Great | the only move that holds the position | second-best is much worse — a real MultiPV need |
-| Miss | a forced win existed and was not played | mate detection, which exists |
+| games won | 92.6% | 83.0 |
+| games drawn | 92.1% | 31.0 |
+| games lost | 92.8% | 29.8 |
 
-**Accuracy %** is a function of average centipawn loss. Chess.com's exact curve
-is theirs; any monotonic mapping works, but pick one and write down *why*, or it
-will be tuned to flatter whoever is being reviewed.
+Accuracy is flat across results — which is what a metric measuring *play* rather
+than *position* should look like. Centipawn loss still inverts, and is kept in
+the output as a diagnostic rather than a judgement.
 
-Note that "Great" is the one label that genuinely wants MultiPV. It may be
-cheaper to drop the label than to add the feature.
+### What was built
+
+- `winPercent(cp)` — the standard logistic, so the compression is built in.
+- `accuracy(wpLoss)` — Lichess's curve. One defensible mapping of many, and
+  adopted rather than invented precisely because a curve designed here would
+  end up tuned until the numbers flattered whoever was being reviewed.
+- Thresholds in win-probability points: Blunder ≥ 20, Mistake ≥ 10, Inaccuracy
+  ≥ 5, then Good, Excellent, Best.
+- Per-side accuracy, average centipawn loss, and a count of each label.
+
+### Whole-archive profile, 2026-08-15
+
+49 games, 1 934 moves analysed, Stockfish 16 at depth 14:
+
+| | accuracy | games | score |
+|---|---|---|---|
+| overall | **92.6%** | 49 | — |
+| as White | 92.3% | 27 | 61% |
+| as Black | 92.8% | 22 | 77% |
+
+**Do not compare that 92.6% to a Chess.com number.** Accuracy is a function of
+the analysing engine, its depth, and the curve — all three differ. It is a
+baseline to compare *this* engine against itself over time, and nothing else.
+
+### Not implemented, deliberately
+
+`Book`, `Brilliant`, `Great` and `Miss` are all still unimplemented. `Great`
+needs MultiPV — Stockfish has it, `UciEngine` does not request it. `Brilliant`
+needs "material sacrificed and still best". `Miss` needs mate scores preserved
+rather than clamped. Each is a small piece of work and none of them change what
+the tool is for, which is why the core landed without them.
 
 ---
 
@@ -195,7 +237,7 @@ there is a reason not to.
 
 ## Order, and the honest prerequisite
 
-R0 and R1 are done. R2 → R4 next, with R3 whenever it is wanted. Each is independently
+R0, R1 and R2 are done. R4 next, with R3 whenever it is wanted. Each is independently
 demonstrable.
 
 But the prerequisite is not on this list: **the engine's evaluation is the
