@@ -7,8 +7,9 @@ ChessBot is a local C++ chess application with an SFML-based graphical interface
 It includes:
 - A full chess board with click-to-move and drag-and-drop input
 - A negamax alpha-beta engine with iterative deepening, a transposition table,
-  quiescence search, null-move pruning, late move reductions and aspiration
-  windows, under a wall-clock budget it is required to respect
+  bounded quiescence search, null-move pruning, late move reductions, check
+  extensions and aspiration windows, under a wall-clock budget it is required
+  to respect
 - Perft-verified move generation, including castling, en passant and promotion
 - Full terminal detection — checkmate, stalemate, fifty-move, threefold
   repetition, insufficient material — plus PGN export, undo/redo, resignation,
@@ -90,14 +91,26 @@ reporting mates as `mate N` rather than a centipawn value.
 | `LMR` | check | true | late move reductions |
 | `Aspiration` | check | true | aspiration windows |
 | `TtAging` | check | true | age the TT once per search |
-| `SeeOrdering` | check | true | order captures by SEE; gated +25.6 Elo |
-| `SeePruning` | check | **false** | drop losing captures in quiescence; awaiting a *timed* gate |
+| `SeeOrdering` | check | true | order captures by SEE; gated **+25.6** Elo |
+| `SeePruning` | check | **false** | drop losing captures in quiescence; gated twice, **not demonstrated** either way |
+| `QBound` | check | true | cap quiescence 8 plies past the horizon; a repair, ungated |
+| `CheckExt` | check | true | extend a ply when in check; gated **+23.0** Elo |
+| `DeltaPruning` | check | **false** | skip captures that cannot reach alpha; **+7.1**, interval spans zero |
 
 The heuristic toggles are exposed on purpose: A/B testing a single feature can
 then run through standard tooling instead of only through `tests/match`. They
 share one named-lookup table with the match harness, so a feature added there
 becomes switchable over UCI without a second edit — and cannot end up settable
-but undescribable, which invalidated a gate once.
+but undescribable, which invalidated a gate once. The defaults advertised here
+are read out of a default-constructed `SearchOptions` rather than written by
+hand, because the hand-written version went stale the moment a gate flipped one.
+
+**A default of `false` is not a rejection.** It means no gate has demonstrated a
+gain, which is a different claim. `SeePruning` cuts 41% of nodes and measured
++2.2 at equal nodes and +4.0 on the clock, both intervals spanning zero.
+`DeltaPruning` measured +7.1, also spanning zero — and −50.0 at a tighter margin,
+which is what settled the margin rather than the technique. Every figure above
+is 3,360 games; see [`docs/PLAN.md`](docs/PLAN.md) for the gate that produced it.
 
 Note that this engine advertises no `Threads`, `SyzygyPath` or `Move Overhead`.
 python-chess raises on any option the engine did not advertise, so a GUI config
@@ -147,7 +160,9 @@ plays.
 | **Null-move pruning** | skip a turn; if the position is *still* too good, prune | Rests on the null-move observation: having a free move is almost always better than any real move. Disabled in check and with no non-pawn material, which is where zugzwang makes that observation false. |
 | **Late move reductions** | moves ordered late are searched shallower first | If ordering is good, moves after the first few are unlikely to be best. Search them cheaply; re-search at full depth only if one unexpectedly beats alpha. |
 | **Aspiration windows** | search a narrow band around the previous iteration's score | The score rarely moves far between iterations, and a narrow window cuts off far more of the tree. The window widens on a fail high/low rather than jumping straight to infinity, so a wrong guess costs one re-search, not the whole benefit. |
-| **Static exchange evaluation** | plays an exchange out to see if a capture actually wins material | MVV-LVA sorts by victim alone, so it cannot tell QxP-that-hangs-a-queen from QxP-that-wins-a-pawn. Wired in but **off by default** — see below. |
+| **Static exchange evaluation** | plays an exchange out to see if a capture actually wins material | MVV-LVA sorts by victim alone, so it cannot tell QxP-that-hangs-a-queen from QxP-that-wins-a-pawn. Ships **half on** — see below. |
+| **Check extensions** | search one ply deeper when in check | The reply to a check is usually forced, so few evasions exist and the extra ply is cheap. It is also where the horizon effect does most damage: a search that stops while in check evaluates a position whose material is about to change. Costs 9.2% more nodes and won its gate by **+23.0** Elo anyway. |
+| **Bounded quiescence** | quiescence stops 8 plies past the horizon | It had no bound at all. In check it searches every legal evasion rather than captures only, so a long forcing sequence could recurse without limit — and an overrun on a clock is a forfeit, not a bad move. A repair rather than a feature, so it defaults on. |
 
 Only alpha-beta itself, the transposition table and quiescence are exact — they
 return the same move a full search would. The rest are heuristics: they trade a
@@ -161,13 +176,22 @@ inconsistency. `SeeOrdering` defaults **on**: it won its match by +25.6 Elo
 (95% CI [+16.1, +35.2], 3 360 games) and was turned on the same day. `SeePruning`
 defaults **off**: it measured +2.2 with the interval spanning zero.
 
-That second result is not "SEE pruning does nothing". The gate pays both sides
+That second result was not "SEE pruning does nothing". The gate pays both sides
 the same *nodes*, which is what makes it reproducible — and that budget divides
 out exactly what pruning buys. Skipping losing captures in quiescence cuts 41%
 of the tree but barely changes the conclusion reached, so at equal nodes there
-is nothing left for it to win with. It stays off until a timed gate rules on it,
-because a heuristic is not accepted here until it wins a match against the
-version without it (PLAN.md 3.2).
+was nothing left for it to win with.
+
+So it was re-gated on the clock, the instrument that *can* see a speed change:
+**+4.0, 95% CI [−7, +14]** over another 3 360 games. Two instruments chosen to
+disagree, agreeing. It stays off — not because it was rejected, but because a
+heuristic is not accepted here until it wins a match against the version without
+it (`docs/PLAN.md` 3.2), and neither match did.
+
+That distinction is the whole method. `DeltaPruning` makes the point again: at a
+200-centipawn margin it lost by **−50.0**, at the 900 the plan actually specified
+it gained **+7.1** — a 57-Elo swing from one constant, which is a verdict on the
+constant and not on the technique.
 
 ### Evaluation
 Handcrafted and material-plus-terms: piece-square tables, mobility, king safety
@@ -200,15 +224,26 @@ across cores. See [tests/README.md](tests/README.md).
   precomputed per-piece lookup tables. Legality is resolved by making each move
   and testing the king square, on the board in place rather than on a copy, so
   no board copy is paid per node.
-- **A complete, perft-verified bitboard module exists but is not connected.**
-  `src/engine/bitboard*.cpp` provides magic sliding attacks, `attackersTo` with
-  caller-supplied occupancy, checkers and pin detection, and its own legal
-  generator with make/unmake. It is finished infrastructure waiting for a
-  consumer, not dead code. It is deliberately *not* being used to replace
-  `movegen.cpp` for speed: move generation is about 2% of search time, so that
-  swap was measured at a ~1.02x ceiling for the whole search. Its value is in
-  what it enables — SEE at every node, and replacing the make-move legality
-  filter, which is the largest remaining item in the profile.
+- **The bitboard module is connected — for what it is good at, not as a movegen
+  replacement.** `src/engine/bitboard*.cpp` provides magic sliding attacks,
+  `attackersTo` with caller-supplied occupancy, checkers and pin detection. The
+  legality filter in `movegen.cpp` uses all of it: instead of making every
+  candidate move and asking whether the king is attacked, it computes the king
+  square, the checkers and the pinned pieces once per position and answers each
+  candidate with a bit test. That was worth **1.28×** and was verified by the
+  bench signature staying byte-identical.
+
+  It is still deliberately *not* used to replace `movegen.cpp` wholesale. That
+  swap was measured at a ~1.02× ceiling, because it targets pseudo-legal
+  generation rather than the legality filter that actually dominated. The module
+  spent weeks as finished infrastructure with no consumer, which was the right
+  call: the value was never in generating moves faster, it was in answering
+  questions about the position without moving anything.
+
+  One caveat on the numbers in this section: the ~1.02× and "2% of search time"
+  figures come from the 2026-08-10 profile, and that profile has since been
+  wrong twice about where the time goes. Re-measure with `make profile` before
+  trusting either.
 - **Incremental Zobrist hashing.** The position hash is updated as moves are
   made and unmade, not recomputed, so a transposition table probe costs a lookup
   rather than a board scan.
