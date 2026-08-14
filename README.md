@@ -216,7 +216,7 @@ across cores. See [tests/README.md](tests/README.md).
   UCI), which is what keeps a long think from feeling like a hang.
 
 Historical numbers and the profiling that produced them are in
-[BACKLOG.md](BACKLOG.md); the ordered plan of work is in [PLAN.md](PLAN.md).
+[BACKLOG.md](docs/BACKLOG.md); the ordered plan of work is in [PLAN.md](docs/PLAN.md).
 
 ## Configuration
 Settings are read from `chessbot.conf` in the working directory, if it exists.
@@ -278,17 +278,17 @@ node-limited rather than time-limited, and how sharding across cores stays
 statistically valid.
 
 ## Documentation map
-- [HANDOFF.md](HANDOFF.md) — **start here**: current state, what is in flight,
+- [HANDOFF.md](docs/HANDOFF.md) — **start here**: current state, what is in flight,
   what to pick up next
 - [README.md](README.md) — this file: build, play, features, UCI
 - [src/README.md](src/README.md) — architecture and where each concern lives
 - [tests/README.md](tests/README.md) — the test suite and match methodology
 - [lichess/README.md](lichess/README.md) — playing online, and why the config
   says what it says
-- [BUGS.md](BUGS.md) — known defects, ordered by what fixing them is worth, each
+- [BUGS.md](docs/BUGS.md) — known defects, ordered by what fixing them is worth, each
   with the game or line of code that demonstrates it
-- [PLAN.md](PLAN.md) — ordered plan of work, phase by phase
-- [BACKLOG.md](BACKLOG.md) — the 2026-08-10 profiling session, kept as a dated
+- [PLAN.md](docs/PLAN.md) — ordered plan of work, phase by phase
+- [BACKLOG.md](docs/BACKLOG.md) — the 2026-08-10 profiling session, kept as a dated
   archive; its measured ceilings and baselines are still the reference, but read
   its header before trusting any of its status claims
 
