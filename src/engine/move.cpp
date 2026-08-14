@@ -1,12 +1,6 @@
 #include "move.hpp"
 #include <sstream>
 
-Move::Move(int f, int t, Piece m, Piece c, MoveFlag fl, Piece p)
-    : from(f), to(t), movedPiece(m), capturedPiece(c), flag(fl), promotionPiece(p) {}
-
-Move::Move()
-    : from(-1), to(-1), movedPiece(), capturedPiece(), flag(NORMAL), promotionPiece() {}
-
 std::string Move::toString() const {
     if (from == -1 || to == -1) return "invalid";
     
@@ -33,11 +27,4 @@ std::string Move::toString() const {
     }
     
     return oss.str();
-}
-
-bool Move::operator==(const Move& other) const {
-    return from == other.from && 
-           to == other.to && 
-           flag == other.flag &&
-           (flag != PROMOTION || promotionPiece.type() == other.promotionPiece.type());
 }

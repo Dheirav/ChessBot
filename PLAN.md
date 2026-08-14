@@ -659,6 +659,14 @@ about 21% of runtime, essentially all overhead. Moved into the header as
 search, and the signature is unchanged, which is the proof it changed nothing
 but speed. `piece.cpp` is deleted.
 
+The same pattern held for `Move`: its two constructors and `operator==` were
+also out of line, at 116 and 65 million calls. Inlining them took bench to
+**~3 595 ms**, so the two changes together are **2.0×** over where the day
+started and **2.7×** over the 2026-08-10 baseline, at 445k nps against 165k.
+`toString()` stays in the .cpp deliberately — it builds a `std::string`, so it
+is neither hot nor cheap, and inlining it would drag `<sstream>` into every
+translation unit that touches a `Move`.
+
 The lesson is worth more than the speedup: this was the single largest
 performance win in the project, it took five lines, and no amount of reasoning
 about algorithms would have found it. Profile before choosing what to optimise —
