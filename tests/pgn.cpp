@@ -223,6 +223,32 @@ int main() {
         check(!parsePgn("1. e4 e5 2. Ke2xq9 *", g, &err) && !err.empty(),
               "an impossible move fails loudly rather than being skipped");
 
+        // Annotations must not break reading. A review writes NAGs and
+        // comments into its output, and that output is read back by the same
+        // parser — if a glyph or a brace confused it, the tool would silently
+        // corrupt the games it was asked to explain.
+        {
+            std::vector<Move> ms;
+            Board b;
+            for (const char* t : {"e4", "e5", "Nf3", "Nc6", "Bb5"}) {
+                const Move m = fromSan(b, t);
+                ms.push_back(m);
+                b.makeMove(m);
+            }
+            std::vector<MoveNote> notes(ms.size());
+            notes[0].comment = "[%eval 0.31]";
+            notes[2].nag = "$6";
+            notes[2].comment = "[%eval 0.20] Inaccuracy, -5.4 win%; best d4";
+            notes[4].nag = "$4";
+
+            PgnTags tags;
+            PgnGame back;
+            std::string e3;
+            const bool ok = parsePgn(toPgn(ms, tags, notes), back, &e3);
+            check(ok && back.moves.size() == ms.size(),
+                  "an annotated game reads back with every move intact");
+        }
+
         // The property that matters: anything this writes, it can read back.
         // Seeded random games cover promotions, castling, en passant and
         // disambiguation without anyone curating them.

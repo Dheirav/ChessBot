@@ -23,6 +23,7 @@
 #include "engine/uci_engine.hpp"
 
 #include <cmath>
+#include <fstream>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -67,6 +68,16 @@ double accuracy(double wpLoss) {
     return a < 0.0 ? 0.0 : (a > 100.0 ? 100.0 : a);
 }
 
+// Numeric Annotation Glyphs, the machine-readable half of an annotation. Only
+// the criticisms are emitted: "!" on a merely-best move is noise, and every
+// viewer already highlights the engine's preference.
+const char* nagFor(double wpLoss) {
+    if (wpLoss >= 20.0) return "$4";   // blunder, shown as ??
+    if (wpLoss >= 10.0) return "$2";   // mistake, shown as ?
+    if (wpLoss >=  5.0) return "$6";   // dubious, shown as ?!
+    return "";
+}
+
 const char* classify(double wpLoss) {
     if (wpLoss >= 20.0) return "Blunder";
     if (wpLoss >= 10.0) return "Mistake";
@@ -87,6 +98,7 @@ int main(int argc, char** argv) {
     // default mode opens a window — so reviewing with it needs
     //   --engine ./chessbot --engine-arg --uci
     std::vector<std::string> engineArgs;
+    std::string annotateOut;
 
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
@@ -95,12 +107,13 @@ int main(int argc, char** argv) {
         else if (a == "--depth")  depth = std::atoi(next());
         else if (a == "--hash")   hashMb = std::atoi(next());
         else if (a == "--engine-arg") engineArgs.push_back(next());
+        else if (a == "--annotate")   annotateOut = next();
         else if (a[0] != '-')     pgnPath = a;
         else { std::printf("unknown option: %s\n", a.c_str()); return 1; }
     }
     if (pgnPath.empty()) {
         std::printf("usage: review <game.pgn> [--engine <path>] [--engine-arg <a>]\n"
-                    "                 [--depth N] [--hash MB]\n"
+                    "                 [--depth N] [--hash MB] [--annotate out.pgn]\n"
                     "  default engine is /usr/games/stockfish; ChessBot needs --engine-arg --uci\n");
         return 1;
     }
@@ -177,6 +190,8 @@ int main(int argc, char** argv) {
         return 5;
     };
 
+    std::vector<MoveNote> notes(game.moves.size());
+
     for (size_t i = 0; i < game.moves.size(); ++i) {
         const int played = -score[i + 1];
         int cpLoss = score[i] - played;
@@ -192,6 +207,23 @@ int main(int argc, char** argv) {
         ++count[s];
         const char* label = classify(wpLoss);
         ++tally[s][bucket(label)];
+
+        {
+            // The eval tag is written from White's point of view and in pawns,
+            // which is the convention Lichess and friends parse. score[] is
+            // from the side to move, so Black's needs negating.
+            const int fromWhite = white ? score[i] : -score[i];
+            char buf[160];
+            const std::string bs = bestSan[i].empty() ? best[i] : bestSan[i];
+            if (wpLoss >= 5.0 && !bs.empty() && bs != san[i]) {
+                std::snprintf(buf, sizeof buf, "[%%eval %.2f] %s, -%.1f win%%; best %s",
+                              fromWhite / 100.0, label, wpLoss, bs.c_str());
+            } else {
+                std::snprintf(buf, sizeof buf, "[%%eval %.2f]", fromWhite / 100.0);
+            }
+            notes[i].comment = buf;
+            notes[i].nag = nagFor(wpLoss);
+        }
 
         if (wpLoss >= 5.0) {
             const std::string b = bestSan[i].empty() ? best[i] : bestSan[i];
@@ -217,6 +249,15 @@ int main(int argc, char** argv) {
         std::printf("%-8s", s == 0 ? "White" : "Black");
         for (int b = 0; b < 6; ++b) std::printf(" %-11d", tally[s][b]);
         std::printf("\n");
+    }
+    if (!annotateOut.empty()) {
+        std::ofstream f(annotateOut);
+        if (!f.is_open()) {
+            std::printf("\ncannot write %s\n", annotateOut.c_str());
+            return 1;
+        }
+        f << toPgn(game.moves, game.tags, notes);
+        std::printf("\nannotated PGN written to %s\n", annotateOut.c_str());
     }
     return 0;
 }

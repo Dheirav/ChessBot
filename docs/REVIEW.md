@@ -211,14 +211,34 @@ wrong. A confident wrong explanation is worse than a bare number.
 
 ---
 
-## R4. Presentation
+## R4. Presentation — **DONE 2026-08-15**
 
-Undecided, deliberately. The obvious options are a PGN with annotations and NAGs
-(works in every existing viewer, no UI to build), a self-contained HTML report,
-or something in the existing SFML GUI.
+`--annotate <out.pgn>` writes the review back as an annotated PGN. Chosen over
+an HTML report or a GUI panel because it needs no interface at all and reaches
+every tool that already reads PGN.
 
-The first is by far the cheapest and reaches the most tools. Prefer it until
-there is a reason not to.
+Each move carries `[%eval X.XX]` in a comment — from White's point of view and
+in pawns, which is the convention Lichess and several other viewers parse to
+draw an evaluation graph. Criticisms carry a NAG: `$6` (?!), `$2` (?), `$4`
+(??). Only criticisms: "!" on a merely-best move is noise, and viewers already
+highlight the engine's preference.
+
+```
+6. Bb5 {[%eval 1.56]} dxc3 $4 {[%eval 1.57] Blunder, -25.1 win%; best Qd6}
+...
+13. Qa8+ $4 {[%eval 5.11] Blunder, -36.8 win%; best Qxd7+} 1/2-1/2
+```
+
+Paste that into Lichess analysis and the graph, the glyphs and the explanations
+come with it.
+
+`toPgn()` gained an overload taking per-move `MoveNote`s rather than the tool
+formatting movetext itself, so numbering, the black-to-move ellipsis and
+80-column wrapping stay in one place.
+
+**The output is read back by the same parser that produced it**, which is the
+property worth guarding: if a glyph or a brace confused the reader, the tool
+would silently corrupt the games it was asked to explain. `tests/pgn` checks it.
 
 ---
 
@@ -237,7 +257,7 @@ there is a reason not to.
 
 ## Order, and the honest prerequisite
 
-R0, R1 and R2 are done. R4 next, with R3 whenever it is wanted. Each is independently
+R0, R1, R2 and R4 are done. R3 is the only piece left, and it is the interesting one. Each is independently
 demonstrable.
 
 But the prerequisite is not on this list: **the engine's evaluation is the

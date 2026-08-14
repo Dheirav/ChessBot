@@ -113,6 +113,11 @@ std::string toSan(const Board& board, const Move& move) {
 }
 
 std::string toPgn(const std::vector<Move>& moves, const PgnTags& tags) {
+    return toPgn(moves, tags, std::vector<MoveNote>{});
+}
+
+std::string toPgn(const std::vector<Move>& moves, const PgnTags& tags,
+                  const std::vector<MoveNote>& notes) {
     std::ostringstream out;
 
     // The seven-tag roster, in the order the standard requires it.
@@ -147,6 +152,11 @@ std::string toPgn(const std::vector<Move>& moves, const PgnTags& tags) {
             movetext << board.fullmoveNumber << "...";
         }
         movetext << " " << toSan(board, move);
+        const size_t idx = (size_t)(&move - &moves[0]);
+        if (idx < notes.size()) {
+            if (!notes[idx].nag.empty())     movetext << " " << notes[idx].nag;
+            if (!notes[idx].comment.empty()) movetext << " {" << notes[idx].comment << "}";
+        }
         board.makeMove(move);
         first = false;
     }

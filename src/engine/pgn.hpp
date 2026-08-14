@@ -35,9 +35,26 @@ std::string pgnToday();
 // looks like afterwards. Both come from `board`, which is left unmodified.
 std::string toSan(const Board& board, const Move& move);
 
+// One move's annotation, as PGN spells it.
+//
+// `nag` is a numeric glyph ("$2" is a mistake, "$4" a blunder) — the machine
+// readable half, which viewers turn into "?" and "??". `comment` is free text
+// written in braces. Lichess and several other viewers read `[%eval 1.23]` out
+// of a comment and draw the evaluation graph from it, which is why a review
+// that emits one is worth more than the same information printed to a terminal.
+struct MoveNote {
+    std::string nag;      // "$4", or empty
+    std::string comment;  // without the braces, or empty
+};
+
 // A complete PGN document: the seven-tag roster, then the movetext wrapped at
 // 80 columns and terminated by the result.
 std::string toPgn(const std::vector<Move>& moves, const PgnTags& tags);
+
+// The same, with each move annotated. `notes` is indexed like `moves`; a
+// shorter vector simply annotates fewer moves.
+std::string toPgn(const std::vector<Move>& moves, const PgnTags& tags,
+                  const std::vector<MoveNote>& notes);
 
 // toPgn() written to `path`. False if the file cannot be opened.
 bool writePgn(const std::string& path, const std::vector<Move>& moves,
