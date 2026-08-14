@@ -47,3 +47,11 @@ struct Move {
 };
 
 using MoveList = std::vector<Move>;
+
+// UCI long algebraic: "e2e4", "e7e8q".
+//
+// Distinct from Move::toString(), which writes "e7e8=Q" for humans and is baked
+// into the bench signature. Kept here because three separate places needed the
+// wire format — the UCI layer, the match harness driving external engines, and
+// game review — and the third copy was the moment to stop.
+std::string toUciMove(const Move& m);

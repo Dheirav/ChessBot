@@ -56,6 +56,11 @@ ENGINE_OBJ = $(ENGINE_SRC:.cpp=.o)
 GM_OBJ = $(GM_SRC:.cpp=.o)
 GUI_OBJ = $(GUI_SRC:.cpp=.o)
 
+TOOL_SRC = $(wildcard tools/*.cpp)
+TOOL_OBJ = $(TOOL_SRC:.cpp=.o)
+TOOL_DEP = $(TOOL_OBJ:.o=.d)
+-include $(TOOL_DEP)
+
 TEST_SRC = $(wildcard tests/*.cpp)
 TEST_OBJ = $(TEST_SRC:.cpp=.o)
 TEST_DEP = $(TEST_OBJ:.o=.d)
@@ -172,6 +177,15 @@ test-pgn: tests/pgn
 test-uci: $(EXEC)
 	python3 tests/uci_smoke.py
 
+# --- Tools ---
+# Game review (docs/REVIEW.md). Links the engine objects but not SFML: it is a
+# command-line analysis pass, and the engine it drives is a parameter rather
+# than this one.
+tools/review: tools/review.o $(ENGINE_OBJ)
+	$(CXX) $^ -o $@ $(LDFLAGS)
+
+review: tools/review
+
 # --- Profiling ---
 #
 # gprof rather than perf: perf is unavailable under WSL, which is why gmon.out
@@ -210,7 +224,7 @@ lichess:
 
 # Clean up build files
 clean:
-	rm -f $(OBJ) $(DEP) $(TEST_OBJ) $(TEST_DEP) $(EXEC) $(TESTS) $(PROF_BIN) gmon.out
+	rm -f $(OBJ) $(DEP) $(TEST_OBJ) $(TEST_DEP) $(TOOL_OBJ) $(TOOL_DEP) $(EXEC) $(TESTS) tools/review $(PROF_BIN) gmon.out
 
 # Clean and rebuild the project
 remake:
@@ -218,4 +232,4 @@ remake:
 	$(MAKE) all
 
 # Mark these targets as not actual files
-.PHONY: all clean remake lichess profile tests test-perft test-match test-gamestate test-evalref evalref-regen bench test-bench bench-regen test-timecontrol test-see test-bitboard test-guiinput test-pgn test-uci
+.PHONY: all clean remake lichess profile review tests test-perft test-match test-gamestate test-evalref evalref-regen bench test-bench bench-regen test-timecontrol test-see test-bitboard test-guiinput test-pgn test-uci

@@ -35,3 +35,6 @@ shard-*/
 
 # Games saved from the GUI with Ctrl+S
 games/
+tools/*.o
+tools/*.d
+tools/review

@@ -78,23 +78,50 @@ it.
 
 ---
 
-## R1. The analysis loop
+## R1. The analysis loop — **DONE 2026-08-15**
 
-For each position in the game: search it, record the best move and its score;
-then search the position after the move actually played and record that score.
-The difference is the move's **centipawn loss**.
+`tools/review.cpp`, built by `make review`.
 
-**No MultiPV needed.** The engine advertises none (`grep -c multipv uci.cpp` →
-0) and does not need it: two searches per ply gives the same two numbers. At
-~100 plies and a second per search that is a couple of minutes per game, which
-is acceptable for a post-game pass and is not worth adding MultiPV to avoid.
+```
+./tools/review game.pgn [--engine <path>] [--engine-arg <a>] [--depth N] [--hash MB]
+```
 
-Both scores must come from the same side's point of view before they are
-compared. The engine reports from the side to move, so one of the two needs
-negating — the single easiest thing to get wrong here.
+Defaults to `/usr/games/stockfish`. ChessBot needs `--engine-arg --uci`, since
+its default mode opens a window.
 
-**Verify:** a game where one side hangs a queen should show one enormous loss
-and small ones elsewhere. If losses are large everywhere, the sign is wrong.
+**One search per position, not two.** This plan called for searching each
+position and then the position after the move played — but the position after
+move *i* is position *i+1*, which the loop already visits. `n` moves need `n+1`
+searches, not `2n`. Halves the cost for free, and no MultiPV is required.
+
+Loss for move *i* is `score[i] − (−score[i+1])`: the second score is from the
+opponent's point of view and has to be negated onto the mover's scale. That was
+flagged here as the easiest thing to get wrong, and the check that it is right is
+that losses are near zero for most moves — if they are large everywhere, the sign
+is inverted.
+
+Mate scores are clamped to ±1000 rather than subtracted as if they were
+centipawns: "mate in 3" minus "mate in 5" is not 200 of anything, and one missed
+mate should not swamp a game's average.
+
+**It works, and its first real run found the bug this project spent a day on.**
+Reviewing `Crimsy_Bot vs sargon-2ply` (CTGzqoeY), the game drawn a rook up:
+
+```
+ 13. Qa8+     Blunder     - 525 cp   (best Qb7, eval +525)
+```
+
+That is `BUGS.md` 1 — the threefold the engine walked into — independently
+priced by Stockfish at the full value of the win it gave away.
+
+Two things it turned up on the way:
+
+- `UciEngine::start()` hardcoded `--uci`, because it was written to drive
+  ChessBot. A standard engine treats an unrecognised argument as a command and
+  exits, so Stockfish died on the handshake and reported itself as a broken
+  pipe. Arguments are a parameter now.
+- The engine answers in UCI (`c6a8`); a review has to say `Qa8+`. Both the
+  played move and the engine's preference are translated through `toSan()`.
 
 ---
 
@@ -168,7 +195,7 @@ there is a reason not to.
 
 ## Order, and the honest prerequisite
 
-R0 is done. R1 → R2 → R4 next, with R3 whenever it is wanted. Each is independently
+R0 and R1 are done. R2 → R4 next, with R3 whenever it is wanted. Each is independently
 demonstrable.
 
 But the prerequisite is not on this list: **the engine's evaluation is the

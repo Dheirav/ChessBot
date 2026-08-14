@@ -25,27 +25,6 @@ std::atomic<bool> g_stop{false};
 std::thread g_searchThread;
 int g_hashMb = 256;
 
-// UCI move format is plain long algebraic: "e2e4", "e7e8q". Move::toString()
-// writes promotions as "e7e8=Q", which is for humans and is baked into the
-// bench signature, so the UCI spelling lives here instead of changing it.
-std::string toUci(const Move& m) {
-    if (m.from < 0 || m.to < 0) return "0000";
-    std::string s;
-    s += (char)('a' + (m.from % 8));
-    s += (char)('8' - (m.from / 8));
-    s += (char)('a' + (m.to % 8));
-    s += (char)('8' - (m.to / 8));
-    if (m.flag == PROMOTION) {
-        switch (m.promotionPiece.type()) {
-            case QUEEN:  s += 'q'; break;
-            case ROOK:   s += 'r'; break;
-            case BISHOP: s += 'b'; break;
-            case KNIGHT: s += 'n'; break;
-            default: break;
-        }
-    }
-    return s;
-}
 
 // Resolve a UCI move string against the legal move list. Matching against
 // generated moves rather than parsing into a Move directly is what makes
@@ -54,7 +33,7 @@ std::string toUci(const Move& m) {
 bool parseUciMove(const Board& board, const std::string& text, Move& out) {
     MoveList legal = generateLegalMoves(board, board.activeColor);
     for (const Move& m : legal) {
-        if (toUci(m) == text) { out = m; return true; }
+        if (toUciMove(m) == text) { out = m; return true; }
     }
     return false;
 }
@@ -127,7 +106,7 @@ void onSearchInfo(int depth, int score, uint64_t nodes, long elapsedMs,
     std::cout << " nodes " << nodes
               << " nps " << (elapsedMs > 0 ? (nodes * 1000ULL / (uint64_t)elapsedMs) : nodes)
               << " time " << elapsedMs
-              << " pv " << toUci(best) << std::endl;
+              << " pv " << toUciMove(best) << std::endl;
 }
 
 // Turn "go" arguments into a budget. A clock (wtime/btime) is divided rather
@@ -215,7 +194,7 @@ void handleGo(std::istringstream& is) {
         g_searchInfo = onSearchInfo;
         Move best = findBestMoveIterativeDeepening(searchBoard, limits, g_stop, *g_tt, history);
         g_searchInfo = nullptr;
-        std::cout << "bestmove " << toUci(best) << std::endl;
+        std::cout << "bestmove " << toUciMove(best) << std::endl;
     });
 }
 

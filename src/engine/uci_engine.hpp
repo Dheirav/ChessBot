@@ -52,7 +52,13 @@ public:
     // transposition table on a 7.7 GB machine and took WSL down with it, twice,
     // on 2026-08-14. Sizing it here also makes an external gate comparable to
     // an in-process one, which uses 32 MB a side.
-    bool start(const std::string& path, int hashMb = 32) {
+    // `args` are the child's command-line arguments. ChessBot needs "--uci"
+    // because its default mode opens a window; a standard UCI engine takes none
+    // and will treat an unrecognised argument as a command to run and exit on.
+    // That is not hypothetical — this hardcoded "--uci" and Stockfish died on
+    // the first handshake, reporting itself as a broken pipe.
+    bool start(const std::string& path, int hashMb = 32,
+               const std::vector<std::string>& args = {"--uci"}) {
         int toChild[2], fromChild[2];
         if (pipe(toChild) != 0) return false;
         if (pipe(fromChild) != 0) { close(toChild[0]); close(toChild[1]); return false; }
@@ -69,7 +75,11 @@ public:
             // with the harness's output.
             FILE* devnull = fopen("/dev/null", "w");
             if (devnull) dup2(fileno(devnull), STDERR_FILENO);
-            execl(path.c_str(), path.c_str(), "--uci", (char*)nullptr);
+            std::vector<char*> argv;
+            argv.push_back(const_cast<char*>(path.c_str()));
+            for (const std::string& a : args) argv.push_back(const_cast<char*>(a.c_str()));
+            argv.push_back(nullptr);
+            execv(path.c_str(), argv.data());
             _exit(127);   // exec failed; the parent sees the handshake time out
         }
 

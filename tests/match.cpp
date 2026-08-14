@@ -70,7 +70,7 @@
 #include "engine/move_lookup.hpp"
 #include "engine/transposition_table.hpp"
 #include "engine/piece.hpp"
-#include "uci_engine.hpp"
+#include "engine/uci_engine.hpp"
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -91,27 +91,6 @@ struct EngineConfig {
     std::string binary;
 };
 
-// UCI long algebraic: "e2e4", "e7e8q". Move::toString() writes "e7e8=Q" for
-// humans and that spelling is baked into the bench signature, so the wire
-// format lives here rather than changing it.
-static std::string toUciMove(const Move& m) {
-    if (m.from < 0 || m.to < 0) return "0000";
-    std::string s;
-    s += (char)('a' + (m.from % 8));
-    s += (char)('8' - (m.from / 8));
-    s += (char)('a' + (m.to % 8));
-    s += (char)('8' - (m.to / 8));
-    if (m.flag == PROMOTION) {
-        switch (m.promotionPiece.type()) {
-            case QUEEN:  s += 'q'; break;
-            case ROOK:   s += 'r'; break;
-            case BISHOP: s += 'b'; break;
-            case KNIGHT: s += 'n'; break;
-            default: break;
-        }
-    }
-    return s;
-}
 
 enum Result { A_WINS, DRAW, B_WINS };
 
