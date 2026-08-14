@@ -75,5 +75,15 @@ jobs:
 
       # Not a strength measurement — just a check that the engine plays a legal
       # game end to end. Real matches are far too long for CI.
+      #
+      # Must state a difference between the two sides. Since 2026-08-11 both
+      # default to the shipped configuration and the harness refuses to run an
+      # A/B that cannot measure anything — a good guard that this step was not
+      # updated for, so CI failed on every push for three days. `--hb off` is
+      # the old heuristics-on-vs-off comparison, asked for explicitly.
+      #
+      # Flag form, not positional: the positional parser stops after three
+      # arguments and ignores the rest, so `./tests/match 2 4 <seed> --hb off`
+      # silently drops the --hb.
       - name: match smoke test
-        run: ./tests/match 2 4 20260810
+        run: ./tests/match -n 2 -d 4 -s 20260810 --hb off
