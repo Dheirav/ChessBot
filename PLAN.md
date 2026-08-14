@@ -33,7 +33,7 @@ the time; it now builds ten, and CI runs eleven test steps. `test-perft`,
 signature bit-identically — 2,056,371 nodes and the same best move in all 12
 positions — which is the strongest evidence available that it was an exact
 restatement rather than a rewrite. (That figure is the signature *as it stood
-then*; it is 1 464 599 today. The claim here is about matching the baseline of
+then*; it is 1 599 675 today. The claim here is about matching the baseline of
 the day, so the old number is the right one to keep.)
 
 **0.1 Remove dead eval fields and constants first** (§3.3)
@@ -459,8 +459,10 @@ feature before gating it.** It is refused with `--check`, since the stored
 signature describes the defaults.
 
 **3.3 Check extensions** (§5.2) — extend a ply when in check. Small, standard,
-usually worth 10–20 Elo. **Implemented 2026-08-14** behind `checkext`, off until
-gated.
+usually worth 10–20 Elo. **DONE 2026-08-14: accepted at +23.0 Elo, 95% CI
+[+13.3, +32.7]** over 3 360 games at equal nodes, 11 of 12 shards positive. On
+by default. Slightly above the range this line predicted, and the largest
+accepted gain since `seeordering`.
 
 Placed before the `depth == 0` drop into quiescence rather than inside the move
 loop, which is the whole decision: a check arriving exactly at the horizon is
@@ -472,8 +474,16 @@ entry asked for matches the depth about to be searched.
 Bench with it on: 1 464 599 → **1 599 675, +9.2%**, and two best moves change.
 `open-sicil` returns to `d7d5`, which 3.2 and 4.3 both moved *away* from and
 which is dubious on principle (`2...d5 3.exd5 Qxd5` costs black time), and
-`zugzwang` moves `e1e5` → `e1e6` at +61% nodes for that position. Neither is a
-verdict at depth 6, but both are worth remembering if the gate disappoints.
+`zugzwang` moves `e1e5` → `e1e6` at +61% nodes for that position. Neither was a
+verdict at depth 6, and the gate did not disappoint — but they are still the
+first places to look if check extensions ever need retuning.
+
+**Why this one worked where the last two did not.** `seepruning` and
+`deltapruning` buy *speed* per node, and a node budget pays both sides the same
+nodes, so the instrument hides most of what they are for. Check extensions buy
+*quality* per node — they cost 9.2% more nodes and win anyway. An equal-nodes
+gate is exactly the right instrument for that, and it saw the effect on the
+first run. Match the instrument to what the change is supposed to buy.
 
 **3.4 Futility pruning and razoring at shallow depths** (§5.2) — needs the
 lazy-eval margins to be sane; keep it after 3.2 so SEE already removes the worst
@@ -593,7 +603,7 @@ split at depth 5: evaluation 34.1%, legality filter 19.4%, `makeMove` 10.4%.
 
 **Status: 5.1, 5.2 and 5.3 are DONE** — 1.45× together, all verified by the
 bench signature staying at 2 056 371, which was the baseline at the time (it is
-1 464 599 now). Remaining: 5.4 (lazy eval, needs a match)
+1 599 675 now). Remaining: 5.4 (lazy eval, needs a match)
 and 5.5 (pin-aware movegen). See `BACKLOG.md §7` for the measurements.
 
 **5.1 Cache the static eval in the TT entry** (§4.3) — repeated visits skip
@@ -728,7 +738,7 @@ is conclusive, and 1.5 needed 136 games where the fixed-N plan wanted ~800.
 ./tests/bench 6 --opt <feature>=on
 ```
 
-Compare against the current baseline, **1 464 599** nodes at depth 6 (2 056 371
+Compare against the current baseline, **1 599 675** nodes at depth 6 (2 056 371
 until `seeordering` was gated on 2026-08-13; then 1 465 771, 1 725 755 and
 1 759 990 as the three Phase 4 evaluation fixes landed on 2026-08-14; then back
 down when the quiescence bound landed the same day). A feature that barely moves the

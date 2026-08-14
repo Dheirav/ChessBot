@@ -49,8 +49,17 @@ struct SearchOptions {
     bool deltaPruning = false; // skip captures that cannot raise alpha
 
     // Check extensions (PLAN.md 3.3): search one ply deeper when in check.
-    // Off until gated, like every other feature here.
-    bool checkExtension = false;
+    //
+    // ON since 2026-08-14: **+23.0 Elo, 95% CI [+13.3, +32.7]** over 3 360
+    // games at equal nodes, 11 of 12 shards positive. The largest accepted gain
+    // since `seeordering`, and the right instrument saw it — this is
+    // quality-per-node, unlike `seepruning` and `deltaPruning`, which buy speed
+    // and which a node budget therefore hides.
+    //
+    // It costs +9.2% nodes at bench 6 and is worth it, which is the cleanest
+    // demonstration in this file that node count is not the thing being
+    // optimised.
+    bool checkExtension = true;
 
     // Age the transposition table once per search, so entries left by earlier
     // searches lose their depth-preference and can be displaced.

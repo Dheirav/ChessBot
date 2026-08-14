@@ -31,6 +31,7 @@ Phase 3 is in progress. What is wired in:
 | `seeordering` | **on** | **accepted**, +25.6 Elo [+16.1, +35.2] — on by default since 2026-08-13 |
 | `seepruning` | off | **resolved, stays off** — +2.2 [−7.2, +11.6] at equal nodes, +4 [−7, +14] on the clock |
 | `qbound` | **on** | quiescence capped 8 plies past the horizon; −16.8% nodes, no best move changed. Ungated repair |
+| `checkext` | **on** | **accepted**, +23.0 Elo [+13.3, +32.7] — on by default since 2026-08-14 |
 | `deltapruning` | off | −50.0 [−60.3, −39.7] at 200cp; **+7.1 [−2.9, +17.2] at 900cp** — spans zero, so stays off |
 
 All three gates ran 2026-08-13 at 14 shards × 120 pairs (3 360 games each,
@@ -65,7 +66,7 @@ plays 900+10, where it spends 15-25 *seconds*. Nothing here rules out
 `seepruning` mattering at long time controls. Testing that is not affordable —
 see the throughput note under Next.
 
-The bench signature is **1,464,599 nodes** at depth 6. Any change claiming to
+The bench signature is **1,599,675 nodes** at depth 6. Any change claiming to
 preserve search behaviour must reproduce it exactly. It has moved four times this
 week — 2,056,371 until `seeordering` was turned on (2026-08-13); then 1,465,771,
 1,725,755 and 1,759,990 as the three Phase 4 evaluation fixes landed
@@ -155,6 +156,7 @@ and recorded above; their logs are kept:
 | `shard-20260814-122546/` | Phase 4 evaluation, two binaries | +6.1 [−3.9, +16.1] |
 | `shard-20260814-153213/` | `deltapruning`, 200cp margin | **−50.0 [−60.3, −39.7]** |
 | `shard-20260814-175417/` | `deltapruning`, 900cp margin | +7.1 [−2.9, +17.2] |
+| `shard-20260814-203000/` | `checkext` | **+23.0 [+13.3, +32.7]** — accepted |
 
 Re-pool any of them with `./tests/pool-shards.sh <dir>/`.
 
@@ -168,9 +170,8 @@ point estimate barely moved; the interval is what shrank. One shard is a
 
 ## Next, in order
 
-1. **Check extensions** (`PLAN.md` 3.3) — small, standard, unimplemented, and
-   quality-per-node, so it gates normally on nodes. The best remaining value per
-   hour of work.
+1. **Phase 3 remainder:** futility pruning and razoring (3.4), IID (3.5),
+   retune LMR (3.6). Read 3.1 before 3.4 — see the warning below.
 
 2. **Optionally resolve `deltapruning`.** At the spec margin it reads +7.1
    [−2.9, +17.2] and stays off because that is not a demonstrated gain. Roughly
