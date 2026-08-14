@@ -123,11 +123,49 @@ Two of the eight non-wins were self-inflicted and are written up in `BUGS.md`:
 a drawn win against a 1404 (−48) and a time forfeit caused by restarting the bot
 mid-game (−120).
 
-**The engine has already moved past this baseline.** `BUGS.md` 1 — the search
-never receiving the game's move history — was fixed on 2026-08-14, so games from
-that build on are not comparable to the 24 above without splitting them. The
-baseline stays frozen as written rather than being edited forward; that is what
-makes it usable as a comparison later.
+**The engine has already moved past this baseline.** `BUGS.md` 1, 2, 3, 4 and 5
+and `PLAN.md` 3.3 all landed on 2026-08-14, so games from those builds are not
+comparable to the 24 above without splitting them. The baseline stays frozen as
+written rather than being edited forward; that is what makes it usable as a
+comparison at all.
+
+### Second measurement — 2026-08-15 00:49
+
+**The rating is no longer provisional.** 44 rated games, `prov=false`.
+
+| | baseline (08-14 00:04) | now (08-15 00:49) |
+|---|---|---|
+| rating | 2198 | **2080** |
+| rd | 121 | **79** |
+| 95% band | 1960-2440 | **1922-2238** |
+| record | 16-6-2 | **30-13-2** |
+
+The drop is the estimate converging, not the engine weakening. A provisional
+rating built almost entirely on wins over 1200-1800 opponents was always going
+to fall as it met stronger ones, and it is up 36 points across the last eight
+games.
+
+**Strength by opponent band**, over the 43 decided games recorded locally:
+
+| opponent | games | W-D-L | score |
+|---|---|---|---|
+| under 1500 | 13 | 12-1-0 | 96% |
+| 1500-1900 | 13 | 12-0-1 | 92% |
+| 1900-2100 | 6 | 4-0-2 | 67% |
+| 2100-2300 | 8 | 2-1-5 | 31% |
+| 2300+ | 3 | 0-0-3 | 0% |
+
+The crossover sits at **2050-2100**, which is where the rating settled — the two
+agree, which the first measurement could not claim.
+
+**The ceiling moved.** On 08-14 the pattern was absolute: every win ≤2072, every
+loss ≥2199, nothing in between ever played. That gap is now filled and the
+boundary has shifted — highest opponent beaten **2156**, lowest lost to 1739.
+
+**Watch the 2100-2300 band, not the rating.** It sits at 31% over 8 games. If
+the +23.0 Elo from check extensions is real against a diverse field rather than
+against this engine's own blind spots, that band is where it shows up first. The
+rating will move for reasons that have nothing to do with the engine.
 
 ---
 
