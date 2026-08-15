@@ -211,214 +211,260 @@ std::string htmlReport(const PgnGame& game, const std::vector<HtmlMove>& moves,
 <title>__TITLE__</title>
 <style>
 /* Three theme states, not two: an explicit choice stamps data-theme, and the
-   default "system" setting stamps nothing at all -- so the bare :root has to
-   carry a complete palette, and both the media query and the [data-theme] rule
-   redefine only tokens. Anything that names a colour outside these blocks
-   renders one theme's ink on the other theme's ground. */
+   default "system" setting stamps nothing -- so bare :root carries a complete
+   palette and the other two blocks redefine only tokens. */
 :root{
-  --bg:#f4f5f7; --panel:#ffffff; --ink:#14171a; --dim:#5f6873;
-  --line:#e2e5ea; --rail:#cfd5dd;
-  --sq-light:#d8dde3; --sq-dark:#7e8b9a; --sq-mark:#c9a227;
-  --blunder:#b3261e; --mistake:#b06a00; --inacc:#8a7400; --plain:#5f6873;
-  --shade:rgba(20,23,26,.06); --shade2:rgba(20,23,26,.11);
+  --bg:#f2f4f6; --panel:#fff; --ink:#14181c; --dim:#657080; --faint:#8b95a3;
+  --line:#e1e6ec; --sq-light:#dfe4ea; --sq-dark:#7c8a99; --sq-mark:#d9a441;
+  --blunder:#b3261e; --mistake:#b06a00; --inacc:#8a7400;
+  --shade:rgba(20,24,28,.055); --shade2:rgba(20,24,28,.105);
+  --wp-fill:#fbfbf9; --wp-edge:#1a1e22; --bp-fill:#1d2228; --bp-edge:rgba(255,255,255,.30);
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
-  --bg:#131619; --panel:#1b1f23; --ink:#e6e9ec; --dim:#98a1ab;
-  --line:#2a2f35; --rail:#3a424b;
-  --sq-light:#6f7a86; --sq-dark:#3d454e; --sq-mark:#d4af37;
-  --blunder:#e2564a; --mistake:#d99432; --inacc:#c4ab30; --plain:#98a1ab;
-  --shade:rgba(230,233,236,.07); --shade2:rgba(230,233,236,.13);
+  --bg:#101315; --panel:#191d21; --ink:#e7eaee; --dim:#9aa4b0; --faint:#78828e;
+  --line:#272d33; --sq-light:#6d7885; --sq-dark:#3b444d; --sq-mark:#e0b354;
+  --blunder:#e2564a; --mistake:#dd9836; --inacc:#c7ae33;
+  --shade:rgba(231,234,238,.07); --shade2:rgba(231,234,238,.13);
+  --wp-fill:#f4f5f3; --wp-edge:#15181b; --bp-fill:#14181c; --bp-edge:rgba(255,255,255,.38);
 }}
 :root[data-theme="dark"]{
-  --bg:#131619; --panel:#1b1f23; --ink:#e6e9ec; --dim:#98a1ab;
-  --line:#2a2f35; --rail:#3a424b;
-  --sq-light:#6f7a86; --sq-dark:#3d454e; --sq-mark:#d4af37;
-  --blunder:#e2564a; --mistake:#d99432; --inacc:#c4ab30; --plain:#98a1ab;
-  --shade:rgba(230,233,236,.07); --shade2:rgba(230,233,236,.13);
+  --bg:#101315; --panel:#191d21; --ink:#e7eaee; --dim:#9aa4b0; --faint:#78828e;
+  --line:#272d33; --sq-light:#6d7885; --sq-dark:#3b444d; --sq-mark:#e0b354;
+  --blunder:#e2564a; --mistake:#dd9836; --inacc:#c7ae33;
+  --shade:rgba(231,234,238,.07); --shade2:rgba(231,234,238,.13);
+  --wp-fill:#f4f5f3; --wp-edge:#15181b; --bp-fill:#14181c; --bp-edge:rgba(255,255,255,.38);
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);
   font:15px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
   -webkit-font-smoothing:antialiased}
-.wrap{max-width:1080px;margin:0 auto;padding:28px 18px 56px}
-/* The header is set like a bulletin: a serif name over a fixed-pitch line of
-   conditions, which is how a game gets recorded on paper. */
-header{margin-bottom:20px;border-bottom:1px solid var(--line);padding-bottom:14px}
-h1{font:600 25px/1.2 ui-serif,Georgia,"Times New Roman",serif;
-  margin:0 0 6px;letter-spacing:-.01em;text-wrap:balance}
-.sub{color:var(--dim);font-size:12.5px;
-  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+.wrap{max-width:1120px;margin:0 auto;padding:26px 18px 52px}
+header{margin-bottom:18px}
+h1{font:600 24px/1.25 ui-serif,Georgia,"Times New Roman",serif;margin:0 0 5px;
+  letter-spacing:-.01em;text-wrap:balance}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   font-variant-numeric:tabular-nums}
-.cols{display:grid;grid-template-columns:minmax(280px,410px) 1fr;gap:20px;align-items:start}
-@media(max-width:840px){.cols{grid-template-columns:1fr}}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:8px}
-#board{display:grid;grid-template-columns:repeat(8,1fr);aspect-ratio:1;
-  border-radius:8px 8px 0 0;overflow:hidden;user-select:none}
-#board div{display:flex;align-items:center;justify-content:center;
-  font-size:min(7.2vw,40px);line-height:1;color:#101316}
+.sub{color:var(--dim);font-size:12.5px}
+.cols{display:grid;grid-template-columns:minmax(300px,430px) 1fr;gap:20px;align-items:start}
+@media(max-width:880px){.cols{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:9px}
+.stack{display:flex;flex-direction:column;gap:14px}
+
+/* The board. Both axes are stated: with columns alone, rows size to their
+   content and a rank holding pieces grows taller than an empty one, which is
+   exactly how the squares came out uneven. Glyph size is a share of the
+   board's own width (cqi), not the viewport, so a square and the piece on it
+   stay in proportion at every layout width. */
+.boardbox{container-type:inline-size;border-radius:9px 9px 0 0;overflow:hidden}
+#board{display:grid;grid-template-columns:repeat(8,1fr);grid-template-rows:repeat(8,1fr);
+  aspect-ratio:1;user-select:none}
+#board div{position:relative;display:flex;align-items:center;justify-content:center;
+  font-size:9.4cqi;line-height:1}
 .lt{background:var(--sq-light)}.dk{background:var(--sq-dark)}
-/* The squares the move used, marked with an inset frame rather than a wash, so
-   the piece on them stays legible. */
-.hl{box-shadow:inset 0 0 0 3px var(--sq-mark)}
-.nav{display:flex;gap:6px;padding:9px 12px;border-top:1px solid var(--line);
-  align-items:center}
-button{font:inherit;font-size:14px;padding:4px 11px;border:1px solid var(--line);
-  border-radius:6px;background:var(--panel);color:var(--ink);cursor:pointer}
+/* Solid glyphs for both colours, coloured and outlined rather than relying on
+   the outline set: the hollow white pieces vanish on a light square in most
+   system fonts. */
+.wp{color:var(--wp-fill);-webkit-text-stroke:1.1px var(--wp-edge);
+  text-shadow:0 1px 1px rgba(0,0,0,.22)}
+.bp{color:var(--bp-fill);-webkit-text-stroke:1.1px var(--bp-edge)}
+.hl::after{content:"";position:absolute;inset:0;
+  box-shadow:inset 0 0 0 3px var(--sq-mark)}
+
+.nav{display:flex;gap:6px;padding:9px 11px;align-items:center;
+  border-top:1px solid var(--line)}
+button{font:inherit;font-size:14px;padding:4px 10px;border:1px solid var(--line);
+  border-radius:6px;background:var(--panel);color:var(--ink);cursor:pointer;line-height:1.4}
 button:hover{background:var(--shade)}
-button:focus-visible,.mv:focus-visible{outline:2px solid var(--sq-mark);outline-offset:1px}
-.summary{display:flex;gap:26px;padding:13px 15px;border-bottom:1px solid var(--line);
+button:focus-visible,.ply:focus-visible{outline:2px solid var(--sq-mark);outline-offset:1px}
+
+/* Detail for the selected move, given room here rather than crammed into the
+   list -- the explanation is the reason this report exists. */
+.detail{padding:13px 15px;min-height:104px}
+.badge{display:inline-block;padding:1px 8px;border-radius:99px;font-size:11.5px;
+  font-weight:650;letter-spacing:.04em;text-transform:uppercase;color:#fff}
+.b-Blunder{background:var(--blunder)}.b-Mistake{background:var(--mistake)}
+.b-Inaccuracy{background:var(--inacc)}
+.b-Good,.b-Excellent,.b-Best{background:transparent;color:var(--faint);
+  border:1px solid var(--line)}
+.dhead{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.dmove{font:600 19px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace}
+.dloss{margin-left:auto;font-size:13px;color:var(--dim)}
+.dterms{margin-top:9px;font-size:13px;color:var(--dim)}
+.dterms b{color:var(--ink);font-weight:600}
+
+.summary{display:flex;gap:24px;padding:13px 15px;border-bottom:1px solid var(--line);
   flex-wrap:wrap}
-.summary div{font-size:12px;color:var(--dim);text-transform:uppercase;
-  letter-spacing:.06em}
-.summary b{display:block;font:600 21px/1.15 ui-monospace,SFMono-Regular,Menlo,monospace;
-  color:var(--ink);letter-spacing:-.01em;font-variant-numeric:tabular-nums;
-  text-transform:none}
-.summary span{font-size:12px;letter-spacing:0;text-transform:none;
-  font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-.moves{max-height:54vh;overflow-y:auto;padding:4px}
-/* A severity rail: the criticised moves have to be findable by eye in a list of
-   eighty, and a colour on the text alone does not survive a quick scan. */
-.mv{display:grid;grid-template-columns:10px 46px 1fr auto;gap:9px;
-  align-items:baseline;padding:4px 9px;border-radius:5px;cursor:pointer}
-.mv:hover{background:var(--shade)}
-.mv.sel{background:var(--shade2)}
-.rail{grid-row:span 2;align-self:stretch;border-radius:2px;background:transparent}
-.Blunder .rail{background:var(--blunder)}
-.Mistake .rail{background:var(--mistake)}
-.Inaccuracy .rail{background:var(--inacc)}
-.num,.san,.tag{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-  font-variant-numeric:tabular-nums}
-.num{color:var(--dim);font-size:12.5px}
-.san{font-weight:600;font-size:14px}
-.tag{font-size:12.5px;color:var(--plain)}
-.Blunder .san,.Blunder .tag{color:var(--blunder)}
-.Mistake .san,.Mistake .tag{color:var(--mistake)}
-.Inaccuracy .san,.Inaccuracy .tag{color:var(--inacc)}
-.terms{grid-column:3/5;color:var(--dim);font-size:12px;margin-top:-1px;
-  padding-bottom:2px}
-.graph{margin-top:20px;padding:14px 15px 10px}
-.graph .sub{display:block;margin-bottom:8px}
-svg{display:block;width:100%;height:118px;overflow:visible}
-.note{color:var(--dim);font-size:12px;margin-top:24px;line-height:1.65;
-  max-width:68ch}
-@media (prefers-reduced-motion:no-preference){
-  .mv,button{transition:background-color .12s ease}
-}
+.summary div{font-size:11.5px;color:var(--dim);letter-spacing:.05em;text-transform:uppercase}
+.summary b{display:block;font:600 20px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;
+  color:var(--ink);font-variant-numeric:tabular-nums;text-transform:none;letter-spacing:0}
+.summary i{font-style:normal;font-size:12px;color:var(--faint);text-transform:none;
+  letter-spacing:0}
+
+/* A scoresheet: one row per move, both plies on it, which is how a game is
+   written down and half the rows of a ply-per-line list. */
+.sheet{max-height:56vh;overflow-y:auto;padding:5px 6px}
+.row{display:grid;grid-template-columns:38px 1fr 1fr;gap:4px;align-items:stretch}
+.no{color:var(--faint);font-size:12.5px;padding:4px 4px 4px 0;text-align:right;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
+.ply{display:flex;align-items:baseline;gap:6px;padding:4px 7px;border-radius:5px;
+  border:0;background:transparent;color:var(--ink);cursor:pointer;text-align:left;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13.5px;width:100%}
+.ply:hover{background:var(--shade)}
+.ply.sel{background:var(--shade2)}
+.ply .d{margin-left:auto;font-size:11.5px;color:var(--faint);font-variant-numeric:tabular-nums}
+.ply.Blunder{color:var(--blunder);font-weight:650}
+.ply.Mistake{color:var(--mistake);font-weight:650}
+.ply.Inaccuracy{color:var(--inacc)}
+.ply.Blunder .d,.ply.Mistake .d,.ply.Inaccuracy .d{color:inherit}
+
+.graph{margin-top:16px;padding:13px 15px 9px}
+svg{display:block;width:100%;height:112px;overflow:visible}
+.note{color:var(--faint);font-size:12px;margin-top:22px;line-height:1.65;max-width:70ch}
+@media (prefers-reduced-motion:no-preference){.ply,button{transition:background-color .12s}}
 </style></head><body><div class="wrap">
 <header>
   <h1 id="ttl"></h1>
-  <div class="sub" id="sub"></div>
+  <div class="sub mono" id="sub"></div>
 </header>
 <div class="cols">
-  <div>
-    <div class="card"><div id="board"></div></div>
-    <div class="card nav">
-      <button onclick="go(-999)">&#8676;</button>
-      <button onclick="go(-1)">&#8592;</button>
-      <button onclick="go(1)">&#8594;</button>
-      <button onclick="go(999)">&#8677;</button>
-      <span class="sub" style="margin-left:auto;align-self:center" id="pos"></span>
+  <div class="stack">
+    <div class="card">
+      <div class="boardbox"><div id="board"></div></div>
+      <div class="nav">
+        <button onclick="go(-999)" title="start">&#8676;</button>
+        <button onclick="go(-1)" title="previous">&#8592;</button>
+        <button onclick="go(1)" title="next">&#8594;</button>
+        <button onclick="go(999)" title="end">&#8677;</button>
+        <span class="sub mono" style="margin-left:auto" id="pos"></span>
+      </div>
     </div>
+    <div class="card detail" id="detail"></div>
   </div>
   <div class="card">
     <div class="summary" id="acc"></div>
-    <div class="moves" id="list"></div>
+    <div class="sheet" id="list"></div>
   </div>
 </div>
-<div class="card graph"><span class="sub">evaluation, white\'s point of view</span>
-<svg id="g" viewBox="0 0 600 120" preserveAspectRatio="none"></svg></div>
+<div class="card graph"><span class="sub">evaluation &middot; white's point of view</span>
+<svg id="g" viewBox="0 0 600 112" preserveAspectRatio="none"></svg></div>
 <p class="note" id="note"></p>
 </div>
 <script>
 const H=__HEAD__, M=__MOVES__;
-const G={"K":"♔","Q":"♕","R":"♖","B":"♗","N":"♘","P":"♙",
-         "k":"♚","q":"♛","r":"♜","b":"♝","n":"♞","p":"♟"};
+const S={k:"♚",q:"♛",r:"♜",b:"♝",n:"♞",p:"♟"};
 let cur=-1;
 
-// Squares the last move touched, so the eye can find it without replaying the
-// game in your head. A review board without this is a puzzle, not a report.
 function sq(u){
   if(!u||u.length<4)return[];
-  const idx=t=>(8-(+t[1]))*8+(t.charCodeAt(0)-97);
-  return[idx(u.slice(0,2)),idx(u.slice(2,4))];
+  const ix=t=>(8-(+t[1]))*8+(t.charCodeAt(0)-97);
+  return[ix(u.slice(0,2)),ix(u.slice(2,4))];
 }
 function board(fen,uci){
-  const rows=fen.split(" ")[0].split("/"), b=document.getElementById("board");
-  const mark=sq(uci);
+  const rows=fen.split(" ")[0].split("/"), b=document.getElementById("board"), mark=sq(uci);
   b.innerHTML="";
   for(let r=0;r<8;r++){let f=0;
     for(const ch of rows[r]){
-      if(ch>="1"&&ch<="8"){for(let k=0;k<+ch;k++,f++)cell(b,r,f,"",mark)}
-      else cell(b,r,f++,G[ch]||"",mark);
+      if(ch>="1"&&ch<="8"){for(let k=0;k<+ch;k++,f++)cell(b,r,f,"",false,mark)}
+      else{cell(b,r,f++,S[ch.toLowerCase()]||"",ch===ch.toUpperCase(),mark)}
     }}
 }
-function cell(b,r,f,g,mark){
+function cell(b,r,f,g,white,mark){
   const d=document.createElement("div");
   d.className=((r+f)%2?"dk":"lt")+(mark.includes(r*8+f)?" hl":"");
-  d.textContent=g; b.appendChild(d);
+  if(g){const s=document.createElement("span");s.className=white?"wp":"bp";s.textContent=g;d.appendChild(s)}
+  b.appendChild(d);
 }
-function fmt(cp){const p=(cp/100).toFixed(2);return (cp>0?"+":"")+p}
+function fmt(cp){return (cp>0?"+":"")+(cp/100).toFixed(2)}
+function label(m){return m.san+(m.label=="Blunder"?"??":m.label=="Mistake"?"?":m.wp>=5?"?!":"")}
 
+function detail(){
+  const d=document.getElementById("detail");
+  if(cur<0){d.innerHTML='<div class="sub">Starting position. Click a move, or use the arrow keys.</div>';return}
+  const m=M[cur];
+  let h='<div class="dhead"><span class="dmove">'+((cur>>1)+1)+(m.w?". ":"… ")+label(m)+'</span>'+
+        '<span class="badge b-'+m.label+'">'+m.label+'</span>'+
+        '<span class="dloss mono">eval '+fmt(m.ev)+'</span></div>';
+  if(m.wp>=5){
+    h+='<div class="dterms">Gave up <b>'+m.wp.toFixed(1)+'%</b> win probability'+
+       (m.cp?' ('+m.cp+' cp)':'')+(m.best?', best was <b>'+m.best+'</b>':'')+'.</div>';
+    if(m.terms)h+='<div class="dterms">'+(m.terms=="no term accounts for it"
+      ?'<b>No evaluation term accounts for it</b> — this engine cannot see what was lost.'
+      :'ChessBot’s evaluation moved: <b>'+m.terms+'</b>')+'</div>';
+  } else {
+    h+='<div class="dterms">Nothing given up here.</div>';
+  }
+  d.innerHTML=h;
+}
 function render(){
   const m=cur<0?null:M[cur];
   board(m?m.fen:H.startFen, m?m.uci:"");
-  document.getElementById("pos").textContent =
-    (cur<0?"start":((cur>>1)+1)+(cur%2?"...":".")+" "+m.san)
-    + "  ·  eval " + fmt(m?m.ev:H.startEval);
-  document.querySelectorAll(".mv").forEach((e,i)=>e.classList.toggle("sel",i===cur));
-  const s=document.querySelector(".mv.sel"); if(s)s.scrollIntoView({block:"nearest"});
+  document.getElementById("pos").textContent=(cur+1)+" / "+M.length;
+  document.querySelectorAll(".ply").forEach(e=>e.classList.toggle("sel",+e.dataset.i===cur));
+  const s=document.querySelector(".ply.sel"); if(s)s.scrollIntoView({block:"nearest"});
+  detail(); marker();
 }
 function go(d){
-  cur = d===-999?-1 : d===999?M.length-1 : Math.max(-1,Math.min(M.length-1,cur+d));
+  cur=d===-999?-1:d===999?M.length-1:Math.max(-1,Math.min(M.length-1,cur+d));
   render();
 }
 document.addEventListener("keydown",e=>{
-  if(e.key==="ArrowLeft")go(-1); else if(e.key==="ArrowRight")go(1);
-  else if(e.key==="Home")go(-999); else if(e.key==="End")go(999); else return;
+  if(e.key==="ArrowLeft")go(-1);else if(e.key==="ArrowRight")go(1);
+  else if(e.key==="Home")go(-999);else if(e.key==="End")go(999);else return;
   e.preventDefault();
 });
 
-document.getElementById("ttl").textContent=H.white+" vs "+H.black+"  —  "+H.result;
+document.getElementById("ttl").textContent=H.white+"  vs  "+H.black;
 document.getElementById("sub").textContent=
-  M.length+" moves analysed · "+H.engine+" at depth "+H.depth;
+  H.result+"  ·  "+M.length+" moves  ·  "+H.engine.split("/").pop()+" depth "+H.depth;
 document.getElementById("acc").innerHTML=
-  '<div>White accuracy<b>'+H.accW.toFixed(1)+'%</b><span>'+H.cpW.toFixed(1)+' cp average loss</span></div>'+
-  '<div>Black accuracy<b>'+H.accB.toFixed(1)+'%</b><span>'+H.cpB.toFixed(1)+' cp average loss</span></div>';
+  '<div>White accuracy<b>'+H.accW.toFixed(1)+'%</b><i>'+H.cpW.toFixed(1)+' cp avg loss</i></div>'+
+  '<div>Black accuracy<b>'+H.accB.toFixed(1)+'%</b><i>'+H.cpB.toFixed(1)+' cp avg loss</i></div>';
 
 const list=document.getElementById("list");
-M.forEach((m,i)=>{
-  const d=document.createElement("div");
-  d.className="mv "+m.label;
-  const crit=m.wp>=5;
-  d.tabIndex=0;
-  d.innerHTML='<i class="rail"></i><span class="num">'+((i>>1)+1)+(m.w?".":"…")+'</span>'+
-    '<span class="san">'+m.san+(m.label=="Blunder"?"??":m.label=="Mistake"?"?":crit?"?!":"")+'</span>'+
-    '<span class="tag">'+(crit?"-"+m.wp.toFixed(1)+"%":fmt(m.ev))+'</span>'+
-    (crit&&m.terms?'<span class="terms">'+m.terms+(m.best?' · best '+m.best:'')+'</span>'
-     :crit&&m.best?'<span class="terms">best '+m.best+'</span>':'');
-  d.onclick=()=>{cur=i;render()};
-  list.appendChild(d);
-});
+for(let i=0;i<M.length;i+=2){
+  const row=document.createElement("div"); row.className="row";
+  row.innerHTML='<span class="no">'+((i>>1)+1)+'.</span>';
+  for(const j of [i,i+1]){
+    if(j>=M.length){row.insertAdjacentHTML("beforeend","<span></span>");continue}
+    const m=M[j], b=document.createElement("button");
+    b.className="ply "+m.label; b.dataset.i=j;
+    b.innerHTML='<span>'+label(m)+'</span>'+
+      (m.wp>=5?'<span class="d">-'+m.wp.toFixed(1)+'%</span>':'<span class="d">'+fmt(m.ev)+'</span>');
+    b.onclick=()=>{cur=j;render()};
+    row.appendChild(b);
+  }
+  list.appendChild(row);
+}
 
+const W=600,Hh=112,CAP=800;
+const pts=[H.startEval].concat(M.map(m=>m.ev));
+const gx=i=>i*W/Math.max(1,pts.length-1);
+const gy=v=>Hh/2-Math.max(-CAP,Math.min(CAP,v))/CAP*(Hh/2-5);
 (function graph(){
-  const pts=[H.startEval].concat(M.map(m=>m.ev)), W=600, Hh=120, cap=800;
-  const x=i=>i*W/Math.max(1,pts.length-1);
-  const y=v=>Hh/2 - Math.max(-cap,Math.min(cap,v))/cap*(Hh/2-4);
-  let d="M"+x(0)+","+y(pts[0]);
-  pts.forEach((v,i)=>{if(i)d+="L"+x(i)+","+y(v)});
-  const area=d+"L"+W+","+(Hh/2)+"L0,"+(Hh/2)+"Z";
+  let d="M"+gx(0)+","+gy(pts[0]);
+  pts.forEach((v,i)=>{if(i)d+="L"+gx(i)+","+gy(v)});
   document.getElementById("g").innerHTML=
-    '<path d="'+area+'" fill="currentColor" opacity=".14"/>'+
-    '<line x1="0" y1="'+(Hh/2)+'" x2="'+W+'" y2="'+(Hh/2)+'" stroke="currentColor" opacity=".3"/>'+
-    '<path d="'+d+'" fill="none" stroke="currentColor" stroke-width="1.6"/>';
+    '<defs><linearGradient id="f" x1="0" y1="0" x2="0" y2="1">'+
+    '<stop offset="0" stop-color="currentColor" stop-opacity=".22"/>'+
+    '<stop offset="1" stop-color="currentColor" stop-opacity=".02"/></linearGradient></defs>'+
+    '<path d="'+d+'L'+W+','+(Hh/2)+'L0,'+(Hh/2)+'Z" fill="url(#f)"/>'+
+    '<line x1="0" y1="'+(Hh/2)+'" x2="'+W+'" y2="'+(Hh/2)+'" stroke="currentColor" stroke-opacity=".35"/>'+
+    '<path d="'+d+'" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>'+
+    '<circle id="mk" r="3.5" fill="var(--sq-mark)" style="display:none"/>';
 })();
+function marker(){
+  const c=document.getElementById("mk"); if(!c)return;
+  const i=cur+1;
+  c.setAttribute("cx",gx(i)); c.setAttribute("cy",gy(pts[i]));
+  c.style.display="";
+}
 
 document.getElementById("note").textContent=
-  "Accuracy is a function of the analysing engine, its depth and the curve used, "+
-  "so these numbers compare games reviewed the same way and nothing else. "+
-  "Term explanations describe what changed in ChessBot's own evaluation, which "+
-  "is not the same as why "+H.engine+" scored the move that way — when the two "+
-  "disagree, that disagreement is the interesting part.";
+  "Accuracy depends on the analysing engine, its depth and the curve used, so these "+
+  "numbers compare games reviewed the same way and nothing else. The named terms "+
+  "describe what moved in ChessBot’s own evaluation, which is not why "+
+  H.engine.split("/").pop()+" scored the move that way — where the two disagree, "+
+  "that disagreement is the useful part.";
 render();
 </script></body></html>
 )HTML";
