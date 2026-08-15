@@ -30,6 +30,7 @@
 #include <iterator>
 #include <cstdio>
 #include <cstdlib>
+#include <cctype>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -132,6 +133,8 @@ struct TermDelta { const char* name; int delta; };
 // report, so the two can never disagree about what a move was worth.
 struct HtmlMove {
     std::string san, bestSan, label, terms, uci;
+    int ms = -1;        // milliseconds spent on this move, -1 when unknown
+    int leftMs = -1;    // clock remaining after it
     int evalAfter;      // centipawns, White's point of view, after this move
     double wpLoss;
     int cpLoss;
@@ -256,10 +259,11 @@ std::string gameRecord(const PgnGame& game, const std::vector<HtmlMove>& moves,
         std::snprintf(buf, sizeof buf,
             "%s{\"n\":%zu,\"w\":%s,\"san\":\"%s\",\"ev\":%d,"
             "\"wp\":%.1f,\"cp\":%d,\"best\":\"%s\",\"label\":\"%s\","
-            "\"terms\":\"%s\",\"uci\":\"%s\"}",
+            "\"terms\":\"%s\",\"uci\":\"%s\",\"ms\":%d,\"left\":%d}",
             i ? "," : "", i, m.white ? "true" : "false", m.san.c_str(),
             m.evalAfter, m.wpLoss, m.cpLoss,
-            m.bestSan.c_str(), m.label.c_str(), m.terms.c_str(), m.uci.c_str());
+            m.bestSan.c_str(), m.label.c_str(), m.terms.c_str(), m.uci.c_str(),
+            m.ms, m.leftMs);
         j += buf;
     }
     j += "]";
@@ -269,12 +273,12 @@ std::string gameRecord(const PgnGame& game, const std::vector<HtmlMove>& moves,
         "{\"white\":\"%s\",\"black\":\"%s\",\"result\":\"%s\",\"engine\":\"%s\","
         "\"depth\":%d,\"startFen\":\"%s\",\"startEval\":%d,"
         "\"accW\":%.1f,\"accB\":%.1f,\"cpW\":%.1f,\"cpB\":%.1f,\"nW\":%d,\"nB\":%d,"
-        "\"flip\":%s,\"blunders\":%d}",
+        "\"flip\":%s,\"blunders\":%d,\"tc\":\"%s\"}",
         game.tags.white.c_str(), game.tags.black.c_str(), game.tags.result.c_str(),
         engine.c_str(), depth, startFen.c_str(), startEval,
         count[0] ? acc[0] : 0.0, count[1] ? acc[1] : 0.0,
         count[0] ? cpAvg[0] : 0.0, count[1] ? cpAvg[1] : 0.0, count[0], count[1],
-        flip ? "true" : "false", blunders);
+        flip ? "true" : "false", blunders, game.tags.timeControl.c_str());
 
     return std::string("{\"head\":") + head + ",\"moves\":" + j + "}";
 }
@@ -466,6 +470,10 @@ svg{display:block;width:100%;height:150px;overflow:visible}
   <div class="glab"><span>evaluation, white's point of view</span><span id="glab2"></span></div>
   <svg id="g" viewBox="0 0 600 150" preserveAspectRatio="none"></svg>
 </div>
+<div class="card graph" id="timecard" style="display:none">
+  <div class="glab"><span>clock remaining</span><span id="tlab"></span></div>
+  <svg id="t" viewBox="0 0 600 90" preserveAspectRatio="none"></svg>
+</div>
 <p class="note" id="note"></p>
 </div>
 <script>
@@ -535,6 +543,8 @@ function cell(b,r,f,p,mark,at){
   b.appendChild(d);
 }
 const fmt=cp=>(cp>0?"+":"")+(cp/100).toFixed(2);
+const secs=ms=>ms>=60000?Math.floor(ms/60000)+"m "+Math.round(ms%60000/1000)+"s"
+                        :(ms/1000).toFixed(ms<10000?1:0)+"s";
 const label=m=>m.san+(m.label=="Blunder"?"??":m.label=="Mistake"?"?":m.wp>=5?"?!":"");
 
 function detail(){
@@ -561,6 +571,8 @@ function detail(){
       }).join("")+'</div>';
     }
   } else h+='<div class="dline">Nothing given up here.</div>';
+  if(m.ms>=0)h+='<div class="dline">Took <b>'+secs(m.ms)+'</b>'+
+    (m.left>=0?', leaving '+secs(m.left)+' on the clock':'')+'.</div>';
   d.innerHTML=h;
 }
 function render(){
@@ -625,6 +637,35 @@ function marker(){
   const c=document.getElementById("mk"); if(!c)return;
   const i=cur+1; c.setAttribute("cx",gx(i)); c.setAttribute("cy",gy(pts[i]));
 }
+// Clock remaining, both sides, across the game. It is here because time is the
+// one thing the position cannot tell you afterwards, and because this engine is
+// known to hoard it (BUGS.md 11): the shape of these lines is that defect, or
+// its absence, drawn from real games rather than from a self-play harness.
+function timeGraph(){
+  const card=document.getElementById("timecard");
+  const have=M.some(m=>m.left>=0);
+  card.style.display=have?"":"none";
+  if(!have)return;
+  const TW=600,TH=90;
+  const base=(H.tc&&parseInt(H.tc,10)?parseInt(H.tc,10):0)*1000;
+  const peak=Math.max(base,...M.map(m=>m.left>=0?m.left:0))||1;
+  const tx=i=>i*TW/Math.max(1,M.length-1);
+  const ty=v=>TH-4-(v/peak)*(TH-10);
+  const line=w=>{
+    let d="",started=false;
+    M.forEach((m,i)=>{ if(m.w!==w||m.left<0)return;
+      d+=(started?"L":"M")+tx(i)+","+ty(m.left); started=true; });
+    return d;
+  };
+  const w=line(true), b=line(false);
+  document.getElementById("t").innerHTML=
+    (w?'<path d="'+w+'" fill="none" stroke="var(--wp-fill)" stroke-width="1.7"/>':'')+
+    (b?'<path d="'+b+'" fill="none" stroke="var(--accent)" stroke-width="1.7"/>':'');
+  const last=[...M].reverse().find(m=>m.left>=0);
+  document.getElementById("tlab").textContent=
+    (H.tc?H.tc+"s · ":"")+(last?secs(last.left)+" left at the end":"");
+}
+
 function loadGame(n){
   gi=n; H=GAMES[gi].head; M=GAMES[gi].moves; flipped=!!H.flip; cur=-1;
   POS=[unpack(H.startFen)];
@@ -636,7 +677,7 @@ function loadGame(n){
   document.getElementById("acc").innerHTML=
     '<div><span>White accuracy</span><b>'+H.accW.toFixed(1)+'%</b><i>'+H.cpW.toFixed(1)+' cp avg loss</i></div>'+
     '<div><span>Black accuracy</span><b>'+H.accB.toFixed(1)+'%</b><i>'+H.cpB.toFixed(1)+' cp avg loss</i></div>';
-  buildSheet(); graph(); render();
+  buildSheet(); graph(); timeGraph(); render();
   if(GAMES.length>1)document.getElementById("pick").value=gi;
 }
 if(GAMES.length>1){
@@ -834,6 +875,17 @@ int main(int argc, char** argv) {
         return 5;
     };
 
+    // "900+10", "600", "-" (correspondence) or absent.
+    int baseMs = -1, incMs = 0;
+    {
+        const std::string& tc = game.tags.timeControl;
+        if (!tc.empty() && std::isdigit((unsigned char)tc[0])) {
+            baseMs = std::atoi(tc.c_str()) * 1000;
+            const size_t plus = tc.find('+');
+            if (plus != std::string::npos) incMs = std::atoi(tc.c_str() + plus + 1) * 1000;
+        }
+    }
+
     std::vector<MoveNote> notes(game.moves.size());
     std::vector<HtmlMove> rows;
     // The HTML report shows the same attribution the text one does, so asking
@@ -892,6 +944,19 @@ int main(int argc, char** argv) {
         }
         {
             HtmlMove r;
+            // What the move cost in time. The clock in the file is what was
+            // left *after* the move and after the increment was added, so the
+            // time spent is the previous reading for that side, plus the
+            // increment, minus this one.
+            if (i < game.clockMs.size() && game.clockMs[i] >= 0) {
+                r.leftMs = game.clockMs[i];
+                const int prev = (i >= 2 && game.clockMs[i - 2] >= 0)
+                               ? game.clockMs[i - 2] : baseMs;
+                if (prev >= 0) {
+                    const int spent = prev + incMs - game.clockMs[i];
+                    r.ms = (spent >= 0) ? spent : -1;
+                }
+            }
             r.san = san[i];
             r.bestSan = (bestSan[i].empty() ? best[i] : bestSan[i]);
             if (r.bestSan == r.san) r.bestSan.clear();

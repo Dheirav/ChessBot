@@ -338,6 +338,39 @@ graph and the glyphs; it cannot give you what this engine's evaluation thought.
 So the two outputs answer different questions and both are kept. Use
 `--annotate` to study the game, `--html` to study the engine.
 
+## R6. Time — **DONE 2026-08-16**
+
+Every Lichess and Chess.com export writes `{[%clk 0:09:59.9]}` after each move,
+and the parser was skipping those comments wholesale. It now keeps them, so a
+review can say what a move cost in *time* as well as in centipawns:
+
+```
+13. Qa8+  BLUNDER  -40.1%  best Qxc3
+Took 25s, leaving 11m 59s on the clock.
+```
+
+plus a clock-remaining chart under the evaluation graph, one line per side.
+
+**This is not a convenience feature.** Time is the only thing a position cannot
+tell you afterwards, and this engine has a known defect in exactly that place:
+`BUGS.md` 11, where `parseGo` divides what is left by a hardcoded 30 and banks
+half the increment, so the clock decays toward `15 × increment` instead of being
+spent. The `--tc` gate can measure a fix in self-play; only this can show the
+behaviour in real rated games. The first game it was pointed at makes the point
+on its own — **719 seconds of a 900-second clock unused after thirteen moves**,
+while the opponent's clock *rose* from 900 to 1004 because it answered in under
+a second.
+
+Time spent is the previous reading for that side, plus the increment, minus the
+current one, with the base from the `TimeControl` tag. It reads `h:mm:ss`,
+`mm:ss` and bare seconds; counting the parts is the whole job, and the first
+version got it wrong — it read `0:15:00` as fifteen *seconds*, which produced
+plausible-looking nonsense rather than an obvious failure. Caught by checking
+the numbers against a game whose clock was known, which is the only reason it
+did not ship.
+
+---
+
 ### Reviewing a game that is not the bot's
 
 The tool takes any PGN, so a game exported from Chess.com or Lichess works

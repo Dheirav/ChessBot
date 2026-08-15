@@ -222,6 +222,32 @@ Move fromSan(Board& board, const std::string& san) {
     return none;   // from == -1
 }
 
+// "0:09:59.9", "1:30:00" or "59.9" into milliseconds, or -1 if it is none of
+// them. Counting the parts is the whole job: h:mm:ss and mm:ss differ only in
+// how many there are, and reading the first as the second turns fifteen minutes
+// into fifteen seconds.
+static int parseClock(const std::string& s) {
+    int part[3] = {0, 0, 0}, n = 0, tenths = 0;
+    size_t i = 0;
+    while (i < s.size() && !std::isdigit((unsigned char)s[i])) ++i;
+    while (n < 3 && i < s.size() && std::isdigit((unsigned char)s[i])) {
+        int v = 0;
+        while (i < s.size() && std::isdigit((unsigned char)s[i])) v = v * 10 + (s[i++] - '0');
+        part[n++] = v;
+        if (i < s.size() && s[i] == '.') {
+            ++i;
+            if (i < s.size() && std::isdigit((unsigned char)s[i])) tenths = s[i] - '0';
+            while (i < s.size() && std::isdigit((unsigned char)s[i])) ++i;
+        }
+        if (i < s.size() && s[i] == ':') ++i; else break;
+    }
+    if (n == 0) return -1;
+    long total = (n == 1) ? part[0]
+               : (n == 2) ? (long)part[0] * 60 + part[1]
+                          : ((long)part[0] * 60 + part[1]) * 60 + part[2];
+    return (int)(total * 1000 + tenths * 100);
+}
+
 bool parsePgn(const std::string& text, PgnGame& out, std::string* error) {
     out = PgnGame{};
 
@@ -247,6 +273,7 @@ bool parsePgn(const std::string& text, PgnGame& out, std::string* error) {
         else if (key == "Black")  out.tags.black  = val;
         else if (key == "Result") out.tags.result = val;
         else if (key == "FEN")    out.tags.startFen = val;
+        else if (key == "TimeControl") out.tags.timeControl = val;
     }
 
     Board board;
@@ -265,7 +292,19 @@ bool parsePgn(const std::string& text, PgnGame& out, std::string* error) {
         if (std::isspace((unsigned char)c)) { ++i; continue; }
 
         // Comments and variations nest; NAGs run to whitespace.
-        if (c == '{') { size_t e = text.find('}', i); i = (e == std::string::npos) ? text.size() : e + 1; continue; }
+        //
+        // A comment is skipped, but not before looking for the clock in it: the
+        // annotation follows the move it belongs to, so whatever it says about
+        // time applies to the move already pushed.
+        if (c == '{') {
+            size_t e = text.find('}', i);
+            const std::string body = text.substr(i + 1, (e == std::string::npos ? text.size() : e) - i - 1);
+            const size_t k = body.find("%clk");
+            if (k != std::string::npos && !out.moves.empty())
+                out.clockMs.back() = parseClock(body.substr(k + 4));
+            i = (e == std::string::npos) ? text.size() : e + 1;
+            continue;
+        }
         if (c == ';') { size_t e = text.find('\n', i); i = (e == std::string::npos) ? text.size() : e + 1; continue; }
         if (c == '$') { while (i < text.size() && !std::isspace((unsigned char)text[i])) ++i; continue; }
         if (c == '(') {
@@ -312,6 +351,7 @@ bool parsePgn(const std::string& text, PgnGame& out, std::string* error) {
             return false;
         }
         out.moves.push_back(m);
+        out.clockMs.push_back(-1);
         board.makeMove(m);
     }
     return true;

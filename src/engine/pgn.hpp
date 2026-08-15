@@ -23,6 +23,7 @@ struct PgnTags {
     std::string black  = "?";
     std::string result = "*";            // "1-0", "0-1", "1/2-1/2" or "*"
     std::string startFen;                // empty = the standard opening position
+    std::string timeControl;             // "600", "900+10"; empty when absent
 };
 
 // Today's date as PGN spells it.
@@ -69,6 +70,11 @@ bool writePgn(const std::string& path, const std::vector<Move>& moves,
 struct PgnGame {
     PgnTags tags;
     std::vector<Move> moves;
+    // Clock remaining after each move, in milliseconds, or -1 where the file
+    // does not say. Lichess and Chess.com both write {[%clk 0:09:59.9]} after
+    // every move, which is the only record of how long a move actually took --
+    // and time is the one thing a position cannot tell you afterwards.
+    std::vector<int> clockMs;
 };
 
 // One SAN token against a position. `board` is left unmodified.
