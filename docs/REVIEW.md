@@ -178,6 +178,30 @@ fixed.
   ≥ 5, then Good, Excellent, Best.
 - Per-side accuracy, average centipawn loss, and a count of each label.
 
+### Regenerating this profile
+
+```bash
+make review                      # builds tools/review; skip if a gate is running
+./tools/archive-profile.py       # the whole archive
+./tools/archive-profile.py --compare 2026.08.15-13:27:00   # before vs after a build
+```
+
+`tools/archive-profile.py` produces every number in this section. It caches each
+game's review under `--work`, so re-running after new games only analyses the
+new ones, and `--jobs` defaults to 4 rather than the core count because the bot's
+own games are on a real clock and starving them corrupts the evidence being
+collected.
+
+It exists because these figures were quoted as fact while being reproducible
+only by whoever still had the throwaway scripts. A documented number with no way
+to regenerate it is the same defect as a documented command nobody has run —
+and this file has already been wrong once, when `BUGS.md` 10 corrupted the
+figures it published.
+
+Timestamps are **Lichess UTC**, not local time. `--compare` takes the moment a
+build went live; **2026.08.15-13:27:00** is when the engine with the
+hanging-piece term removed started playing.
+
 ### Whole-archive profile, regenerated 2026-08-15 on the corrected parser
 
 62 games, 2 575 of the bot's own moves, Stockfish 16 at depth 14:

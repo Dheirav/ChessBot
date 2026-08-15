@@ -304,7 +304,16 @@ It found two things on the way, and both are now the work:
 **What to pick up next**, in the order I would take them:
 
 1. **An uninterrupted night of rated games.** The single outstanding
-   measurement. Everything gained today is self-play, and self-play differs
+   measurement, and there is now one command for reading it:
+
+   ```bash
+   ./tools/archive-profile.py --compare 2026.08.15-13:27:00
+   ```
+
+   That stamp is Lichess **UTC**, and it is the moment the engine with the
+   hanging-piece term removed started playing. Everything before it is the
+   62-game baseline this project has been quoting; everything after is the
+   build that gated at +121.2 and then +155.0. Everything gained today is self-play, and self-play differs
    from the pool in exactly the way that flatters a change. Whether +121 and
    +155 survive contact with a real field decides how much every gate in this
    project is worth — including the ones already banked. Watch the 2100-2300
