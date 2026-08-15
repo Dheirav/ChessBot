@@ -1,4 +1,4 @@
-# Handoff — 2026-08-15
+# Handoff — 2026-08-16
 
 Current state, what is in flight, and what to pick up. This is the file to read
 first; it is meant to be rewritten as state changes, unlike `BACKLOG.md`, which
@@ -7,6 +7,7 @@ is a frozen archive of the 2026-08-10 profiling session.
 | document | what it is | current? |
 |---|---|---|
 | `HANDOFF.md` | this file — where things stand | **yes, keep it that way** |
+| `TODO.md` | every open item, with what blocks it and what it costs | **yes, keep it that way** |
 | `README.md` | features, UCI, build, controls | yes |
 | `src/README.md` | architecture | yes |
 | `tests/README.md` | test suite and gate methodology | yes |
@@ -86,13 +87,20 @@ no amount of reasoning about algorithms would have suggested it — **re-profile
 before optimising anything**, since the 2026-08-10 profile has been wrong twice
 about where the time goes.
 
-`make review` builds `tools/review`, which reads a PGN and analyses it with any
-UCI engine (`docs/REVIEW.md`). It is complete: classification in win
-probability, accuracy, annotated-PGN output, and `--explain` naming which
-evaluation terms changed. Stockfish 16 is installed at `/usr/games/stockfish`;
-ChessBot needs `--engine-arg --uci`. It has been used in anger once — that is
-6.1 under *Next* — and it has a known 3% phantom-loss floor from successive
-searches disagreeing, so a lone inaccuracy under ~5 win% is not evidence.
+`make review` builds `tools/review` (`docs/REVIEW.md`): it reads a PGN — one
+game or a whole export — analyses it with any UCI engine, and writes a text
+report, an annotated PGN, or a self-contained HTML page. Stockfish 16 is at
+`/usr/games/stockfish`; ChessBot needs `--engine-arg --uci`.
+
+```bash
+./tools/review-archive.sh                     # every archived game, one file
+./tools/review-open.sh --latest               # newest game, opened
+./tools/review g.pgn --html o.html --me you   # someone else's export
+./tools/archive-profile.py --compare <stamp>  # accuracy before/after a build
+```
+
+It carries a known **3% phantom-loss floor** from successive searches
+disagreeing, so a lone inaccuracy under ~5 win% is not evidence of anything.
 
 The bench signature is **1,086,693 nodes** at depth 6, after 6.2 removed the
 hanging-piece penalty on 2026-08-15 (1,599,675 → 1,323,943 → 1,086,693, −32.1%
@@ -301,7 +309,8 @@ It found two things on the way, and both are now the work:
   exactly 50.00%), and all of it is **self-play Elo, which does not convert to
   Lichess rating**.
 
-**What to pick up next**, in the order I would take them:
+**`TODO.md` is the queue**, with sizes and blockers for everything open. The
+three that matter most, in the order I would take them:
 
 1. **An uninterrupted night of rated games.** The single outstanding
    measurement, and there is now one command for reading it:
