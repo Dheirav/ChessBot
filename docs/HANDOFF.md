@@ -201,21 +201,37 @@ rating will move for reasons that have nothing to do with the engine.
 
 ## In flight
 
-**The Lichess bot is running**, playing rated 900+10 continuously. Stop it
-**between** games, never during one (`BUGS.md` 7):
+**Nothing is running.** The Lichess bot was stopped cleanly between games on
+2026-08-15 at 17:32, with no game in progress and none left unfinished. `./chessbot`
+holds the gated build, so it can be restarted as-is:
 
 ```bash
-pgrep -x chessbot     # a PID means a game is live — wait
-pkill -INT -f lichess-bot.py
-./lichess/run.sh      # to restart; token comes from the environment
+pgrep -x chessbot     # a PID means a game is live — WAIT
+# only once that prints nothing:
+kill -INT "$(ps -eo pid,args --no-headers | grep 'lichess-bot\.py' \
+             | grep -v 'bash -c' | grep -v grep | awk '{print $1}')"
+
+cd /home/dheirav/Code/lichess-bot && nohup ./venv/bin/python lichess-bot.py \
+  --config /home/dheirav/Code/ChessBot/lichess/config.yml -v > /tmp/bot.log 2>&1 &
 ```
 
-Note that `run.sh` builds first, so restarting deploys whatever is in the
-working tree. Do not restart it on top of unverified changes.
+`pgrep -x`, and `ps` with the wrappers filtered — **not** `pgrep -f`, which
+matches the shell running the check and produced false positives three separate
+times on 2026-08-15 (`BUGS.md` 9). `./lichess/run.sh` is the documented
+launcher but needs `LICHESS_BOT_TOKEN` exported in the calling shell; it also
+builds first, so it deploys whatever is in the working tree — do not use it on
+top of unverified changes.
 
+**SIGINT does not finish the game in progress** (`BUGS.md` 7). It cost eight
+minutes of clock in a rated game on 2026-08-15 and nearly a second forfeit.
 
-**No gate is running.** Three completed overnight on 2026-08-13 and are pooled
-and recorded above; their logs are kept:
+**Today's work is not externally validated.** The bot played one game on the
+post-6.2 build before being stopped, so the +121.2 and +155.0 are self-play
+only. An uninterrupted night of rated games is the outstanding measurement, and
+`ROADMAP.md` 6.2 explains why it matters more than the gate numbers do.
+
+**No gate is running.** Logs are kept; re-pool any with
+`./tests/pool-shards.sh <dir>/`.
 
 | directory | gate | pooled result |
 |---|---|---|
@@ -227,8 +243,20 @@ and recorded above; their logs are kept:
 | `shard-20260814-153213/` | `deltapruning`, 200cp margin | **−50.0 [−60.3, −39.7]** |
 | `shard-20260814-175417/` | `deltapruning`, 900cp margin | +7.1 [−2.9, +17.2] |
 | `shard-20260814-203000/` | `checkext` | **+23.0 [+13.3, +32.7]** — accepted |
+| `shard-20260815-112406/` | 6.2 SEE rebuild vs baseline | **+121.2 [+110.8, +131.9]** |
+| `shard-20260815-121725/` | **null control**, baseline vs itself | **50.00%** — no side bias |
+| `shard-20260815-131111/` | divisor 1 vs 2 | **−177.7 [−189.1, −166.7]** |
+| `shard-20260815-142024/` | divisor 3 vs 2 | +66.8 [+57.0, +76.7] |
+| `shard-20260815-153101/` | divisor 4 vs 2, scan | +98.1 [+80.9, +115.7] |
+| `shard-20260815-155045/` | divisor 6 vs 2, scan | +105.2 [+87.4, +123.5] |
+| `shard-20260815-160908/` | no penalty vs 2, scan | +152.0 [+133.1, +171.8] |
+| `shard-20260815-163117/` | **no penalty vs 2, full** | **+155.0 [+144.3, +166.0]** — shipped |
 
-Re-pool any of them with `./tests/pool-shards.sh <dir>/`.
+**Run a null control when a result is surprising.** The +121.2 was five times
+anything previously measured here, so the same harness was pointed at the
+baseline against itself from two paths: 1 120 games, exactly 50.00%, pentanomial
+`0-0-560-0-0`. It costs twenty minutes and is the difference between a
+measurement and a hope.
 
 **Always pool before believing a shard.** Shard 1 of the `ttaging` gate on its
 own read +13 with a CI spanning zero — "no difference demonstrated". Pooled over
@@ -272,6 +300,22 @@ It found two things on the way, and both are now the work:
   The controls are recorded there too (baseline against itself: 1 120 games,
   exactly 50.00%), and all of it is **self-play Elo, which does not convert to
   Lichess rating**.
+
+**What to pick up next**, in the order I would take them:
+
+1. **An uninterrupted night of rated games.** The single outstanding
+   measurement. Everything gained today is self-play, and self-play differs
+   from the pool in exactly the way that flatters a change. Whether +121 and
+   +155 survive contact with a real field decides how much every gate in this
+   project is worth — including the ones already banked. Watch the 2100-2300
+   band, which sat at 23% before today, rather than the rating headline.
+2. **The time-management fix** (`BUGS.md` 11). The bot spends under half its
+   clock; `parseGo` divides what is left by a hardcoded 30 and banks half the
+   increment. The instrument to gate it now exists (`--tc`), and the fix does
+   not — deliberately, because "spend more clock" is exactly the kind of
+   plausible argument that has been wrong twice here.
+3. **The general Texel tune** — the rest of 6.2, now over an evaluation whose
+   largest term has stopped shouting.
 
 Still open in the existing plan: 3.4 (futility/razoring — **read 3.1's result
 first**, the same bet swung 57 Elo on one constant), 3.5 (IID, the safe one),
