@@ -385,8 +385,15 @@ Stamp `<html data-theme="light">` on a copy to see the other theme: the default
 is whatever the renderer's `prefers-color-scheme` reports, so one screenshot
 only ever tests one of the two.
 
-**Not done, and cheap when wanted:** flipping the board when the bot played
-Black, an opening name, the `Book`/`Brilliant`/`Great`/`Miss` labels below, and
+**Board orientation follows the side being studied.** `--flip` starts from
+Black's view, the toggle beside the navigation (or `F`) turns it during reading,
+and `review-open.sh` passes `--flip` automatically when the bot played Black —
+half the archive, and a review of your own game shown from the opponent's side
+is one you have to read upside down. The evaluation bar reorients with it, and
+the coordinates label the edges of the *view* rather than of the board, which is
+where a flipped diagram usually goes wrong.
+
+**Not done, and cheap when wanted:** an opening name, the `Book`/`Brilliant`/`Great`/`Miss` labels below, and
 a batch index across the archive to pair with `tools/archive-profile.py`.
 
 ---

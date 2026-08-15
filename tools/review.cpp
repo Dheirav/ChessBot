@@ -239,7 +239,7 @@ std::string htmlReport(const PgnGame& game, const std::vector<HtmlMove>& moves,
                        const std::string& startFen, int startEval,
                        const std::string& engine, int depth,
                        const double acc[2], const double cpAvg[2],
-                       const int count[2]) {
+                       const int count[2], bool flip) {
     std::string j = "[";
     for (size_t i = 0; i < moves.size(); ++i) {
         const HtmlMove& m = moves[i];
@@ -259,11 +259,13 @@ std::string htmlReport(const PgnGame& game, const std::vector<HtmlMove>& moves,
     std::snprintf(head, sizeof head,
         "{\"white\":\"%s\",\"black\":\"%s\",\"result\":\"%s\",\"engine\":\"%s\","
         "\"depth\":%d,\"startFen\":\"%s\",\"startEval\":%d,"
-        "\"accW\":%.1f,\"accB\":%.1f,\"cpW\":%.1f,\"cpB\":%.1f,\"nW\":%d,\"nB\":%d}",
+        "\"accW\":%.1f,\"accB\":%.1f,\"cpW\":%.1f,\"cpB\":%.1f,\"nW\":%d,\"nB\":%d,"
+        "\"flip\":%s}",
         game.tags.white.c_str(), game.tags.black.c_str(), game.tags.result.c_str(),
         engine.c_str(), depth, startFen.c_str(), startEval,
         count[0] ? acc[0] : 0.0, count[1] ? acc[1] : 0.0,
-        count[0] ? cpAvg[0] : 0.0, count[1] ? cpAvg[1] : 0.0, count[0], count[1]);
+        count[0] ? cpAvg[0] : 0.0, count[1] ? cpAvg[1] : 0.0, count[0], count[1],
+        flip ? "true" : "false");
 
     std::string html = R"HTML(<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -325,6 +327,7 @@ h1 .vs{color:var(--faint);font-style:italic;font-size:22px;padding:0 6px}
 .bar{border-radius:4px;overflow:hidden;background:var(--bar-b);position:relative}
 .bar i{position:absolute;left:0;right:0;bottom:0;background:var(--bar-w);
   transition:height .18s ease}
+.bar.flip i{bottom:auto;top:0}
 .boardbox{container-type:inline-size;border-radius:5px;overflow:hidden;
   box-shadow:0 1px 3px rgba(0,0,0,.14)}
 /* minmax(0,1fr), not 1fr: a bare 1fr keeps an automatic minimum of its content,
@@ -427,6 +430,7 @@ svg{display:block;width:100%;height:150px;overflow:visible}
         <button onclick="go(-1)" title="Previous">&#8592;</button>
         <button onclick="go(1)" title="Next">&#8594;</button>
         <button onclick="go(999)" title="End">&#8677;</button>
+        <button onclick="flipBoard()" title="Flip the board (F)" id="flipbtn">&#8645;</button>
         <span class="ply-count mono" id="pos"></span>
       </div>
     </div>
@@ -447,31 +451,44 @@ svg{display:block;width:100%;height:150px;overflow:visible}
 const H=__HEAD__, M=__MOVES__, P=__PIECES__;
 const HAVE_IMG=Object.keys(P).length===12;
 const S={k:"♚",q:"♛",r:"♜",b:"♝",n:"♞",p:"♟"};
-let cur=-1;
+let cur=-1, flipped=!!H.flip;
 const winPct=cp=>50+50*(2/(1+Math.exp(-0.00368208*cp))-1);
 
 function sq(u){ if(!u||u.length<4)return[];
   const ix=t=>(8-(+t[1]))*8+(t.charCodeAt(0)-97);
   return[ix(u.slice(0,2)),ix(u.slice(2,4))]; }
-function board(fen,uci){
-  const rows=fen.split(" ")[0].split("/"), b=document.getElementById("board"), mark=sq(uci);
-  b.innerHTML="";
+// The FEN is unpacked into 64 squares first, so drawing order is a separate
+// decision from parsing. Flipping is then a 180-degree rotation -- 63-i, both
+// rank and file -- rather than a second parser that reads the board backwards.
+function unpack(fen){
+  const a=new Array(64).fill(""), rows=fen.split(" ")[0].split("/");
   for(let r=0;r<8;r++){let f=0;
     for(const ch of rows[r]){
-      if(ch>="1"&&ch<="8"){for(let k=0;k<+ch;k++,f++)cell(b,r,f,"",false,mark)}
-      else cell(b,r,f++,ch,ch===ch.toUpperCase(),mark);
+      if(ch>="1"&&ch<="8")f+=+ch; else a[r*8+(f++)]=ch;
     }}
+  return a;
 }
-function cell(b,r,f,p,white,mark){
+function board(fen,uci){
+  const a=unpack(fen), mark=sq(uci), b=document.getElementById("board");
+  b.innerHTML="";
+  for(let i=0;i<64;i++){
+    const idx=flipped?63-i:i;
+    cell(b,idx>>3,idx&7,a[idx],mark,i);
+  }
+}
+function cell(b,r,f,p,mark,at){
   const d=document.createElement("div");
+  const white=p&&p===p.toUpperCase();
   const g=p?(HAVE_IMG?p.toUpperCase():S[p.toLowerCase()]||""):"";
   d.className=((r+f)%2?"dk":"lt")+(mark.includes(r*8+f)?" hl":"");
   if(g){
     if(HAVE_IMG){const im=new Image();im.src=P[(white?"w":"b")+g];im.alt="";d.appendChild(im)}
     else{const s=document.createElement("span");s.className=white?"wp":"bp";s.textContent=g;d.appendChild(s)}
   }
-  if(r===7)d.insertAdjacentHTML("beforeend",'<span class="co f">'+"abcdefgh"[f]+'</span>');
-  if(f===0)d.insertAdjacentHTML("beforeend",'<span class="co r">'+(8-r)+'</span>');
+  // Coordinates belong to the edges of the *view*, not of the board, or they
+  // end up in the middle of a flipped diagram.
+  if(at>=56)d.insertAdjacentHTML("beforeend",'<span class="co f">'+"abcdefgh"[f]+'</span>');
+  if(at%8===0)d.insertAdjacentHTML("beforeend",'<span class="co r">'+(8-r)+'</span>');
   b.appendChild(d);
 }
 const fmt=cp=>(cp>0?"+":"")+(cp/100).toFixed(2);
@@ -507,16 +524,20 @@ function render(){
   const m=cur<0?null:M[cur], ev=m?m.ev:H.startEval;
   board(m?m.fen:H.startFen, m?m.uci:"");
   document.getElementById("bar").style.height=winPct(ev).toFixed(1)+"%";
-  document.getElementById("pos").textContent=(cur+1)+" / "+M.length;
+  document.querySelector(".bar").classList.toggle("flip",flipped);
+  document.getElementById("pos").textContent=
+    (flipped?H.black:H.white)+" below · "+(cur+1)+" / "+M.length;
   document.querySelectorAll(".ply").forEach(e=>e.classList.toggle("sel",+e.dataset.i===cur));
   const s=document.querySelector(".ply.sel"); if(s)s.scrollIntoView({block:"nearest"});
   document.getElementById("glab2").textContent=fmt(ev);
   detail(); marker();
 }
 function go(d){ cur=d===-999?-1:d===999?M.length-1:Math.max(-1,Math.min(M.length-1,cur+d)); render(); }
+function flipBoard(){ flipped=!flipped; render(); }
 document.addEventListener("keydown",e=>{
   if(e.key==="ArrowLeft")go(-1);else if(e.key==="ArrowRight")go(1);
-  else if(e.key==="Home")go(-999);else if(e.key==="End")go(999);else return;
+  else if(e.key==="Home")go(-999);else if(e.key==="End")go(999);
+  else if(e.key==="f"||e.key==="F")flipBoard();else return;
   e.preventDefault();
 });
 
@@ -599,7 +620,7 @@ int main(int argc, char** argv) {
     //   --engine ./chessbot --engine-arg --uci
     std::vector<std::string> engineArgs;
     std::string annotateOut, htmlOut;
-    bool explain = false;
+    bool explain = false, flip = false;
 
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
@@ -610,6 +631,7 @@ int main(int argc, char** argv) {
         else if (a == "--engine-arg") engineArgs.push_back(next());
         else if (a == "--annotate")   annotateOut = next();
         else if (a == "--html")       htmlOut = next();
+        else if (a == "--flip")       flip = true;
         else if (a == "--explain")    explain = true;
         else if (a[0] != '-')     pgnPath = a;
         else { std::printf("unknown option: %s\n", a.c_str()); return 1; }
@@ -617,7 +639,7 @@ int main(int argc, char** argv) {
     if (pgnPath.empty()) {
         std::printf("usage: review <game.pgn> [--engine <path>] [--engine-arg <a>]\n"
                     "                 [--depth N] [--hash MB] [--annotate out.pgn]\n"
-                    "                 [--html out.html] [--explain]\n"
+                    "                 [--html out.html] [--flip] [--explain]\n"
                     "  default engine is /usr/games/stockfish; ChessBot needs --engine-arg --uci\n");
         return 1;
     }
@@ -832,7 +854,7 @@ int main(int argc, char** argv) {
         const double accArr[2] = {accW, accB};
         const double cpArr[2] = {cpW, cpB};
         f << htmlReport(game, rows, start.getFEN(), score[0], enginePath, depth,
-                        accArr, cpArr, count);
+                        accArr, cpArr, count, flip);
         std::printf("\nreport written to %s\n", htmlOut.c_str());
     }
     if (!annotateOut.empty()) {
