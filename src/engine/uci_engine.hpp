@@ -223,7 +223,15 @@ private:
             haveScore_ = true;
         } else if (line.compare(p, 5, "mate ") == 0) {
             int n = std::atoi(line.c_str() + p + 5);
-            lastScore_ = (n >= 0) ? (30000 - n * 2) : (-30000 - n * 2);
+            // n == 0 is not "I mate in zero" — it is the score of a position
+            // that is *already* checkmated, which every engine reports for the
+            // side to move there. Reading it as a win handed +30000 to the side
+            // that had just been mated, so anything searching a terminal
+            // position saw the mating move as the worst blunder in the game.
+            // `tests/match` never met this because it detects mate itself
+            // before asking for a move; `tools/review` searches all n+1
+            // positions and did.
+            lastScore_ = (n > 0) ? (30000 - n * 2) : (-30000 - n * 2);
             haveScore_ = true;
         }
     }

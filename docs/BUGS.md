@@ -1,4 +1,4 @@
-# Known defects — 2026-08-14
+# Known defects — 2026-08-15
 
 Bugs the engine is known to have, ordered by what fixing them is worth. Each
 entry names the evidence, so a fix can be checked against the thing that found
@@ -397,6 +397,64 @@ The lesson is the cheap one, and it cost a day to learn three times: a
 documented command that has never been run is a guess. The `shard-gate.sh` one
 sat at the top of `HANDOFF.md` and was carried forward through two separate
 edits before anyone tried it.
+
+---
+
+## 10. `mate 0` read as a win for the side that had just been mated — **FIXED 2026-08-15**
+
+Not an engine defect — an instrument one, in the UCI score parser that the gate
+harness and the review tool share.
+
+`captureScore` (`uci_engine.hpp`) mapped `score mate n` to `30000 - 2n` whenever
+`n >= 0`. But a UCI engine reports `score mate 0` for a position that is
+*already* checkmate, so that branch handed **+30000 to the side to move — the
+side that had just been mated**. Every mate in the archive was therefore scored
+as a 2 000-centipawn swing away from the player who delivered it.
+
+Confirmed against the analysing engine rather than inferred:
+
+```
+position fen R6k/5ppp/8/8/8/8/8/6K1 b - - 0 1
+info depth 0 score mate 0
+```
+
+Stalemate, for contrast, reports `score cp 0` and was never affected.
+
+**The gates are not affected**, which is worth stating precisely because the
+parser is shared with `tests/match`. The harness tests for checkmate itself
+before asking an engine to move (`match.cpp:195-199`), so a mated position never
+reaches `bestMove()` and `mate 0` never reaches the adjudicator. `tools/review`
+searches all *n+1* positions of a game, including the terminal one, and did.
+
+### What it cost the numbers
+
+This is the part to be honest about, because the corrupted figures were
+published as a baseline. The whole-archive profile in `REVIEW.md` was measured
+with this bug live, and every game the bot won by mate carried a phantom
+2 000-centipawn blunder attributed to the winning move.
+
+Over the 62-game archive, average centipawn loss falls from **51.9 to 20.8**,
+and the correction is proportional to how often the bot delivered mate:
+
+| opponent band | avg cp loss, buggy | corrected |
+|---|---|---|
+| under 1500 | 86.4 | **14.2** |
+| 1500-1900 | 64.3 | **19.3** |
+| 1900-2100 | 45.9 | **24.3** |
+| 2100-2300 | 27.5 | **22.0** |
+| 2300+ | 29.2 | **29.2** |
+
+The 2300+ row is unchanged because the bot has never mated an opponent in that
+band — which is the check that the mechanism is understood rather than merely
+plausible.
+
+That gradient is also what made "accuracy is flat across opponent strength" look
+true when the sweep was first read. It is not flat; it declines monotonically.
+See `ROADMAP.md` 6.1.
+
+**A reference measured through a broken instrument is worse than no reference**,
+because it gets quoted. `REVIEW.md`'s 92.6% archive accuracy and its
+won/drawn/lost table predate this fix and have not been regenerated.
 
 ---
 

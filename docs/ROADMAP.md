@@ -25,7 +25,14 @@ Every measurement this week points at it:
 | Phase 4 gate: **+6.1, CI spans zero** | the corrected evaluation is not demonstrably better than the broken one |
 | `deltapruning` **−50 → +7.1** on a margin change | pruning that trusts the static score is fragile because the score is |
 | `checkext` **+23.0**, costing 9.2% *more* nodes | quality per node wins; speed per node has returned ~zero, three times |
-| review says **"no term accounts for it"** | there are positions this evaluation cannot see at all |
+| accuracy **96.6% → 93.2%** as opponents strengthen | a small uniform quality gap, not rare catastrophes — 9 blunders in 2 575 moves |
+| `threats` swings **±830 at p90**, more than material | the largest term in the evaluation double-counts material (6.2) |
+
+~~review says "no term accounts for it" → there are positions this evaluation
+cannot see at all~~ — **withdrawn 2026-08-15.** It was one example, and the
+whole-archive sweep put it at 3%. Struck rather than deleted because it drove
+the ordering of this file for a day, and a reader who remembers it should find
+out what happened to it. See 6.1.
 
 Phase 4 made the evaluation *correct* — mirror-symmetric, no colour-blind
 constants, honest "defended". Correct is not good. It remains hand-written
@@ -40,25 +47,93 @@ diminishing returns. That is the argument for Phase 6 below being first.
 
 Not in `PLAN.md`. The instrument for it did not exist until this week.
 
-**6.1 Find what the evaluation cannot see.** `./tools/review --explain` over the
-game archive, collecting every move where the analysing engine reports a large
-loss and no term accounts for it. Those are the blind spots, named. This is a
-scripted afternoon and needs no engine changes; it produces the list everything
-else in this phase works from.
+**6.1 Find what the evaluation cannot see** — **DONE 2026-08-15, and the
+hypothesis did not survive.**
 
-**6.2 Retune piece values and term weights.** The values in `evaluation.cpp` are
-conventional guesses. Tuning them against real game outcomes (Texel-style: pick
-the weights that best predict results over a large position set) is the standard
-method, and the position set already exists — the game archive plus the 23 603
-positions `evalref` generates.
+`./tools/review --explain` over all 62 games, Stockfish 16 at depth 14, 2 575 of
+the bot's own moves. The prediction was a list of positions this evaluation is
+blind to. There is no such list:
 
-*Verify:* each candidate weight set is a full A/B, gated on nodes with the
-two-binary path. `evalref` will show a diff; `bench` will move. Expect the tune
-to be worth more than everything remaining in Phases 3 and 5 combined.
+| | |
+|---|---|
+| criticised moves, the bot's own | 158 — 9 blunders, 37 mistakes, 112 inaccuracies |
+| **no term accounts for the loss** | **4 (3%)** |
+| played move *was* the engine's choice (search noise) | 5 (3%) |
 
-**6.3 Add the terms the blind-spot list demands**, and only those. Do not add
-terms speculatively — that is how the current evaluation acquired 25 of them,
-several of which were wrong for months.
+The terms move on **97%** of this engine's own errors. The premise came from a
+single example — `13.Qa8+` in CTGzqoeY — and that was `BUGS.md` 1, the
+repetition blindness, since fixed. One sweep retired a phase.
+
+Two things had to be repaired before the numbers meant anything, and both are
+the same lesson: **the instrument was wrong in the direction that flattered the
+conclusion.** `BUGS.md` 10 (`mate 0` scored backwards) inflated cp loss most in
+exactly the games the bot won, which made accuracy look flat across opponent
+strength. Corrected, it declines monotonically:
+
+| opponent band | games | score | accuracy | avg cp loss |
+|---|---|---|---|---|
+| under 1500 | 17 | 97% | 96.6% | 14.2 |
+| 1500-1900 | 18 | 86% | 95.4% | 19.3 |
+| 1900-2100 | 11 | 73% | 94.6% | 24.3 |
+| 2100-2300 | 13 | 23% | 93.9% | 22.0 |
+| 2300+ | 3 | 0% | 93.2% | 29.2 |
+
+Overall **94.9%, 20.8 cp**. Note the shape: 3.4 accuracy points separate the
+band the bot beats 97% of the time from the one it has never scored in. The
+deficit is not rare catastrophes — 9 blunders in 2 575 moves — it is a small,
+uniform quality gap that compounds. **That is an argument for tuning weights,
+not for hunting blunders.**
+
+**6.2 Retune piece values and term weights** — *now first, and it has a named
+target.*
+
+The values in `evaluation.cpp` are conventional guesses. Tuning them against
+real game outcomes (Texel-style: pick the weights that best predict results over
+a large position set) is the standard method, and the position set already
+exists — the game archive plus the 23 603 positions `evalref` generates.
+
+6.1 named where to start. Across the 154 attributed errors, `threats` is the
+largest-magnitude term in the evaluation — larger than material:
+
+| term | n | median \|Δ\| | p90 | max |
+|---|---|---|---|---|
+| **threats** | 128 | **148** | **830** | **1555** |
+| material | 81 | 125 | 550 | 1060 |
+| piece placement | 83 | 45 | 90 | 140 |
+| mobility | 47 | 30 | 82 | 108 |
+
+It leads 80 of the 154 explanations, and **49 of those 80 involve no material
+change at all**. A positional term that routinely swings more than a queen is
+not measuring position. Reading `evaluation.cpp:503-553` says why:
+
+- `hangingPiecePenalty` subtracts the **full piece value** for any piece
+  attacked and not defended — regardless of whose move it is, whether the
+  attacker survives the recapture, or whether the piece can simply step away. A
+  queen merely *en prise* reads −900, as though already lost. That is material
+  counted twice.
+- the threat bonuses accumulate per *(attacker, target)* pair, uncapped: three
+  attackers on one piece score three times.
+- `see.cpp` exists, is unit-tested, and gated at +25.6 Elo for move ordering.
+  The evaluation does not consult it.
+- a piece attacked and undefended is *also* charged by the separate `undefended`
+  term.
+
+The comment above it reads "much more aggressive evaluation", which describes
+what it does rather than what it should do. This is a magnitude problem, not a
+correctness one — `evalref`'s mirror-symmetry check passes.
+
+*Verify:* rebuilding the hanging term on SEE is an evaluation change, so it is a
+full A/B gated on nodes through the two-binary path (`BUGS.md` 8), not a toggle.
+`evalref` will diff and `bench` will move; read both before regenerating either.
+Do this **before** the general tune — tuning weights over a term that
+double-counts material would only find weights that paper over it.
+
+**6.3 Add the terms a blind-spot list demands** — **deferred; there is no such
+list.** 6.1 was supposed to produce it and returned four moves, one of which is
+search noise. Do not add terms speculatively — that is how the current
+evaluation acquired 25 of them, several of which were wrong for months. Re-run
+6.1 after 6.2 lands; a corrected `threats` may expose blind spots it was
+previously masking.
 
 ---
 
@@ -99,16 +174,25 @@ wrong twice about where the time goes, and both corrections came from measuring.
 ## Open defects
 
 `BUGS.md` 6 (deterministic play) and 7 (restarting mid-game forfeits) are the
-only ones left. 6 matters more than it looks: results against a given opponent
-are correlated, so the 49-game archive is worth less than 49 games of evidence,
-and every accuracy figure derived from it inherits that.
+only ones left; 10 was found and fixed by the 6.1 sweep. 6 matters more than it
+looks: results against a given opponent are correlated, so the 62-game archive
+is worth less than 62 games of evidence, and every accuracy figure derived from
+it — including the table in 6.1 — inherits that.
 
 ---
 
 ## Game review
 
-R0-R4 are done and the tool works. What is left is **using** it — 6.1 above is
-the highest-value application, and it is engine work rather than a feature.
+R0-R4 are done and the tool works. It has now been **used**: 6.1 was its first
+job as an instrument, and it paid for itself twice over — once by retiring 6.3,
+once by finding `BUGS.md` 10 in its own scoring.
+
+The residue is a 3% phantom-loss floor: five criticised moves where the played
+move *was* the engine's choice, worst at 16.7 win%, caused by successive
+searches disagreeing across a shared transposition table. Small enough to leave
+alone, large enough that single inaccuracies under ~5 win% should not be read as
+real. `REVIEW.md`'s archive profile still predates `BUGS.md` 10 and needs
+regenerating before it is quoted again.
 
 If it is ever to be shipped to players rather than used as an instrument, the
 constraint in `REVIEW.md` still stands: at 2065 this engine is a peer of the
