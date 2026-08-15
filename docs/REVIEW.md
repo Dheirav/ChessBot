@@ -338,6 +338,29 @@ graph and the glyphs; it cannot give you what this engine's evaluation thought.
 So the two outputs answer different questions and both are kept. Use
 `--annotate` to study the game, `--html` to study the engine.
 
+## R7. Reading a game quickly — **DONE 2026-08-16**
+
+Two small things that change how the report is used.
+
+**The engine's move, drawn.** A criticised move used to say "best was Qb7" and
+leave you to find Qb7 on the board. It is now an arrow, stopping short of the
+destination so the arrowhead does not cover the piece standing there. It
+rotates with the board, and appears only on criticised moves — an arrow on
+every move is wallpaper.
+
+**Jump between mistakes.** `N` and `P`, or the two marked buttons. An
+eighty-move game has three moves worth looking at, and stepping through a
+hundred and sixty plies to find them is exactly the reading this tool exists to
+save.
+
+Both were verified by rendering, in both orientations. Worth noting the check
+that nearly went wrong: the first screenshot showed an empty board and looked
+like a scripting error, but dumping the DOM showed 37 KB of squares present and
+the right move selected. The window was simply too narrow for the layout I was
+screenshotting. **A blank render is not evidence of a blank page.**
+
+---
+
 ## R6. Time — **DONE 2026-08-16**
 
 Every Lichess and Chess.com export writes `{[%clk 0:09:59.9]}` after each move,

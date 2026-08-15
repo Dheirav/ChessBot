@@ -25,11 +25,18 @@ JOBS="${JOBS:-3}"
     exit 1
 }
 mkdir -p "$CACHE"
+RECVER=$("$REPO/tools/review" --record-version 2>/dev/null | tr -d '[:space:]')
+[ -n "$RECVER" ] || { echo "cannot ask tools/review for its record version" >&2; exit 1; }
+export RECVER
 
 one() {
     pgn="$1"; name=$(basename "$pgn" .pgn); id="${name##* - }"
     out="$CACHE/${id:-$name}.json"
-    [ -s "$out" ] && return 0
+    # A cached record from an older build is incomplete rather than wrong, and
+    # an archive assembled from a mix of the two says nothing about which games
+    # lack what. Re-review anything that is not the current format.
+    if [ -s "$out" ] && grep -q "\"v\":$RECVER" "$out"; then return 0; fi
+    rm -f "$out"
     # Orient each game to the side being studied; the picker then never shows a
     # game upside down.
     nice -n 10 "$REPO/tools/review" "$pgn" --json "$out" --me "$BOT" "${EXTRA[@]}" >/dev/null 2>&1 \

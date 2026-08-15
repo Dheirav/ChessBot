@@ -132,7 +132,7 @@ struct TermDelta { const char* name; int delta; };
 // One row of the HTML report. Collected during the pass that prints the text
 // report, so the two can never disagree about what a move was worth.
 struct HtmlMove {
-    std::string san, bestSan, label, terms, uci;
+    std::string san, bestSan, label, terms, uci, bestUci;
     int ms = -1;        // milliseconds spent on this move, -1 when unknown
     int leftMs = -1;    // clock remaining after it
     int evalAfter;      // centipawns, White's point of view, after this move
@@ -238,6 +238,14 @@ std::string pieceImages() {
 // that breaks on the machine you sent it to. Pieces are Unicode glyphs for the
 // same reason — an image set would have to be embedded or fetched, and both are
 // worse than a character that every system already has.
+// Bumped whenever a record gains or changes a field. Cached records from an
+// older tool are not wrong, they are incomplete -- when the clock and the
+// best-move arrow landed, an archive rebuilt from cache silently produced 74
+// games with neither and 6 with both, and nothing said so. A version the cache
+// can compare against is the difference between a stale record and a stale
+// record that announces itself.
+constexpr int RECORD_VERSION = 2;
+
 // One game as a record the page can load. Kept separate from the page itself so
 // an archive of seventy games is seventy of these inside one document, rather
 // than seventy documents each carrying its own copy of the stylesheet and the
@@ -259,11 +267,11 @@ std::string gameRecord(const PgnGame& game, const std::vector<HtmlMove>& moves,
         std::snprintf(buf, sizeof buf,
             "%s{\"n\":%zu,\"w\":%s,\"san\":\"%s\",\"ev\":%d,"
             "\"wp\":%.1f,\"cp\":%d,\"best\":\"%s\",\"label\":\"%s\","
-            "\"terms\":\"%s\",\"uci\":\"%s\",\"ms\":%d,\"left\":%d}",
+            "\"terms\":\"%s\",\"uci\":\"%s\",\"bu\":\"%s\",\"ms\":%d,\"left\":%d}",
             i ? "," : "", i, m.white ? "true" : "false", m.san.c_str(),
             m.evalAfter, m.wpLoss, m.cpLoss,
             m.bestSan.c_str(), m.label.c_str(), m.terms.c_str(), m.uci.c_str(),
-            m.ms, m.leftMs);
+            m.bestUci.c_str(), m.ms, m.leftMs);
         j += buf;
     }
     j += "]";
@@ -273,12 +281,13 @@ std::string gameRecord(const PgnGame& game, const std::vector<HtmlMove>& moves,
         "{\"white\":\"%s\",\"black\":\"%s\",\"result\":\"%s\",\"engine\":\"%s\","
         "\"depth\":%d,\"startFen\":\"%s\",\"startEval\":%d,"
         "\"accW\":%.1f,\"accB\":%.1f,\"cpW\":%.1f,\"cpB\":%.1f,\"nW\":%d,\"nB\":%d,"
-        "\"flip\":%s,\"blunders\":%d,\"tc\":\"%s\"}",
+        "\"flip\":%s,\"blunders\":%d,\"tc\":\"%s\",\"v\":%d}",
         game.tags.white.c_str(), game.tags.black.c_str(), game.tags.result.c_str(),
         engine.c_str(), depth, startFen.c_str(), startEval,
         count[0] ? acc[0] : 0.0, count[1] ? acc[1] : 0.0,
         count[0] ? cpAvg[0] : 0.0, count[1] ? cpAvg[1] : 0.0, count[0], count[1],
-        flip ? "true" : "false", blunders, game.tags.timeControl.c_str());
+        flip ? "true" : "false", blunders, game.tags.timeControl.c_str(),
+        RECORD_VERSION);
 
     return std::string("{\"head\":") + head + ",\"moves\":" + j + "}";
 }
@@ -293,7 +302,8 @@ std::string htmlReport(const std::string& gamesJson, const std::string& title) {
   --bg:#eceff3; --panel:#fff; --sunk:#f5f7f9; --ink:#0f1319; --dim:#5a6472; --faint:#8b95a2;
   --line:#dde3ea; --accent:#a8712c;
   --sq-light:#d6dde5; --sq-dark:#6a7889; --sq-mark:#d7a13f;
-  --blunder:#b02a1f; --mistake:#a96a09; --inacc:#7f7108; --ok:#3f6f45;
+  --blunder:#b02a1f; --mistake:#a96a09; --inacc:#7f7108; --ok:#3f6f45; --arrow:#2f7d4f;
+  --num:#000;
   --shade:rgba(15,19,25,.055); --shade2:rgba(15,19,25,.10);
   --wp-fill:#fcfcfa; --wp-edge:#0f1319; --bp-fill:#131820; --bp-edge:rgba(255,255,255,.34);
   --bar-w:#f2f3f0; --bar-b:#2b3138;
@@ -302,7 +312,8 @@ std::string htmlReport(const std::string& gamesJson, const std::string& title) {
   --bg:#0d1013; --panel:#161a1f; --sunk:#11151a; --ink:#e9edf2; --dim:#98a3b1; --faint:#6f7a87;
   --line:#252c34; --accent:#d9a05b;
   --sq-light:#7c8795; --sq-dark:#4a5560; --sq-mark:#e0ad55;
-  --blunder:#e35c4d; --mistake:#dd9a37; --inacc:#c3ad32; --ok:#6fa871;
+  --blunder:#e35c4d; --mistake:#dd9a37; --inacc:#c3ad32; --ok:#6fa871; --arrow:#5fbf85;
+  --num:#fff;
   --shade:rgba(233,237,242,.06); --shade2:rgba(233,237,242,.12);
   --wp-fill:#f6f7f4; --wp-edge:#090c10; --bp-fill:#0a0d12; --bp-edge:rgba(255,255,255,.72);
   --bar-w:#e8eae6; --bar-b:#1b2026;
@@ -311,7 +322,8 @@ std::string htmlReport(const std::string& gamesJson, const std::string& title) {
   --bg:#0d1013; --panel:#161a1f; --sunk:#11151a; --ink:#e9edf2; --dim:#98a3b1; --faint:#6f7a87;
   --line:#252c34; --accent:#d9a05b;
   --sq-light:#7c8795; --sq-dark:#4a5560; --sq-mark:#e0ad55;
-  --blunder:#e35c4d; --mistake:#dd9a37; --inacc:#c3ad32; --ok:#6fa871;
+  --blunder:#e35c4d; --mistake:#dd9a37; --inacc:#c3ad32; --ok:#6fa871; --arrow:#5fbf85;
+  --num:#fff;
   --shade:rgba(233,237,242,.06); --shade2:rgba(233,237,242,.12);
   --wp-fill:#f6f7f4; --wp-edge:#090c10; --bp-fill:#0a0d12; --bp-edge:rgba(255,255,255,.72);
   --bar-w:#e8eae6; --bar-b:#1b2026;
@@ -350,7 +362,10 @@ h1 .vs{color:var(--faint);font-style:italic;font-size:22px;padding:0 6px}
   transition:height .18s ease}
 .bar.flip i{bottom:auto;top:0}
 .boardbox{container-type:inline-size;border-radius:5px;overflow:hidden;
-  box-shadow:0 1px 3px rgba(0,0,0,.14)}
+  box-shadow:0 1px 3px rgba(0,0,0,.14);position:relative}
+/* The engine's preferred move, drawn over the board. "Best was Qb7" makes you
+   find Qb7 yourself; an arrow is the same information without the search. */
+.arrows{position:absolute;inset:0;pointer-events:none;width:100%;height:100%}
 /* minmax(0,1fr), not 1fr: a bare 1fr keeps an automatic minimum of its content,
    so a glyph larger than its share silently stretches that rank and the board
    stops being a grid of equal squares. */
@@ -377,12 +392,13 @@ h1 .vs{color:var(--faint);font-style:italic;font-size:22px;padding:0 6px}
 .co{position:absolute;font:600 2.5cqi/1 ui-monospace,SFMono-Regular,Menlo,monospace;opacity:.7}
 .co.f{right:5%;bottom:3%}.co.r{left:5%;top:3%}
 .lt .co{color:var(--sq-dark)}.dk .co{color:var(--sq-light)}
-.nav{display:flex;gap:6px;padding:0 14px 13px;align-items:center}
+.nav{display:flex;gap:6px;padding:0 14px 13px;align-items:center;flex-wrap:wrap}
 button{font:inherit;font-size:14px;padding:5px 11px;border:1px solid var(--line);
   border-radius:6px;background:var(--panel);color:var(--ink);cursor:pointer;line-height:1.3}
 button:hover{background:var(--shade)}
 button:focus-visible,.ply:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
-.ply-count{margin-left:auto;color:var(--faint);font-size:12.5px}
+.ply-count{margin-left:auto;color:var(--faint);font-size:12.5px;white-space:nowrap}
+.warn{color:var(--mistake);padding:5px 8px;letter-spacing:-1px}
 
 /* The move under inspection, given the room the explanation needs. */
 .detail{padding:15px 17px;min-height:118px;border-left:3px solid var(--line)}
@@ -415,7 +431,9 @@ button:focus-visible,.ply:focus-visible{outline:2px solid var(--accent);outline-
 
 .sheet{max-height:64vh;overflow-y:auto;padding:6px}
 .row{display:grid;grid-template-columns:32px 1fr 1fr;gap:3px;align-items:stretch}
-.no{color:var(--faint);font-size:12px;padding:5px 5px 0 0;text-align:right;
+/* The move numbers are the column you navigate by, so they are set at full
+   strength rather than as the faint furniture they started out as. */
+.no{color:var(--num);font-weight:650;font-size:12.5px;padding:5px 5px 0 0;text-align:right;
   font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
 .ply{display:flex;align-items:baseline;gap:7px;padding:4px 8px;border-radius:5px;
   border:0;background:transparent;color:var(--ink);cursor:pointer;text-align:left;width:100%;
@@ -448,7 +466,8 @@ svg{display:block;width:100%;height:150px;overflow:visible}
     <div class="card">
       <div class="play">
         <div class="bar"><i id="bar" style="height:50%"></i></div>
-        <div class="boardbox"><div id="board"></div></div>
+        <div class="boardbox"><div id="board"></div>
+    <svg class="arrows" id="arrow" viewBox="0 0 8 8" aria-hidden="true"></svg></div>
       </div>
       <div class="nav">
         <button onclick="go(-999)" title="Start">&#8676;</button>
@@ -456,6 +475,8 @@ svg{display:block;width:100%;height:150px;overflow:visible}
         <button onclick="go(1)" title="Next">&#8594;</button>
         <button onclick="go(999)" title="End">&#8677;</button>
         <button onclick="flipBoard()" title="Flip the board (F)" id="flipbtn">&#8645;</button>
+        <button onclick="jump(-1)" title="Previous mistake (P)" class="warn">&#9666;&#9888;</button>
+        <button onclick="jump(1)" title="Next mistake (N)" class="warn">&#9888;&#9656;</button>
         <span class="ply-count mono" id="pos"></span>
       </div>
     </div>
@@ -551,8 +572,9 @@ function detail(){
   const d=document.getElementById("detail");
   d.className="card detail"+(cur>=0&&M[cur].wp>=5?" "+M[cur].label:"");
   if(cur<0){
-    d.innerHTML='<div class="dline">Starting position. Click any move, or use the '+
-      '<b>&larr;</b> and <b>&rarr;</b> keys.</div>';return;
+    d.innerHTML='<div class="dline">Starting position. Click any move, or use '+
+      '<b>&larr;</b> <b>&rarr;</b> to step, <b>N</b> and <b>P</b> to jump between '+
+      'mistakes, <b>F</b> to flip the board.</div>';return;
   }
   const m=M[cur];
   let h='<div class="dhead"><span class="dmove">'+((cur>>1)+1)+(m.w?". ":"… ")+label(m)+'</span>'+
@@ -575,9 +597,28 @@ function detail(){
     (m.left>=0?', leaving '+secs(m.left)+' on the clock':'')+'.</div>';
   d.innerHTML=h;
 }
+function arrow(u){
+  const g=document.getElementById("arrow");
+  if(!u||u.length<4){g.innerHTML="";return}
+  const at=t=>{
+    const idx=(8-(+t[1]))*8+(t.charCodeAt(0)-97), d=flipped?63-idx:idx;
+    return [(d%8)+0.5,(d>>3)+0.5];
+  };
+  const [x1,y1]=at(u.slice(0,2)), [x2,y2]=at(u.slice(2,4));
+  // Stop short of the destination so the arrowhead sits on the square rather
+  // than covering the piece standing on it.
+  const dx=x2-x1, dy=y2-y1, len=Math.hypot(dx,dy)||1;
+  const ex=x2-dx/len*0.32, ey=y2-dy/len*0.32;
+  g.innerHTML=
+    '<defs><marker id="ah" markerWidth="3.2" markerHeight="3.2" refX="1.6" refY="1.6" orient="auto">'+
+    '<path d="M0,0 L3.2,1.6 L0,3.2 z" fill="var(--arrow)"/></marker></defs>'+
+    '<line x1="'+x1+'" y1="'+y1+'" x2="'+ex+'" y2="'+ey+'" stroke="var(--arrow)" '+
+    'stroke-width="0.15" stroke-linecap="round" marker-end="url(#ah)" opacity=".85"/>';
+}
 function render(){
   const m=cur<0?null:M[cur], ev=m?m.ev:H.startEval;
   board(POS[cur+1], m?m.uci:"");
+  arrow(m && m.wp>=5 ? m.bu : "");
   document.getElementById("bar").style.height=winPct(ev).toFixed(1)+"%";
   document.querySelector(".bar").classList.toggle("flip",flipped);
   document.getElementById("pos").textContent=
@@ -589,10 +630,21 @@ function render(){
 }
 function go(d){ cur=d===-999?-1:d===999?M.length-1:Math.max(-1,Math.min(M.length-1,cur+d)); render(); }
 function flipBoard(){ flipped=!flipped; render(); }
+// An eighty-move game has three moves worth looking at. Stepping through a
+// hundred and sixty plies to find them is the reading this tool exists to save.
+function jump(dir){
+  const bad=M.map((m,i)=>m.wp>=5?i:-1).filter(i=>i>=0);
+  if(!bad.length)return;
+  const next=dir>0?bad.find(i=>i>cur):[...bad].reverse().find(i=>i<cur);
+  cur = next===undefined ? (dir>0?bad[0]:bad[bad.length-1]) : next;
+  render();
+}
 document.addEventListener("keydown",e=>{
   if(e.key==="ArrowLeft")go(-1);else if(e.key==="ArrowRight")go(1);
   else if(e.key==="Home")go(-999);else if(e.key==="End")go(999);
-  else if(e.key==="f"||e.key==="F")flipBoard();else return;
+  else if(e.key==="f"||e.key==="F")flipBoard();
+  else if(e.key==="n"||e.key==="N")jump(1);
+  else if(e.key==="p"||e.key==="P")jump(-1);else return;
   e.preventDefault();
 });
 
@@ -715,6 +767,15 @@ loadGame(0);
 }  // namespace
 
 int main(int argc, char** argv) {
+    // Answered before anything is initialised: a cache asks the binary what
+    // format it writes, and the move-table loader prints to stdout, which would
+    // otherwise end up in the answer.
+    for (int i = 1; i < argc; ++i)
+        if (std::string(argv[i]) == "--record-version") {
+            std::printf("%d\n", RECORD_VERSION);
+            return 0;
+        }
+
     initMoveLookupTables();
 
     std::string pgnPath, enginePath = "/usr/games/stockfish";
@@ -959,7 +1020,9 @@ int main(int argc, char** argv) {
             }
             r.san = san[i];
             r.bestSan = (bestSan[i].empty() ? best[i] : bestSan[i]);
-            if (r.bestSan == r.san) r.bestSan.clear();
+            r.bestUci = best[i];
+            if (r.bestSan == r.san) { r.bestSan.clear(); r.bestUci.clear(); }
+            if (r.bestUci == r.uci) r.bestUci.clear();
             r.label = label;
             r.terms = termsText;
             r.uci = toUciMove(game.moves[i]);
