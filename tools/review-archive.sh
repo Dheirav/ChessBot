@@ -32,9 +32,7 @@ one() {
     [ -s "$out" ] && return 0
     # Orient each game to the side being studied; the picker then never shows a
     # game upside down.
-    flip=""
-    grep -q "^\[Black \"$BOT\"\]" "$pgn" 2>/dev/null && flip="--flip"
-    nice -n 10 "$REPO/tools/review" "$pgn" --json "$out" $flip "${EXTRA[@]}" >/dev/null 2>&1 \
+    nice -n 10 "$REPO/tools/review" "$pgn" --json "$out" --me "$BOT" "${EXTRA[@]}" >/dev/null 2>&1 \
         || { echo "  failed: $name" >&2; rm -f "$out"; return 1; }
     echo "  reviewed $name"
 }

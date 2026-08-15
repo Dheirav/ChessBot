@@ -684,6 +684,7 @@ int main(int argc, char** argv) {
     std::vector<std::string> engineArgs;
     std::string annotateOut, htmlOut, jsonOut, archiveOut;
     bool explain = false, flip = false;
+    std::string me;
     std::vector<std::string> archiveIn;
 
     for (int i = 1; i < argc; ++i) {
@@ -696,6 +697,7 @@ int main(int argc, char** argv) {
         else if (a == "--annotate")   annotateOut = next();
         else if (a == "--html")       htmlOut = next();
         else if (a == "--flip")       flip = true;
+        else if (a == "--me")         me = next();
         else if (a == "--json")       jsonOut = next();
         else if (a == "--archive")    archiveOut = next();
         else if (a == "--explain")    explain = true;
@@ -705,7 +707,9 @@ int main(int argc, char** argv) {
     if (pgnPath.empty()) {
         std::printf("usage: review <game.pgn> [--engine <path>] [--engine-arg <a>]\n"
                     "                 [--depth N] [--hash MB] [--annotate out.pgn]\n"
-                    "                 [--html out.html] [--json out.json] [--flip] [--explain]\n"
+                    "                 [--html out.html] [--json out.json] [--flip|--me <player>]\n"
+                    "                 [--explain]\n"
+                    "  a file holding several games is reviewed in full, into one page\n"
                     "       review --archive all.html g1.json g2.json ...\n"
                     "  default engine is /usr/games/stockfish; ChessBot needs --engine-arg --uci\n");
         return 1;
@@ -737,9 +741,9 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    PgnGame game;
+    std::vector<PgnGame> games;
     std::string err;
-    if (!readPgn(pgnPath, game, &err)) {
+    if (!readPgnAll(pgnPath, games, &err)) {
         std::printf("cannot read %s: %s\n", pgnPath.c_str(), err.c_str());
         return 1;
     }
@@ -749,8 +753,18 @@ int main(int argc, char** argv) {
         std::printf("cannot start engine: %s\n", enginePath.c_str());
         return 1;
     }
+    std::vector<std::string> records;
+    std::string annotated;
+
+    for (size_t gameIndex = 0; gameIndex < games.size(); ++gameIndex) {
+    const PgnGame& game = games[gameIndex];
+    // --me orients each game to that player without having to know, per game,
+    // which colour they had. --flip still forces it for a one-off.
+    const bool flipThis = flip || (!me.empty() && game.tags.black == me);
     engine.newGame();
 
+    if (games.size() > 1)
+        std::printf("=== game %zu of %zu ===\n", gameIndex + 1, games.size());
     std::printf("%s vs %s  (%s)\n", game.tags.white.c_str(), game.tags.black.c_str(),
                 game.tags.result.c_str());
     std::printf("%zu moves | %s at depth %d\n\n", game.moves.size(),
@@ -931,7 +945,7 @@ int main(int argc, char** argv) {
         for (int b = 0; b < 6; ++b) std::printf(" %-11d", tally[s][b]);
         std::printf("\n");
     }
-    if (!htmlOut.empty() || !jsonOut.empty()) {
+    {
         Board start;
         if (!game.tags.startFen.empty()) start.setFromFEN(game.tags.startFen);
         const double accW = count[0] ? accSum[0] / count[0] : 0.0;
@@ -940,21 +954,43 @@ int main(int argc, char** argv) {
         const double cpB = count[1] ? (double)cpSum[1] / count[1] : 0.0;
         const double accArr[2] = {accW, accB};
         const double cpArr[2] = {cpW, cpB};
-        const std::string rec = gameRecord(game, rows, start.getFEN(), score[0],
-                                           enginePath, depth, accArr, cpArr, count, flip);
-        if (!jsonOut.empty()) {
-            std::ofstream f(jsonOut);
-            if (!f.is_open()) { std::printf("\ncannot write %s\n", jsonOut.c_str()); return 1; }
-            f << rec;
-            std::printf("\nrecord written to %s\n", jsonOut.c_str());
+        records.push_back(gameRecord(game, rows, start.getFEN(), score[0],
+                                     enginePath, depth, accArr, cpArr, count, flipThis));
+    }
+    if (!annotateOut.empty()) {
+        if (!annotated.empty()) annotated += "\n\n";
+        annotated += toPgn(game.moves, game.tags, notes);
+    }
+    if (games.size() > 1) std::printf("\n");
+    }  // end per-game loop
+
+    if (!jsonOut.empty()) {
+        std::ofstream f(jsonOut);
+        if (!f.is_open()) { std::printf("\ncannot write %s\n", jsonOut.c_str()); return 1; }
+        // One record per game, so a multi-game file caches as one entry.
+        f << (records.size() == 1 ? records[0] : "");
+        if (records.size() != 1) {
+            std::printf("\n--json writes a single game; %zu were read. Use --html.\n",
+                        records.size());
+            return 1;
         }
-        if (!htmlOut.empty()) {
-            std::ofstream f(htmlOut);
-            if (!f.is_open()) { std::printf("\ncannot write %s\n", htmlOut.c_str()); return 1; }
-            f << htmlReport("[" + rec + "]",
-                            game.tags.white + " vs " + game.tags.black);
-            std::printf("\nreport written to %s\n", htmlOut.c_str());
-        }
+        std::printf("\nrecord written to %s\n", jsonOut.c_str());
+    }
+    if (!htmlOut.empty()) {
+        std::ofstream f(htmlOut);
+        if (!f.is_open()) { std::printf("\ncannot write %s\n", htmlOut.c_str()); return 1; }
+        std::string all = "[";
+        for (size_t k = 0; k < records.size(); ++k) all += (k ? "," : "") + records[k];
+        all += "]";
+        char title[128];
+        if (records.size() == 1)
+            std::snprintf(title, sizeof title, "%s vs %s",
+                          games[0].tags.white.c_str(), games[0].tags.black.c_str());
+        else
+            std::snprintf(title, sizeof title, "%zu reviewed games", records.size());
+        f << htmlReport(all, title);
+        std::printf("\nreport written to %s (%zu game%s)\n", htmlOut.c_str(),
+                    records.size(), records.size() == 1 ? "" : "s");
     }
     if (!annotateOut.empty()) {
         std::ofstream f(annotateOut);
@@ -962,7 +998,7 @@ int main(int argc, char** argv) {
             std::printf("\ncannot write %s\n", annotateOut.c_str());
             return 1;
         }
-        f << toPgn(game.moves, game.tags, notes);
+        f << annotated;
         std::printf("\nannotated PGN written to %s\n", annotateOut.c_str());
     }
     return 0;

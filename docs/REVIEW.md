@@ -338,6 +338,34 @@ graph and the glyphs; it cannot give you what this engine's evaluation thought.
 So the two outputs answer different questions and both are kept. Use
 `--annotate` to study the game, `--html` to study the engine.
 
+### Reviewing a game that is not the bot's
+
+The tool takes any PGN, so a game exported from Chess.com or Lichess works
+directly. Tell it which player is you, and it orients every board accordingly:
+
+```bash
+./tools/review chesscom-export.pgn --html out.html --me your_username
+BOT=your_username ./tools/review-open.sh game.pgn      # same, and opens it
+```
+
+Two things had to be fixed before that was true, and both were found by
+building an export and trying it rather than by reasoning about the parser:
+
+- **A file holding several games only had its first game read.** That is how
+  every export site hands you your history — Chess.com's "Download games" is one
+  file with all of them — and the rest were dropped *silently*, which is the
+  failure this parser refuses to commit for illegal moves, committed at the
+  level of whole games. `readPgnAll()` reads them all; a multi-game file becomes
+  one page with a picker.
+- **Orientation was tied to the bot's name.** `--me <player>` sets it per game
+  from the tags, so a mixed export of your games as both colours comes out the
+  right way round throughout.
+
+Chess.com's own format needed nothing: their tag set is ignored as unknown tags,
+and the `{[%clk 0:09:59.9]}` comment after every move was already handled. That
+was checked against a generated export rather than assumed — the first attempt
+at checking it produced a broken sample and blamed the parser.
+
 ### The archive: 74 games in one file, not 74 files
 
 ```bash

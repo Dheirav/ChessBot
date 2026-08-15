@@ -36,16 +36,14 @@ NAME=$(basename "$PGN" .pgn)
 ID="${NAME##* - }"
 HTML="$OUT/${ID:-$NAME}.html"
 
-# Orient the board to the side being studied. A review of your own game shown
-# from the opponent's side is a review you have to read upside down, and half
-# the archive is played as Black.
+# Orient every game to the side being studied -- a review of your own game shown
+# from the opponent's side is one you have to read upside down. Set BOT to your
+# own name when reviewing a game exported from Chess.com or Lichess:
+#   BOT=your_username ./tools/review-open.sh game.pgn
 BOT="${BOT:-Crimsy_Bot}"
-FLIP=""
-if grep -q "^\[Black \"$BOT\"\]" "$PGN" 2>/dev/null; then FLIP="--flip"; fi
 
-if [ -n "$FLIP" ]; then echo "reviewing $NAME (oriented for Black)"
-else echo "reviewing $NAME"; fi
-nice -n 10 "$REPO/tools/review" "$PGN" --html "$HTML" $FLIP "$@" || exit 1
+echo "reviewing $NAME"
+nice -n 10 "$REPO/tools/review" "$PGN" --html "$HTML" --me "$BOT" "$@" || exit 1
 
 # Opening a browser is best-effort: the report is the deliverable and it is
 # already written by this point, so failing to launch one is not an error.

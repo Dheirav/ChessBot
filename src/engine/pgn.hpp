@@ -97,3 +97,11 @@ bool parsePgn(const std::string& text, PgnGame& out, std::string* error = nullpt
 
 // parsePgn() over a file's contents. False if the file cannot be opened.
 bool readPgn(const std::string& path, PgnGame& out, std::string* error = nullptr);
+
+// Every game in the text or file. Export sites hand you your whole history in
+// one file, and reading only the first game from one of those loses the rest
+// without saying so.
+bool parseAllPgn(const std::string& text, std::vector<PgnGame>& out,
+                 std::string* error = nullptr);
+bool readPgnAll(const std::string& path, std::vector<PgnGame>& out,
+                std::string* error = nullptr);

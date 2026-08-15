@@ -317,6 +317,54 @@ bool parsePgn(const std::string& text, PgnGame& out, std::string* error) {
     return true;
 }
 
+// A file can hold many games, and every export site produces such files: it is
+// how Chess.com and Lichess both hand you your history. parsePgn() reads the
+// first game and stops at its result token, so reading one game from such a
+// file silently discards the rest -- the failure this parser refuses to commit
+// for illegal moves, committed at the level of whole games instead.
+//
+// Games are separated by the [Event tag that opens each one; a tag pair only
+// begins a new game when it follows a blank line or the start of the file,
+// which is what keeps an [Event inside a comment from splitting anything.
+bool parseAllPgn(const std::string& text, std::vector<PgnGame>& out, std::string* error) {
+    out.clear();
+    std::vector<size_t> starts;
+    for (size_t p = text.find("[Event "); p != std::string::npos;
+         p = text.find("[Event ", p + 1)) {
+        bool atLineStart = (p == 0) || (text[p - 1] == '\n');
+        if (atLineStart) starts.push_back(p);
+    }
+    if (starts.empty()) starts.push_back(0);
+
+    for (size_t k = 0; k < starts.size(); ++k) {
+        const size_t from = starts[k];
+        const size_t to = (k + 1 < starts.size()) ? starts[k + 1] : text.size();
+        PgnGame g;
+        std::string e;
+        if (!parsePgn(text.substr(from, to - from), g, &e)) {
+            if (error) *error = "game " + std::to_string(k + 1) + ": " + e;
+            return false;
+        }
+        if (!g.moves.empty()) out.push_back(std::move(g));
+    }
+    if (out.empty()) {
+        if (error) *error = "no games with moves in them";
+        return false;
+    }
+    return true;
+}
+
+bool readPgnAll(const std::string& path, std::vector<PgnGame>& out, std::string* error) {
+    std::ifstream file(path);
+    if (!file.is_open()) {
+        if (error) *error = "cannot open " + path;
+        return false;
+    }
+    std::ostringstream buf;
+    buf << file.rdbuf();
+    return parseAllPgn(buf.str(), out, error);
+}
+
 bool readPgn(const std::string& path, PgnGame& out, std::string* error) {
     std::ifstream file(path);
     if (!file.is_open()) {
