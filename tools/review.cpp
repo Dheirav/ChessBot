@@ -131,7 +131,7 @@ struct TermDelta { const char* name; int delta; };
 // One row of the HTML report. Collected during the pass that prints the text
 // report, so the two can never disagree about what a move was worth.
 struct HtmlMove {
-    std::string san, bestSan, label, terms, fen, uci;
+    std::string san, bestSan, label, terms, uci;
     int evalAfter;      // centipawns, White's point of view, after this move
     double wpLoss;
     int cpLoss;
@@ -235,38 +235,51 @@ std::string pieceImages() {
 // that breaks on the machine you sent it to. Pieces are Unicode glyphs for the
 // same reason — an image set would have to be embedded or fetched, and both are
 // worse than a character that every system already has.
-std::string htmlReport(const PgnGame& game, const std::vector<HtmlMove>& moves,
+// One game as a record the page can load. Kept separate from the page itself so
+// an archive of seventy games is seventy of these inside one document, rather
+// than seventy documents each carrying its own copy of the stylesheet and the
+// same twelve piece images -- which measured 3.3 MB against 0.4 MB.
+std::string gameRecord(const PgnGame& game, const std::vector<HtmlMove>& moves,
                        const std::string& startFen, int startEval,
                        const std::string& engine, int depth,
                        const double acc[2], const double cpAvg[2],
                        const int count[2], bool flip) {
+    // Counted here rather than passed in: the picker needs one number per game
+    // and this is the only place that has the moves and the labels together.
+    int blunders = 0;
+    for (const HtmlMove& m : moves)
+        if (m.label == "Blunder" && m.white != flip) ++blunders;
     std::string j = "[";
     for (size_t i = 0; i < moves.size(); ++i) {
         const HtmlMove& m = moves[i];
         char buf[1024];
         std::snprintf(buf, sizeof buf,
-            "%s{\"n\":%zu,\"w\":%s,\"san\":\"%s\",\"fen\":\"%s\",\"ev\":%d,"
+            "%s{\"n\":%zu,\"w\":%s,\"san\":\"%s\",\"ev\":%d,"
             "\"wp\":%.1f,\"cp\":%d,\"best\":\"%s\",\"label\":\"%s\","
             "\"terms\":\"%s\",\"uci\":\"%s\"}",
             i ? "," : "", i, m.white ? "true" : "false", m.san.c_str(),
-            m.fen.c_str(), m.evalAfter, m.wpLoss, m.cpLoss,
+            m.evalAfter, m.wpLoss, m.cpLoss,
             m.bestSan.c_str(), m.label.c_str(), m.terms.c_str(), m.uci.c_str());
         j += buf;
     }
     j += "]";
 
-    char head[2048];
+    char head[2560];
     std::snprintf(head, sizeof head,
         "{\"white\":\"%s\",\"black\":\"%s\",\"result\":\"%s\",\"engine\":\"%s\","
         "\"depth\":%d,\"startFen\":\"%s\",\"startEval\":%d,"
         "\"accW\":%.1f,\"accB\":%.1f,\"cpW\":%.1f,\"cpB\":%.1f,\"nW\":%d,\"nB\":%d,"
-        "\"flip\":%s}",
+        "\"flip\":%s,\"blunders\":%d}",
         game.tags.white.c_str(), game.tags.black.c_str(), game.tags.result.c_str(),
         engine.c_str(), depth, startFen.c_str(), startEval,
         count[0] ? acc[0] : 0.0, count[1] ? acc[1] : 0.0,
         count[0] ? cpAvg[0] : 0.0, count[1] ? cpAvg[1] : 0.0, count[0], count[1],
-        flip ? "true" : "false");
+        flip ? "true" : "false", blunders);
 
+    return std::string("{\"head\":") + head + ",\"moves\":" + j + "}";
+}
+
+std::string htmlReport(const std::string& gamesJson, const std::string& title) {
     std::string html = R"HTML(<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -307,6 +320,10 @@ body{margin:0;background:var(--bg);color:var(--ink);
 
 /* Header: the two names carry the page, the conditions sit under them in the
    fixed pitch a scoresheet uses. */
+.picker{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+.picker select{flex:1;min-width:0;font:inherit;font-size:13.5px;padding:7px 10px;
+  border:1px solid var(--line);border-radius:7px;background:var(--panel);color:var(--ink)}
+.gcount{color:var(--faint);font-size:12px;letter-spacing:.06em;text-transform:uppercase}
 header{display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap;
   padding-bottom:14px;border-bottom:2px solid var(--ink);margin-bottom:22px}
 h1{font:600 30px/1.15 ui-serif,Georgia,"Times New Roman",serif;margin:0;
@@ -414,6 +431,10 @@ svg{display:block;width:100%;height:150px;overflow:visible}
 .note{color:var(--faint);font-size:12px;margin-top:24px;line-height:1.7;max-width:72ch}
 @media (prefers-reduced-motion:no-preference){.ply,button{transition:background-color .12s}}
 </style></head><body><div class="wrap">
+<div id="picker" class="picker" style="display:none">
+  <span class="gcount mono" id="gcount"></span>
+  <select id="pick" aria-label="Choose a game"></select>
+</div>
 <header>
   <h1 id="ttl"></h1>
   <div class="cond mono" id="cond"></div>
@@ -448,8 +469,9 @@ svg{display:block;width:100%;height:150px;overflow:visible}
 <p class="note" id="note"></p>
 </div>
 <script>
-const H=__HEAD__, M=__MOVES__, P=__PIECES__;
+const GAMES=__GAMES__, P=__PIECES__;
 const HAVE_IMG=Object.keys(P).length===12;
+let gi=0, H=GAMES[0].head, M=GAMES[0].moves, POS=[];
 const S={k:"♚",q:"♛",r:"♜",b:"♝",n:"♞",p:"♟"};
 let cur=-1, flipped=!!H.flip;
 const winPct=cp=>50+50*(2/(1+Math.exp(-0.00368208*cp))-1);
@@ -468,8 +490,29 @@ function unpack(fen){
     }}
   return a;
 }
-function board(fen,uci){
-  const a=unpack(fen), mark=sq(uci), b=document.getElementById("board");
+// Positions are replayed rather than stored. A FEN per move is about 60 bytes
+// against the 4 the move already costs, and the game is fully determined by its
+// move list -- carrying both meant every report shipped the same information
+// twice, which mattered once there were seventy of them.
+//
+// Only legal moves ever reach this, so it applies a move rather than validating
+// one: the three that are not "pick it up and put it down" are castling (the
+// king crosses two files and the rook jumps it), en passant (a pawn captures
+// onto an empty square) and promotion (the fifth character of the UCI move).
+function applyMove(a,u){
+  const from=(8-(+u[1]))*8+(u.charCodeAt(0)-97), to=(8-(+u[3]))*8+(u.charCodeAt(2)-97);
+  const p=a[from];
+  a[from]="";
+  if(p.toLowerCase()==="k" && Math.abs((from&7)-(to&7))===2){
+    const rank=to&56, rf=(to&7)>4?rank+7:rank, rt=(to&7)>4?rank+5:rank+3;
+    a[rt]=a[rf]; a[rf]="";
+  }
+  if(p.toLowerCase()==="p" && (from&7)!==(to&7) && !a[to]) a[(from&56)|(to&7)]="";
+  a[to]=u.length>4?(p===p.toUpperCase()?u[4].toUpperCase():u[4].toLowerCase()):p;
+  return a;
+}
+function board(a,uci){
+  const mark=sq(uci), b=document.getElementById("board");
   b.innerHTML="";
   for(let i=0;i<64;i++){
     const idx=flipped?63-i:i;
@@ -522,7 +565,7 @@ function detail(){
 }
 function render(){
   const m=cur<0?null:M[cur], ev=m?m.ev:H.startEval;
-  board(m?m.fen:H.startFen, m?m.uci:"");
+  board(POS[cur+1], m?m.uci:"");
   document.getElementById("bar").style.height=winPct(ev).toFixed(1)+"%";
   document.querySelector(".bar").classList.toggle("flip",flipped);
   document.getElementById("pos").textContent=
@@ -541,35 +584,29 @@ document.addEventListener("keydown",e=>{
   e.preventDefault();
 });
 
-document.getElementById("ttl").innerHTML=
-  H.white+'<span class="vs">vs</span>'+H.black;
-document.getElementById("cond").innerHTML=
-  '<b>'+H.result+'</b>'+M.length+' moves · '+H.engine.split("/").pop()+' depth '+H.depth;
-document.getElementById("acc").innerHTML=
-  '<div><span>White accuracy</span><b>'+H.accW.toFixed(1)+'%</b><i>'+H.cpW.toFixed(1)+' cp avg loss</i></div>'+
-  '<div><span>Black accuracy</span><b>'+H.accB.toFixed(1)+'%</b><i>'+H.cpB.toFixed(1)+' cp avg loss</i></div>';
-
-const list=document.getElementById("list");
-for(let i=0;i<M.length;i+=2){
-  const row=document.createElement("div"); row.className="row";
-  row.innerHTML='<span class="no">'+((i>>1)+1)+'</span>';
-  for(const j of [i,i+1]){
-    if(j>=M.length){row.insertAdjacentHTML("beforeend","<span></span>");continue}
-    const m=M[j], b=document.createElement("button");
-    b.className="ply "+(m.wp>=5?m.label:""); b.dataset.i=j;
-    b.innerHTML='<span>'+label(m)+'</span><span class="d">'+
-      (m.wp>=5?"-"+m.wp.toFixed(1)+"%":fmt(m.ev))+'</span>';
-    b.onclick=()=>{cur=j;render()};
-    row.appendChild(b);
+function buildSheet(){
+  const list=document.getElementById("list"); list.innerHTML="";
+  for(let i=0;i<M.length;i+=2){
+    const row=document.createElement("div"); row.className="row";
+    row.innerHTML='<span class="no">'+((i>>1)+1)+'</span>';
+    for(const j of [i,i+1]){
+      if(j>=M.length){row.insertAdjacentHTML("beforeend","<span></span>");continue}
+      const m=M[j], b=document.createElement("button");
+      b.className="ply "+(m.wp>=5?m.label:""); b.dataset.i=j;
+      b.innerHTML='<span>'+label(m)+'</span><span class="d">'+
+        (m.wp>=5?"-"+m.wp.toFixed(1)+"%":fmt(m.ev))+'</span>';
+      b.onclick=()=>{cur=j;render()};
+      row.appendChild(b);
+    }
+    list.appendChild(row);
   }
-  list.appendChild(row);
 }
 
 const W=600,GH=150,CAP=700;
-const pts=[H.startEval].concat(M.map(m=>m.ev));
+let pts=[];
 const gx=i=>i*W/Math.max(1,pts.length-1);
 const gy=v=>GH/2-Math.max(-CAP,Math.min(CAP,v))/CAP*(GH/2-6);
-(function graph(){
+function graph(){
   let d="M"+gx(0)+","+gy(pts[0]);
   pts.forEach((v,i)=>{if(i)d+="L"+gx(i)+","+gy(v)});
   let marks="";
@@ -583,17 +620,44 @@ const gy=v=>GH/2-Math.max(-CAP,Math.min(CAP,v))/CAP*(GH/2-6);
     '<line x1="0" y1="'+(GH/2)+'" x2="'+W+'" y2="'+(GH/2)+'" stroke="currentColor" stroke-opacity=".38" stroke-dasharray="3 3"/>'+
     '<path d="'+d+'" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>'+
     marks+'<circle id="mk" r="4" fill="var(--accent)" stroke="var(--panel)" stroke-width="1.5"/>';
-})();
+}
 function marker(){
   const c=document.getElementById("mk"); if(!c)return;
   const i=cur+1; c.setAttribute("cx",gx(i)); c.setAttribute("cy",gy(pts[i]));
+}
+function loadGame(n){
+  gi=n; H=GAMES[gi].head; M=GAMES[gi].moves; flipped=!!H.flip; cur=-1;
+  POS=[unpack(H.startFen)];
+  for(const m of M) POS.push(applyMove(POS[POS.length-1].slice(),m.uci));
+  pts=[H.startEval].concat(M.map(m=>m.ev));
+  document.getElementById("ttl").innerHTML=H.white+'<span class="vs">vs</span>'+H.black;
+  document.getElementById("cond").innerHTML=
+    '<b>'+H.result+'</b>'+M.length+' moves · '+H.engine.split("/").pop()+' depth '+H.depth;
+  document.getElementById("acc").innerHTML=
+    '<div><span>White accuracy</span><b>'+H.accW.toFixed(1)+'%</b><i>'+H.cpW.toFixed(1)+' cp avg loss</i></div>'+
+    '<div><span>Black accuracy</span><b>'+H.accB.toFixed(1)+'%</b><i>'+H.cpB.toFixed(1)+' cp avg loss</i></div>';
+  buildSheet(); graph(); render();
+  if(GAMES.length>1)document.getElementById("pick").value=gi;
+}
+if(GAMES.length>1){
+  const sel=document.getElementById("pick");
+  GAMES.forEach((g,i)=>{
+    const o=document.createElement("option"); o.value=i;
+    const bl=g.head.blunders, acc=g.head.flip?g.head.accB:g.head.accW;
+    o.textContent=g.head.white+" vs "+g.head.black+"  ·  "+g.head.result+
+      "  ·  "+acc.toFixed(1)+"%"+(bl?"  ·  "+bl+" blunder"+(bl>1?"s":""):"");
+    sel.appendChild(o);
+  });
+  sel.onchange=()=>loadGame(+sel.value);
+  document.getElementById("picker").style.display="";
+  document.getElementById("gcount").textContent=GAMES.length+" games";
 }
 document.getElementById("note").textContent=
   "Accuracy depends on the analysing engine, its depth and the curve used, so these numbers "+
   "compare games reviewed the same way and nothing else. The named terms describe what moved "+
   "in ChessBot’s own evaluation, which is not why "+H.engine.split("/").pop()+" scored the move "+
   "that way — where the two disagree, that disagreement is the useful part.";
-render();
+loadGame(0);
 </script></body></html>
 )HTML";
 
@@ -601,9 +665,8 @@ render();
         const size_t p = html.find(key);
         if (p != std::string::npos) html.replace(p, key.size(), val);
     };
-    sub("__TITLE__", game.tags.white + " vs " + game.tags.black);
-    sub("__HEAD__", head);
-    sub("__MOVES__", j);
+    sub("__TITLE__", title);
+    sub("__GAMES__", gamesJson);
     sub("__PIECES__", pieceImages());
     return html;
 }
@@ -619,8 +682,9 @@ int main(int argc, char** argv) {
     // default mode opens a window — so reviewing with it needs
     //   --engine ./chessbot --engine-arg --uci
     std::vector<std::string> engineArgs;
-    std::string annotateOut, htmlOut;
+    std::string annotateOut, htmlOut, jsonOut, archiveOut;
     bool explain = false, flip = false;
+    std::vector<std::string> archiveIn;
 
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
@@ -632,16 +696,45 @@ int main(int argc, char** argv) {
         else if (a == "--annotate")   annotateOut = next();
         else if (a == "--html")       htmlOut = next();
         else if (a == "--flip")       flip = true;
+        else if (a == "--json")       jsonOut = next();
+        else if (a == "--archive")    archiveOut = next();
         else if (a == "--explain")    explain = true;
-        else if (a[0] != '-')     pgnPath = a;
+        else if (a[0] != '-') { if (pgnPath.empty()) pgnPath = a; archiveIn.push_back(a); }
         else { std::printf("unknown option: %s\n", a.c_str()); return 1; }
     }
     if (pgnPath.empty()) {
         std::printf("usage: review <game.pgn> [--engine <path>] [--engine-arg <a>]\n"
                     "                 [--depth N] [--hash MB] [--annotate out.pgn]\n"
-                    "                 [--html out.html] [--flip] [--explain]\n"
+                    "                 [--html out.html] [--json out.json] [--flip] [--explain]\n"
+                    "       review --archive all.html g1.json g2.json ...\n"
                     "  default engine is /usr/games/stockfish; ChessBot needs --engine-arg --uci\n");
         return 1;
+    }
+
+    // Assembling an archive reads records that --json already produced, so it
+    // costs no analysis: adding one game to a 70-game archive re-reviews one
+    // game, not seventy.
+    if (!archiveOut.empty()) {
+        std::string games = "[";
+        int n = 0;
+        for (const std::string& in : archiveIn) {
+            std::ifstream f(in);
+            if (!f) { std::printf("cannot read %s\n", in.c_str()); return 1; }
+            const std::string rec((std::istreambuf_iterator<char>(f)),
+                                   std::istreambuf_iterator<char>());
+            if (rec.empty()) continue;
+            if (n++) games += ",";
+            games += rec;
+        }
+        games += "]";
+        if (!n) { std::printf("no game records given\n"); return 1; }
+        std::ofstream out(archiveOut);
+        if (!out.is_open()) { std::printf("cannot write %s\n", archiveOut.c_str()); return 1; }
+        char t[64];
+        std::snprintf(t, sizeof t, "%d reviewed games", n);
+        out << htmlReport(games, t);
+        std::printf("archive of %d games written to %s\n", n, archiveOut.c_str());
+        return 0;
     }
 
     PgnGame game;
@@ -790,7 +883,6 @@ int main(int argc, char** argv) {
             if (r.bestSan == r.san) r.bestSan.clear();
             r.label = label;
             r.terms = termsText;
-            r.fen = position[i + 1].getFEN();
             r.uci = toUciMove(game.moves[i]);
             r.evalAfter = (i % 2 == 0) ? -score[i + 1] : score[i + 1];
             r.wpLoss = wpLoss;
@@ -839,12 +931,7 @@ int main(int argc, char** argv) {
         for (int b = 0; b < 6; ++b) std::printf(" %-11d", tally[s][b]);
         std::printf("\n");
     }
-    if (!htmlOut.empty()) {
-        std::ofstream f(htmlOut);
-        if (!f.is_open()) {
-            std::printf("\ncannot write %s\n", htmlOut.c_str());
-            return 1;
-        }
+    if (!htmlOut.empty() || !jsonOut.empty()) {
         Board start;
         if (!game.tags.startFen.empty()) start.setFromFEN(game.tags.startFen);
         const double accW = count[0] ? accSum[0] / count[0] : 0.0;
@@ -853,9 +940,21 @@ int main(int argc, char** argv) {
         const double cpB = count[1] ? (double)cpSum[1] / count[1] : 0.0;
         const double accArr[2] = {accW, accB};
         const double cpArr[2] = {cpW, cpB};
-        f << htmlReport(game, rows, start.getFEN(), score[0], enginePath, depth,
-                        accArr, cpArr, count, flip);
-        std::printf("\nreport written to %s\n", htmlOut.c_str());
+        const std::string rec = gameRecord(game, rows, start.getFEN(), score[0],
+                                           enginePath, depth, accArr, cpArr, count, flip);
+        if (!jsonOut.empty()) {
+            std::ofstream f(jsonOut);
+            if (!f.is_open()) { std::printf("\ncannot write %s\n", jsonOut.c_str()); return 1; }
+            f << rec;
+            std::printf("\nrecord written to %s\n", jsonOut.c_str());
+        }
+        if (!htmlOut.empty()) {
+            std::ofstream f(htmlOut);
+            if (!f.is_open()) { std::printf("\ncannot write %s\n", htmlOut.c_str()); return 1; }
+            f << htmlReport("[" + rec + "]",
+                            game.tags.white + " vs " + game.tags.black);
+            std::printf("\nreport written to %s\n", htmlOut.c_str());
+        }
     }
     if (!annotateOut.empty()) {
         std::ofstream f(annotateOut);

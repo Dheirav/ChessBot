@@ -338,6 +338,32 @@ graph and the glyphs; it cannot give you what this engine's evaluation thought.
 So the two outputs answer different questions and both are kept. Use
 `--annotate` to study the game, `--html` to study the engine.
 
+### The archive: 74 games in one file, not 74 files
+
+```bash
+./tools/review-archive.sh          # every archived game, one document
+```
+
+A per-game report is ~42 KB, of which **~21 KB is the same twelve piece images
+and ~15 KB the same stylesheet**. Only about 6 KB of it is the game. Written one
+file per game that is **3.4 MB to say what 0.7 MB says**, and it leaves you with
+seventy loose files and no way in.
+
+One document carries the assets once, gains a game picker, and is still a single
+self-contained thing you can send someone. Measured: **74 games, 716 KB.**
+
+Per-game records are cached as JSON (`--json`), so adding a game re-reviews that
+game rather than the archive; `--archive` is then a concatenation and costs no
+analysis at all. `--html` still writes a single-game page when that is what you
+want to send.
+
+Positions are **replayed in the browser** from the start position and the move
+list rather than stored per move — a FEN is ~60 bytes against the 4 the move
+already costs, and carrying both shipped the same information twice. Worth
+stating plainly, since the first estimate here was wrong: the FENs were never
+the main cost. The assets and the stylesheet were, which is why the archive is
+the fix and the replay is only a trim.
+
 **One file, no dependencies.** No CDN, no webfont, nothing fetched — a review is
 something you send to someone, and a page that fetches anything breaks on the
 machine you sent it to.
