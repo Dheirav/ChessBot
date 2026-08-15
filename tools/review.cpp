@@ -210,132 +210,162 @@ std::string htmlReport(const PgnGame& game, const std::vector<HtmlMove>& moves,
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>__TITLE__</title>
 <style>
-/* Three theme states, not two: an explicit choice stamps data-theme, and the
-   default "system" setting stamps nothing -- so bare :root carries a complete
-   palette and the other two blocks redefine only tokens. */
 :root{
-  --bg:#f2f4f6; --panel:#fff; --ink:#14181c; --dim:#657080; --faint:#8b95a3;
-  --line:#e1e6ec; --sq-light:#dfe4ea; --sq-dark:#7c8a99; --sq-mark:#d9a441;
-  --blunder:#b3261e; --mistake:#b06a00; --inacc:#8a7400;
-  --shade:rgba(20,24,28,.055); --shade2:rgba(20,24,28,.105);
-  --wp-fill:#fbfbf9; --wp-edge:#1a1e22; --bp-fill:#1d2228; --bp-edge:rgba(255,255,255,.30);
+  --bg:#eceff3; --panel:#fff; --sunk:#f5f7f9; --ink:#0f1319; --dim:#5a6472; --faint:#8b95a2;
+  --line:#dde3ea; --accent:#a8712c;
+  --sq-light:#d6dde5; --sq-dark:#6a7889; --sq-mark:#d7a13f;
+  --blunder:#b02a1f; --mistake:#a96a09; --inacc:#7f7108; --ok:#3f6f45;
+  --shade:rgba(15,19,25,.055); --shade2:rgba(15,19,25,.10);
+  --wp-fill:#fcfcfa; --wp-edge:#0f1319; --bp-fill:#131820; --bp-edge:rgba(255,255,255,.34);
+  --bar-w:#f2f3f0; --bar-b:#2b3138;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
-  --bg:#101315; --panel:#191d21; --ink:#e7eaee; --dim:#9aa4b0; --faint:#78828e;
-  --line:#272d33; --sq-light:#6d7885; --sq-dark:#3b444d; --sq-mark:#e0b354;
-  --blunder:#e2564a; --mistake:#dd9836; --inacc:#c7ae33;
-  --shade:rgba(231,234,238,.07); --shade2:rgba(231,234,238,.13);
-  --wp-fill:#f4f5f3; --wp-edge:#15181b; --bp-fill:#14181c; --bp-edge:rgba(255,255,255,.38);
+  --bg:#0d1013; --panel:#161a1f; --sunk:#11151a; --ink:#e9edf2; --dim:#98a3b1; --faint:#6f7a87;
+  --line:#252c34; --accent:#d9a05b;
+  --sq-light:#7c8795; --sq-dark:#4a5560; --sq-mark:#e0ad55;
+  --blunder:#e35c4d; --mistake:#dd9a37; --inacc:#c3ad32; --ok:#6fa871;
+  --shade:rgba(233,237,242,.06); --shade2:rgba(233,237,242,.12);
+  --wp-fill:#f6f7f4; --wp-edge:#090c10; --bp-fill:#0a0d12; --bp-edge:rgba(255,255,255,.72);
+  --bar-w:#e8eae6; --bar-b:#1b2026;
 }}
 :root[data-theme="dark"]{
-  --bg:#101315; --panel:#191d21; --ink:#e7eaee; --dim:#9aa4b0; --faint:#78828e;
-  --line:#272d33; --sq-light:#6d7885; --sq-dark:#3b444d; --sq-mark:#e0b354;
-  --blunder:#e2564a; --mistake:#dd9836; --inacc:#c7ae33;
-  --shade:rgba(231,234,238,.07); --shade2:rgba(231,234,238,.13);
-  --wp-fill:#f4f5f3; --wp-edge:#15181b; --bp-fill:#14181c; --bp-edge:rgba(255,255,255,.38);
+  --bg:#0d1013; --panel:#161a1f; --sunk:#11151a; --ink:#e9edf2; --dim:#98a3b1; --faint:#6f7a87;
+  --line:#252c34; --accent:#d9a05b;
+  --sq-light:#7c8795; --sq-dark:#4a5560; --sq-mark:#e0ad55;
+  --blunder:#e35c4d; --mistake:#dd9a37; --inacc:#c3ad32; --ok:#6fa871;
+  --shade:rgba(233,237,242,.06); --shade2:rgba(233,237,242,.12);
+  --wp-fill:#f6f7f4; --wp-edge:#090c10; --bp-fill:#0a0d12; --bp-edge:rgba(255,255,255,.72);
+  --bar-w:#e8eae6; --bar-b:#1b2026;
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);
-  font:15px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
-  -webkit-font-smoothing:antialiased}
-.wrap{max-width:1120px;margin:0 auto;padding:26px 18px 52px}
-header{margin-bottom:18px}
-h1{font:600 24px/1.25 ui-serif,Georgia,"Times New Roman",serif;margin:0 0 5px;
-  letter-spacing:-.01em;text-wrap:balance}
-.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-  font-variant-numeric:tabular-nums}
-.sub{color:var(--dim);font-size:12.5px}
-.cols{display:grid;grid-template-columns:minmax(300px,430px) 1fr;gap:20px;align-items:start}
-@media(max-width:880px){.cols{grid-template-columns:1fr}}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:9px}
+  font:15px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+.wrap{max-width:980px;margin:0 auto;padding:30px 20px 56px}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-variant-numeric:tabular-nums}
+
+/* Header: the two names carry the page, the conditions sit under them in the
+   fixed pitch a scoresheet uses. */
+header{display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap;
+  padding-bottom:14px;border-bottom:2px solid var(--ink);margin-bottom:22px}
+h1{font:600 30px/1.15 ui-serif,Georgia,"Times New Roman",serif;margin:0;
+  letter-spacing:-.015em;text-wrap:balance}
+h1 .vs{color:var(--faint);font-style:italic;font-size:22px;padding:0 6px}
+.cond{margin-left:auto;text-align:right;font-size:12px;color:var(--dim);line-height:1.7}
+.cond b{display:block;font-size:19px;color:var(--ink);font-weight:600}
+
+.cols{display:grid;grid-template-columns:minmax(300px,450px) minmax(280px,1fr);
+  gap:20px;align-items:start}
+@media(max-width:900px){.cols{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px}
 .stack{display:flex;flex-direction:column;gap:14px}
 
-/* The board. Both axes are stated: with columns alone, rows size to their
-   content and a rank holding pieces grows taller than an empty one, which is
-   exactly how the squares came out uneven. Glyph size is a share of the
-   board's own width (cqi), not the viewport, so a square and the piece on it
-   stay in proportion at every layout width. */
-.boardbox{container-type:inline-size;border-radius:9px 9px 0 0;overflow:hidden}
-#board{display:grid;grid-template-columns:repeat(8,1fr);grid-template-rows:repeat(8,1fr);
-  aspect-ratio:1;user-select:none}
+/* Board with an evaluation bar beside it, the arrangement every analysis board
+   uses: the bar answers "who is winning" before you have read anything. */
+.play{display:grid;grid-template-columns:14px minmax(0,1fr);gap:11px;padding:13px}
+.bar{border-radius:4px;overflow:hidden;background:var(--bar-b);position:relative}
+.bar i{position:absolute;left:0;right:0;bottom:0;background:var(--bar-w);
+  transition:height .18s ease}
+.boardbox{container-type:inline-size;border-radius:5px;overflow:hidden;
+  box-shadow:0 1px 3px rgba(0,0,0,.14)}
+/* minmax(0,1fr), not 1fr: a bare 1fr keeps an automatic minimum of its content,
+   so a glyph larger than its share silently stretches that rank and the board
+   stops being a grid of equal squares. */
+#board{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));
+  grid-template-rows:repeat(8,minmax(0,1fr));aspect-ratio:1;user-select:none;overflow:hidden}
 #board div{position:relative;display:flex;align-items:center;justify-content:center;
-  font-size:9.4cqi;line-height:1}
+  font-size:8.6cqi;line-height:1;overflow:hidden}
 .lt{background:var(--sq-light)}.dk{background:var(--sq-dark)}
-/* Solid glyphs for both colours, coloured and outlined rather than relying on
-   the outline set: the hollow white pieces vanish on a light square in most
-   system fonts. */
-.wp{color:var(--wp-fill);-webkit-text-stroke:1.1px var(--wp-edge);
-  text-shadow:0 1px 1px rgba(0,0,0,.22)}
-.bp{color:var(--bp-fill);-webkit-text-stroke:1.1px var(--bp-edge)}
-.hl::after{content:"";position:absolute;inset:0;
-  box-shadow:inset 0 0 0 3px var(--sq-mark)}
-
-.nav{display:flex;gap:6px;padding:9px 11px;align-items:center;
-  border-top:1px solid var(--line)}
-button{font:inherit;font-size:14px;padding:4px 10px;border:1px solid var(--line);
-  border-radius:6px;background:var(--panel);color:var(--ink);cursor:pointer;line-height:1.4}
+/* Solid glyphs for both sides: the outline set for White disappears on a light
+   square in most system fonts. Outlined through tokens, no shadow -- a shadow
+   at this size just muddies the shape. */
+/* paint-order matters more than the stroke width here: -webkit-text-stroke is
+   centred on the glyph outline, so without this the stroke eats half the fill
+   and a white piece reads as a dark one -- the two sides became almost
+   indistinguishable in the light theme. Stroke behind fill keeps both solid. */
+.wp,.bp{paint-order:stroke fill}
+.wp{color:var(--wp-fill);-webkit-text-stroke:1.6px var(--wp-edge)}
+.bp{color:var(--bp-fill);-webkit-text-stroke:1.6px var(--bp-edge)}
+.hl::after{content:"";position:absolute;inset:0;box-shadow:inset 0 0 0 3px var(--sq-mark)}
+/* Coordinates on the edge squares: a board being read from, rather than played
+   on, has to let you check a square against the notation beside it. */
+.co{position:absolute;font:600 2.5cqi/1 ui-monospace,SFMono-Regular,Menlo,monospace;opacity:.7}
+.co.f{right:5%;bottom:3%}.co.r{left:5%;top:3%}
+.lt .co{color:var(--sq-dark)}.dk .co{color:var(--sq-light)}
+.nav{display:flex;gap:6px;padding:0 14px 13px;align-items:center}
+button{font:inherit;font-size:14px;padding:5px 11px;border:1px solid var(--line);
+  border-radius:6px;background:var(--panel);color:var(--ink);cursor:pointer;line-height:1.3}
 button:hover{background:var(--shade)}
-button:focus-visible,.ply:focus-visible{outline:2px solid var(--sq-mark);outline-offset:1px}
+button:focus-visible,.ply:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.ply-count{margin-left:auto;color:var(--faint);font-size:12.5px}
 
-/* Detail for the selected move, given room here rather than crammed into the
-   list -- the explanation is the reason this report exists. */
-.detail{padding:13px 15px;min-height:104px}
-.badge{display:inline-block;padding:1px 8px;border-radius:99px;font-size:11.5px;
-  font-weight:650;letter-spacing:.04em;text-transform:uppercase;color:#fff}
+/* The move under inspection, given the room the explanation needs. */
+.detail{padding:15px 17px;min-height:118px;border-left:3px solid var(--line)}
+.detail.Blunder{border-left-color:var(--blunder)}
+.detail.Mistake{border-left-color:var(--mistake)}
+.detail.Inaccuracy{border-left-color:var(--inacc)}
+.dhead{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:9px}
+.dmove{font:600 22px/1.15 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:-.02em}
+.badge{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+  padding:3px 9px;border-radius:99px;color:#fff}
 .b-Blunder{background:var(--blunder)}.b-Mistake{background:var(--mistake)}
 .b-Inaccuracy{background:var(--inacc)}
-.b-Good,.b-Excellent,.b-Best{background:transparent;color:var(--faint);
-  border:1px solid var(--line)}
-.dhead{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
-.dmove{font:600 19px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace}
-.dloss{margin-left:auto;font-size:13px;color:var(--dim)}
-.dterms{margin-top:9px;font-size:13px;color:var(--dim)}
-.dterms b{color:var(--ink);font-weight:600}
+.b-Good,.b-Excellent,.b-Best{background:transparent;color:var(--ok);
+  border:1px solid currentColor}
+.deval{margin-left:auto;font-size:14px;color:var(--dim)}
+.dline{font-size:13.5px;color:var(--dim);margin-top:5px}
+.dline b{color:var(--ink);font-weight:650}
+.terms{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}
+.term{font-size:12px;padding:3px 9px;border-radius:5px;background:var(--sunk);
+  border:1px solid var(--line);color:var(--ink)}
+.term em{font-style:normal;color:var(--dim)}
 
-.summary{display:flex;gap:24px;padding:13px 15px;border-bottom:1px solid var(--line);
-  flex-wrap:wrap}
-.summary div{font-size:11.5px;color:var(--dim);letter-spacing:.05em;text-transform:uppercase}
-.summary b{display:block;font:600 20px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;
-  color:var(--ink);font-variant-numeric:tabular-nums;text-transform:none;letter-spacing:0}
-.summary i{font-style:normal;font-size:12px;color:var(--faint);text-transform:none;
-  letter-spacing:0}
+.summary{display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid var(--line)}
+.summary div{padding:13px 15px}
+.summary div+div{border-left:1px solid var(--line)}
+.summary span{font-size:11px;color:var(--dim);letter-spacing:.07em;text-transform:uppercase}
+.summary b{display:block;margin-top:2px;font:600 26px/1.1 ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.summary i{font-style:normal;font-size:11.5px;color:var(--faint)}
 
-/* A scoresheet: one row per move, both plies on it, which is how a game is
-   written down and half the rows of a ply-per-line list. */
-.sheet{max-height:56vh;overflow-y:auto;padding:5px 6px}
-.row{display:grid;grid-template-columns:38px 1fr 1fr;gap:4px;align-items:stretch}
-.no{color:var(--faint);font-size:12.5px;padding:4px 4px 4px 0;text-align:right;
+.sheet{max-height:64vh;overflow-y:auto;padding:6px}
+.row{display:grid;grid-template-columns:32px 1fr 1fr;gap:3px;align-items:stretch}
+.no{color:var(--faint);font-size:12px;padding:5px 5px 0 0;text-align:right;
   font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
-.ply{display:flex;align-items:baseline;gap:6px;padding:4px 7px;border-radius:5px;
-  border:0;background:transparent;color:var(--ink);cursor:pointer;text-align:left;
-  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13.5px;width:100%}
+.ply{display:flex;align-items:baseline;gap:7px;padding:4px 8px;border-radius:5px;
+  border:0;background:transparent;color:var(--ink);cursor:pointer;text-align:left;width:100%;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13.5px}
 .ply:hover{background:var(--shade)}
-.ply.sel{background:var(--shade2)}
-.ply .d{margin-left:auto;font-size:11.5px;color:var(--faint);font-variant-numeric:tabular-nums}
-.ply.Blunder{color:var(--blunder);font-weight:650}
-.ply.Mistake{color:var(--mistake);font-weight:650}
+.ply.sel{background:var(--shade2);box-shadow:inset 2px 0 0 var(--accent)}
+.ply .d{margin-left:auto;font-size:11px;color:var(--faint);font-variant-numeric:tabular-nums}
+.ply.Blunder,.ply.Mistake{font-weight:700}
+.ply.Blunder{color:var(--blunder)}.ply.Mistake{color:var(--mistake)}
 .ply.Inaccuracy{color:var(--inacc)}
-.ply.Blunder .d,.ply.Mistake .d,.ply.Inaccuracy .d{color:inherit}
+.ply.Blunder .d,.ply.Mistake .d,.ply.Inaccuracy .d{color:inherit;opacity:.85}
 
-.graph{margin-top:16px;padding:13px 15px 9px}
-svg{display:block;width:100%;height:112px;overflow:visible}
-.note{color:var(--faint);font-size:12px;margin-top:22px;line-height:1.65;max-width:70ch}
+.graph{margin-top:16px;padding:14px 17px 8px}
+.glab{display:flex;justify-content:space-between;font-size:11px;color:var(--faint);
+  letter-spacing:.06em;text-transform:uppercase;margin-bottom:7px}
+svg{display:block;width:100%;height:150px;overflow:visible}
+.note{color:var(--faint);font-size:12px;margin-top:24px;line-height:1.7;max-width:72ch}
 @media (prefers-reduced-motion:no-preference){.ply,button{transition:background-color .12s}}
 </style></head><body><div class="wrap">
 <header>
   <h1 id="ttl"></h1>
-  <div class="sub mono" id="sub"></div>
+  <div class="cond mono" id="cond"></div>
 </header>
 <div class="cols">
   <div class="stack">
     <div class="card">
-      <div class="boardbox"><div id="board"></div></div>
+      <div class="play">
+        <div class="bar"><i id="bar" style="height:50%"></i></div>
+        <div class="boardbox"><div id="board"></div></div>
+      </div>
       <div class="nav">
-        <button onclick="go(-999)" title="start">&#8676;</button>
-        <button onclick="go(-1)" title="previous">&#8592;</button>
-        <button onclick="go(1)" title="next">&#8594;</button>
-        <button onclick="go(999)" title="end">&#8677;</button>
-        <span class="sub mono" style="margin-left:auto" id="pos"></span>
+        <button onclick="go(-999)" title="Start">&#8676;</button>
+        <button onclick="go(-1)" title="Previous">&#8592;</button>
+        <button onclick="go(1)" title="Next">&#8594;</button>
+        <button onclick="go(999)" title="End">&#8677;</button>
+        <span class="ply-count mono" id="pos"></span>
       </div>
     </div>
     <div class="card detail" id="detail"></div>
@@ -345,126 +375,136 @@ svg{display:block;width:100%;height:112px;overflow:visible}
     <div class="sheet" id="list"></div>
   </div>
 </div>
-<div class="card graph"><span class="sub">evaluation &middot; white's point of view</span>
-<svg id="g" viewBox="0 0 600 112" preserveAspectRatio="none"></svg></div>
+<div class="card graph">
+  <div class="glab"><span>evaluation, white's point of view</span><span id="glab2"></span></div>
+  <svg id="g" viewBox="0 0 600 150" preserveAspectRatio="none"></svg>
+</div>
 <p class="note" id="note"></p>
 </div>
 <script>
 const H=__HEAD__, M=__MOVES__;
 const S={k:"♚",q:"♛",r:"♜",b:"♝",n:"♞",p:"♟"};
 let cur=-1;
+const winPct=cp=>50+50*(2/(1+Math.exp(-0.00368208*cp))-1);
 
-function sq(u){
-  if(!u||u.length<4)return[];
+function sq(u){ if(!u||u.length<4)return[];
   const ix=t=>(8-(+t[1]))*8+(t.charCodeAt(0)-97);
-  return[ix(u.slice(0,2)),ix(u.slice(2,4))];
-}
+  return[ix(u.slice(0,2)),ix(u.slice(2,4))]; }
 function board(fen,uci){
   const rows=fen.split(" ")[0].split("/"), b=document.getElementById("board"), mark=sq(uci);
   b.innerHTML="";
   for(let r=0;r<8;r++){let f=0;
     for(const ch of rows[r]){
       if(ch>="1"&&ch<="8"){for(let k=0;k<+ch;k++,f++)cell(b,r,f,"",false,mark)}
-      else{cell(b,r,f++,S[ch.toLowerCase()]||"",ch===ch.toUpperCase(),mark)}
+      else cell(b,r,f++,S[ch.toLowerCase()]||"",ch===ch.toUpperCase(),mark);
     }}
 }
 function cell(b,r,f,g,white,mark){
   const d=document.createElement("div");
   d.className=((r+f)%2?"dk":"lt")+(mark.includes(r*8+f)?" hl":"");
   if(g){const s=document.createElement("span");s.className=white?"wp":"bp";s.textContent=g;d.appendChild(s)}
+  if(r===7)d.insertAdjacentHTML("beforeend",'<span class="co f">'+"abcdefgh"[f]+'</span>');
+  if(f===0)d.insertAdjacentHTML("beforeend",'<span class="co r">'+(8-r)+'</span>');
   b.appendChild(d);
 }
-function fmt(cp){return (cp>0?"+":"")+(cp/100).toFixed(2)}
-function label(m){return m.san+(m.label=="Blunder"?"??":m.label=="Mistake"?"?":m.wp>=5?"?!":"")}
+const fmt=cp=>(cp>0?"+":"")+(cp/100).toFixed(2);
+const label=m=>m.san+(m.label=="Blunder"?"??":m.label=="Mistake"?"?":m.wp>=5?"?!":"");
 
 function detail(){
   const d=document.getElementById("detail");
-  if(cur<0){d.innerHTML='<div class="sub">Starting position. Click a move, or use the arrow keys.</div>';return}
+  d.className="card detail"+(cur>=0&&M[cur].wp>=5?" "+M[cur].label:"");
+  if(cur<0){
+    d.innerHTML='<div class="dline">Starting position. Click any move, or use the '+
+      '<b>&larr;</b> and <b>&rarr;</b> keys.</div>';return;
+  }
   const m=M[cur];
   let h='<div class="dhead"><span class="dmove">'+((cur>>1)+1)+(m.w?". ":"… ")+label(m)+'</span>'+
         '<span class="badge b-'+m.label+'">'+m.label+'</span>'+
-        '<span class="dloss mono">eval '+fmt(m.ev)+'</span></div>';
+        '<span class="deval mono">'+fmt(m.ev)+'</span></div>';
   if(m.wp>=5){
-    h+='<div class="dterms">Gave up <b>'+m.wp.toFixed(1)+'%</b> win probability'+
-       (m.cp?' ('+m.cp+' cp)':'')+(m.best?', best was <b>'+m.best+'</b>':'')+'.</div>';
-    if(m.terms)h+='<div class="dterms">'+(m.terms=="no term accounts for it"
-      ?'<b>No evaluation term accounts for it</b> — this engine cannot see what was lost.'
-      :'ChessBot’s evaluation moved: <b>'+m.terms+'</b>')+'</div>';
-  } else {
-    h+='<div class="dterms">Nothing given up here.</div>';
-  }
+    h+='<div class="dline">Gave up <b>'+m.wp.toFixed(1)+'%</b> win probability'+
+       (m.cp?' — '+m.cp+' centipawns':'')+(m.best?'. Best was <b>'+m.best+'</b>':'')+'.</div>';
+    if(m.terms==="no term accounts for it")
+      h+='<div class="dline"><b>No evaluation term accounts for it.</b> ChessBot cannot '+
+         'see what this move lost.</div>';
+    else if(m.terms){
+      h+='<div class="terms">'+m.terms.split(", ").map(t=>{
+        const i=t.lastIndexOf(" ");
+        return '<span class="term"><em>'+t.slice(0,i)+'</em> '+t.slice(i+1)+'</span>';
+      }).join("")+'</div>';
+    }
+  } else h+='<div class="dline">Nothing given up here.</div>';
   d.innerHTML=h;
 }
 function render(){
-  const m=cur<0?null:M[cur];
+  const m=cur<0?null:M[cur], ev=m?m.ev:H.startEval;
   board(m?m.fen:H.startFen, m?m.uci:"");
+  document.getElementById("bar").style.height=winPct(ev).toFixed(1)+"%";
   document.getElementById("pos").textContent=(cur+1)+" / "+M.length;
   document.querySelectorAll(".ply").forEach(e=>e.classList.toggle("sel",+e.dataset.i===cur));
   const s=document.querySelector(".ply.sel"); if(s)s.scrollIntoView({block:"nearest"});
+  document.getElementById("glab2").textContent=fmt(ev);
   detail(); marker();
 }
-function go(d){
-  cur=d===-999?-1:d===999?M.length-1:Math.max(-1,Math.min(M.length-1,cur+d));
-  render();
-}
+function go(d){ cur=d===-999?-1:d===999?M.length-1:Math.max(-1,Math.min(M.length-1,cur+d)); render(); }
 document.addEventListener("keydown",e=>{
   if(e.key==="ArrowLeft")go(-1);else if(e.key==="ArrowRight")go(1);
   else if(e.key==="Home")go(-999);else if(e.key==="End")go(999);else return;
   e.preventDefault();
 });
 
-document.getElementById("ttl").textContent=H.white+"  vs  "+H.black;
-document.getElementById("sub").textContent=
-  H.result+"  ·  "+M.length+" moves  ·  "+H.engine.split("/").pop()+" depth "+H.depth;
+document.getElementById("ttl").innerHTML=
+  H.white+'<span class="vs">vs</span>'+H.black;
+document.getElementById("cond").innerHTML=
+  '<b>'+H.result+'</b>'+M.length+' moves · '+H.engine.split("/").pop()+' depth '+H.depth;
 document.getElementById("acc").innerHTML=
-  '<div>White accuracy<b>'+H.accW.toFixed(1)+'%</b><i>'+H.cpW.toFixed(1)+' cp avg loss</i></div>'+
-  '<div>Black accuracy<b>'+H.accB.toFixed(1)+'%</b><i>'+H.cpB.toFixed(1)+' cp avg loss</i></div>';
+  '<div><span>White accuracy</span><b>'+H.accW.toFixed(1)+'%</b><i>'+H.cpW.toFixed(1)+' cp avg loss</i></div>'+
+  '<div><span>Black accuracy</span><b>'+H.accB.toFixed(1)+'%</b><i>'+H.cpB.toFixed(1)+' cp avg loss</i></div>';
 
 const list=document.getElementById("list");
 for(let i=0;i<M.length;i+=2){
   const row=document.createElement("div"); row.className="row";
-  row.innerHTML='<span class="no">'+((i>>1)+1)+'.</span>';
+  row.innerHTML='<span class="no">'+((i>>1)+1)+'</span>';
   for(const j of [i,i+1]){
     if(j>=M.length){row.insertAdjacentHTML("beforeend","<span></span>");continue}
     const m=M[j], b=document.createElement("button");
-    b.className="ply "+m.label; b.dataset.i=j;
-    b.innerHTML='<span>'+label(m)+'</span>'+
-      (m.wp>=5?'<span class="d">-'+m.wp.toFixed(1)+'%</span>':'<span class="d">'+fmt(m.ev)+'</span>');
+    b.className="ply "+(m.wp>=5?m.label:""); b.dataset.i=j;
+    b.innerHTML='<span>'+label(m)+'</span><span class="d">'+
+      (m.wp>=5?"-"+m.wp.toFixed(1)+"%":fmt(m.ev))+'</span>';
     b.onclick=()=>{cur=j;render()};
     row.appendChild(b);
   }
   list.appendChild(row);
 }
 
-const W=600,Hh=112,CAP=800;
+const W=600,GH=150,CAP=700;
 const pts=[H.startEval].concat(M.map(m=>m.ev));
 const gx=i=>i*W/Math.max(1,pts.length-1);
-const gy=v=>Hh/2-Math.max(-CAP,Math.min(CAP,v))/CAP*(Hh/2-5);
+const gy=v=>GH/2-Math.max(-CAP,Math.min(CAP,v))/CAP*(GH/2-6);
 (function graph(){
   let d="M"+gx(0)+","+gy(pts[0]);
   pts.forEach((v,i)=>{if(i)d+="L"+gx(i)+","+gy(v)});
+  let marks="";
+  M.forEach((m,i)=>{ if(m.wp>=10) marks+='<circle cx="'+gx(i+1)+'" cy="'+gy(m.ev)+'" r="3" fill="var(--'+
+    (m.label=="Blunder"?"blunder":"mistake")+')"/>'; });
   document.getElementById("g").innerHTML=
     '<defs><linearGradient id="f" x1="0" y1="0" x2="0" y2="1">'+
-    '<stop offset="0" stop-color="currentColor" stop-opacity=".22"/>'+
+    '<stop offset="0" stop-color="currentColor" stop-opacity=".20"/>'+
     '<stop offset="1" stop-color="currentColor" stop-opacity=".02"/></linearGradient></defs>'+
-    '<path d="'+d+'L'+W+','+(Hh/2)+'L0,'+(Hh/2)+'Z" fill="url(#f)"/>'+
-    '<line x1="0" y1="'+(Hh/2)+'" x2="'+W+'" y2="'+(Hh/2)+'" stroke="currentColor" stroke-opacity=".35"/>'+
-    '<path d="'+d+'" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>'+
-    '<circle id="mk" r="3.5" fill="var(--sq-mark)" style="display:none"/>';
+    '<path d="'+d+'L'+W+','+(GH/2)+'L0,'+(GH/2)+'Z" fill="url(#f)"/>'+
+    '<line x1="0" y1="'+(GH/2)+'" x2="'+W+'" y2="'+(GH/2)+'" stroke="currentColor" stroke-opacity=".38" stroke-dasharray="3 3"/>'+
+    '<path d="'+d+'" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>'+
+    marks+'<circle id="mk" r="4" fill="var(--accent)" stroke="var(--panel)" stroke-width="1.5"/>';
 })();
 function marker(){
   const c=document.getElementById("mk"); if(!c)return;
-  const i=cur+1;
-  c.setAttribute("cx",gx(i)); c.setAttribute("cy",gy(pts[i]));
-  c.style.display="";
+  const i=cur+1; c.setAttribute("cx",gx(i)); c.setAttribute("cy",gy(pts[i]));
 }
-
 document.getElementById("note").textContent=
-  "Accuracy depends on the analysing engine, its depth and the curve used, so these "+
-  "numbers compare games reviewed the same way and nothing else. The named terms "+
-  "describe what moved in ChessBot’s own evaluation, which is not why "+
-  H.engine.split("/").pop()+" scored the move that way — where the two disagree, "+
-  "that disagreement is the useful part.";
+  "Accuracy depends on the analysing engine, its depth and the curve used, so these numbers "+
+  "compare games reviewed the same way and nothing else. The named terms describe what moved "+
+  "in ChessBot’s own evaluation, which is not why "+H.engine.split("/").pop()+" scored the move "+
+  "that way — where the two disagree, that disagreement is the useful part.";
 render();
 </script></body></html>
 )HTML";

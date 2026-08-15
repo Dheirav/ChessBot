@@ -358,6 +358,22 @@ Deliberately no embedded font: inlining a face as a data URI would bloat every
 report the tool ever writes, which is a real cost for something that emits one
 file per game.
 
+**How the layout was actually checked.** Reading the HTML is not checking it:
+three defects survived inspection and only fell to a screenshot — uneven ranks,
+white pieces reading as black, and black pieces disappearing on dark squares.
+Chrome renders it headlessly without a display:
+
+```bash
+cp ~/reviews/GAME.html /mnt/c/Users/<user>/Temp/r.html
+"/mnt/c/Program Files/Google/Chrome/Application/chrome.exe" --headless=new \
+  --disable-gpu --window-size=1050,900 --screenshot=C:\Users\<user>\Temp\shot.png \
+  "file:///C:/Users/<user>/Temp/r.html"
+```
+
+Stamp `<html data-theme="light">` on a copy to see the other theme: the default
+is whatever the renderer's `prefers-color-scheme` reports, so one screenshot
+only ever tests one of the two.
+
 **Not done, and cheap when wanted:** flipping the board when the bot played
 Black, an opening name, the `Book`/`Brilliant`/`Great`/`Miss` labels below, and
 a batch index across the archive to pair with `tools/archive-profile.py`.
