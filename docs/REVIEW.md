@@ -320,6 +320,50 @@ would silently corrupt the games it was asked to explain. `tests/pgn` checks it.
 
 ---
 
+## R5. An HTML report — **DONE 2026-08-15**
+
+```bash
+./tools/review game.pgn --html out.html      # one self-contained page
+./tools/review-open.sh --latest              # newest archived game, opened
+```
+
+**This reverses R4's stated choice, and the reason matters.** R4 picked the
+annotated PGN *over* a report because it "needs no interface at all and reaches
+every tool that already reads PGN". That is still true and the PGN output stays.
+What it does not reach is the term attribution: no PGN viewer on earth renders
+"threats −750, material +200", and that line is the whole reason this tool
+exists as an instrument rather than a toy. Pasting into Lichess gives you the
+graph and the glyphs; it cannot give you what this engine's evaluation thought.
+
+So the two outputs answer different questions and both are kept. Use
+`--annotate` to study the game, `--html` to study the engine.
+
+**One file, no dependencies.** No CDN, no webfont, no images — a review is
+something you send to someone, and a page that fetches anything is a page that
+breaks on the machine you sent it to. Pieces are Unicode glyphs for the same
+reason. A generated report is ~15 KB.
+
+**What it shows.** Board with the played move framed, a scoresheet with a
+severity rail so criticised moves are findable in a list of eighty, per-side
+accuracy and average centipawn loss, the term attribution under each criticised
+move, and an evaluation graph from White's point of view. Click a move or use
+the arrow keys.
+
+`--html` implies `--explain`: a page that classified moves without saying which
+terms moved would be the less useful half of the tool.
+
+**Typography is fixed-pitch for notation** because chess notation has been set
+that way on every printed scoresheet, and it makes the evaluation column align.
+Deliberately no embedded font: inlining a face as a data URI would bloat every
+report the tool ever writes, which is a real cost for something that emits one
+file per game.
+
+**Not done, and cheap when wanted:** flipping the board when the bot played
+Black, an opening name, the `Book`/`Brilliant`/`Great`/`Miss` labels below, and
+a batch index across the archive to pair with `tools/archive-profile.py`.
+
+---
+
 ## Explicitly not doing
 
 - **Reimplementing Stockfish's analysis.** If trustworthy output is the goal,
