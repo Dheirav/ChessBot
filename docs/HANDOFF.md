@@ -94,8 +94,9 @@ ChessBot needs `--engine-arg --uci`. It has been used in anger once — that is
 6.1 under *Next* — and it has a known 3% phantom-loss floor from successive
 searches disagreeing, so a lone inaccuracy under ~5 win% is not evidence.
 
-The bench signature is **1,599,675 nodes** at depth 6. Any change claiming to
-preserve search behaviour must reproduce it exactly. It has moved four times this
+The bench signature is **1,323,943 nodes** at depth 6, since the 6.2 SEE rebuild
+landed on 2026-08-15 (from 1,599,675, −17.2%). Any change claiming to
+preserve search behaviour must reproduce it exactly. It has moved five times this
 week — 2,056,371 until `seeordering` was turned on (2026-08-13); then 1,465,771,
 1,725,755 and 1,759,990 as the three Phase 4 evaluation fixes landed
 (2026-08-14); then back down to 1,464,599 when the quiescence bound landed the
@@ -256,14 +257,15 @@ It found two things on the way, and both are now the work:
   published archive number in the direction that flattered them — see the entry,
   and note that `REVIEW.md`'s profile has been regenerated on the corrected
   parser (94.9%, not the 92.6% older documents quote).
-- **`threats` is the largest-magnitude term in the evaluation, larger than
-  material** — median |Δ| 148, p90 830, max 1555 — because
-  `hangingPiecePenalty` (`evaluation.cpp:547`) charges the *full piece value*
-  for anything merely attacked and undefended, without asking whose move it is
-  or whether the capture even wins material. `see.cpp` answers exactly that
-  question, is unit-tested, and is not consulted. **This is 6.2's first job**,
-  before any general weight tune: tuning over a term that double-counts material
-  would only find weights that hide it.
+- **`threats` was the largest-magnitude term in the evaluation, larger than
+  material**, because `hangingPiecePenalty` charged the *full piece value* for
+  anything merely attacked and undefended, without asking whose move it is or
+  whether the capture even wins material. **Rebuilt on `see()` and gated the
+  same day at +121.2 Elo, 95% CI [+110.8, +131.9]** — the largest measured gain
+  in this project by a factor of five. See `ROADMAP.md` 6.2, and read the null
+  control recorded there before quoting the number: the baseline against itself
+  returned exactly 50.00% over 1 120 games, which is what makes +121 a
+  measurement. It is **self-play Elo and does not convert to Lichess rating**.
 
 Still open in the existing plan: 3.4 (futility/razoring — **read 3.1's result
 first**, the same bet swung 57 Elo on one constant), 3.5 (IID, the safe one),

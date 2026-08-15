@@ -119,8 +119,14 @@ test-perft: tests/perft
 	./tests/perft
 
 # Run a short match. Override the defaults, e.g.
-#   make test-match MATCH_ARGS="100 4 12345"
-MATCH_ARGS ?= 25 4
+#   make test-match MATCH_ARGS="-n 100 -d 4 -s 12345 --hb off"
+#
+# The default has to name a difference. Both sides default to the shipped
+# configuration, and the harness refuses an A/B that differs in nothing, so the
+# old `25 4` exited 1 every time it was run. CI hit the same wall and was fixed
+# in 3fc24e0 (BUGS.md 9); this target was missed, and stayed broken because
+# `make tests` does not run it.
+MATCH_ARGS ?= -n 2 -d 4 -s 20260810 --hb off
 test-match: tests/match
 	./tests/match $(MATCH_ARGS)
 

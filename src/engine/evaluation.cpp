@@ -3,6 +3,7 @@
 #include "evaluation.hpp"
 #include "board.hpp"
 #include "movegen.hpp" // For generateLegalMoves
+#include "see.hpp"     // For pricing a threat by what the exchange actually wins
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -16,6 +17,28 @@ const int pieceValues[] = { 0, 20000, 100, 325, 335, 525, 950 };
 // the threat loop skips king targets entirely (a king can never be captured),
 // so any value here would be unreachable.
 const int threatBonus[] = { 0, 0, 10, 25, 30, 50, 100 };
+
+// A threatened piece is not a lost piece, and this term used to score it as one.
+//
+// The old rule charged the *full piece value* of anything attacked and not
+// defended — so a queen merely en prise read −950, on top of the material term
+// still counting her. That is material scored twice, and it made `threats` the
+// largest-magnitude term in the evaluation: over the 62-game archive its median
+// swing was 148 centipawns and its 90th percentile 830, both larger than
+// material's (`ROADMAP.md` 6.2). It also fired on threats that win nothing and
+// stayed silent on real ones, because "undefended" is not the same question as
+// "does the exchange win material" — a defended queen attacked by a pawn scored
+// zero.
+//
+// `see()` answers the right question and is already unit-tested, so the penalty
+// is now what the exchange actually wins. It is charged at a fraction because
+// the side to move usually gets to answer a threat: only one of the two sides'
+// threats can be executed next, and the other side has a move in which to save
+// the piece, interpose, or counter-attack. The divisor is a tuning constant and
+// deliberately a named one — delta pruning swung 57 Elo on a single constant of
+// this kind, so it should be tuned on its own evidence rather than folded into
+// a larger change.
+constexpr int HANGING_THREAT_DIVISOR = 2;
 
 // Piece-square tables (centipawns), white perspective, index 0 = a8 (matches board indexing).
 // Standard simplified evaluation tables. Black uses the vertically mirrored table (sq ^ 56).
@@ -508,6 +531,15 @@ EvalDetails evaluate_details(const Board& board) {
     // test below (previously two isSquareAttacked() ray-scans per piece).
     // Indexed by PieceColor, so slot 1 is white and slot 2 is black.
     bool attackedBy[3][64] = {};
+    // The square the cheapest attacker of each colour stands on, or -1. An
+    // exchange is opened by the least valuable attacker, so pricing a threat
+    // with see() needs to know which piece starts it — and the walk below
+    // already visits every attacker, so remembering the cheapest costs a
+    // comparison rather than a second scan. int8_t because a square index fits,
+    // and this is zeroed once per evaluation.
+    int8_t cheapestAttacker[3][64];
+    for (int c = 0; c < 3; ++c)
+        for (int s = 0; s < 64; ++s) cheapestAttacker[c][s] = -1;
 
     for (int i = 0; i < 64; ++i) {
         const Piece& attacker = board.squares[i];
@@ -520,6 +552,11 @@ EvalDetails evaluate_details(const Board& board) {
 
             const Piece& target = board.squares[j];
             if (target.type() == NONE || target.color() == ac) return;
+
+            const int8_t prev = cheapestAttacker[ac][j];
+            if (prev < 0 || attackerValue < pieceValues[board.squares[prev].type()])
+                cheapestAttacker[ac][j] = (int8_t)i;
+
             // The king is handled by the search's mate scores, not the static threats.
             if (target.type() == KING) return;
 
@@ -536,18 +573,35 @@ EvalDetails evaluate_details(const Board& board) {
         });
     }
 
-    // Penalize pieces that are really attacked but not really defended.
+    // Penalise pieces the opponent can actually win material on, by what the
+    // exchange is worth rather than by what the piece is worth. See
+    // HANGING_THREAT_DIVISOR for why this replaced "attacked and undefended,
+    // charged at full piece value".
+    //
     // The king is never a hangable piece; checkmate is scored by the search.
     for (int i = 0; i < 64; ++i) {
         const Piece& p = board.squares[i];
         if (p.type() == NONE || p.type() == KING) continue;
-        PieceColor own = p.color();
-        PieceColor enemyColor = (own == COLOR_WHITE) ? COLOR_BLACK : COLOR_WHITE;
-        if (attackedBy[enemyColor][i] && !attackedBy[own][i]) {
-            int hangingPenalty = pieceValues[p.type()];
-            if (own == COLOR_WHITE) hangingPiecePenalty -= hangingPenalty;
-            else                    hangingPiecePenalty += hangingPenalty;
-        }
+        const PieceColor own = p.color();
+        const PieceColor enemyColor = (own == COLOR_WHITE) ? COLOR_BLACK : COLOR_WHITE;
+        if (!attackedBy[enemyColor][i]) continue;
+
+        const int from = cheapestAttacker[enemyColor][i];
+        if (from < 0) continue;
+
+        // Defended, and attacked by nothing cheaper than itself: the exchange
+        // cannot win material, so skip it without paying for a see(). This is
+        // the common case by far, and see() is far too expensive to run on
+        // every attacked piece at every node without it.
+        if (attackedBy[own][i] &&
+            pieceValues[board.squares[from].type()] >= pieceValues[p.type()]) continue;
+
+        const int gain = see(board, Move(from, i, board.squares[from], p, CAPTURE));
+        if (gain <= 0) continue;
+
+        const int hangingPenalty = gain / HANGING_THREAT_DIVISOR;
+        if (own == COLOR_WHITE) hangingPiecePenalty -= hangingPenalty;
+        else                    hangingPiecePenalty += hangingPenalty;
     }
 
     threatScore = (whiteThreats - blackThreats) + captureIncentive + hangingPiecePenalty;

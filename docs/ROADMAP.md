@@ -84,8 +84,47 @@ deficit is not rare catastrophes — 9 blunders in 2 575 moves — it is a small
 uniform quality gap that compounds. **That is an argument for tuning weights,
 not for hunting blunders.**
 
-**6.2 Retune piece values and term weights** — *now first, and it has a named
-target.*
+**6.2 Retune piece values and term weights** — *now first. The first piece of it
+is done and is the largest gain this project has measured.*
+
+### The SEE rebuild — gated 2026-08-15 at **+121.2 Elo, 95% CI [+110.8, +131.9]**
+
+3 360 games at `-N 100000`, two binaries over UCI, 14 shards pooled. Score
+66.77%; pentanomial 68-154-559-381-518.
+
+**The control matters as much as the result.** A gain five times larger than
+anything else in this project (`seeordering` +25.6, `checkext` +23.0) is a
+reason to doubt the instrument first. So the same harness was run with the
+*baseline binary against itself*, from two different paths so the
+"A and B differ" guard still passed: 1 120 games, **50.00%**, pentanomial
+`0-0-560-0-0`. Every pair a perfect mirror, no A-side advantage of any kind. The
+binaries were also confirmed distinct by node count — the baseline reproduces
+the stored bench reference exactly at 27 986 nodes on startpos at depth 6, the
+rebuild gives 45 278.
+
+Three independent lines agree on why it is this large, which is the part worth
+trusting more than the interval:
+
+| evidence | reading |
+|---|---|
+| `evalref`: `\|threats\|` p90 950 → 591, max **2755 → 1339** | the old term routinely outweighed material, and could exceed two queens |
+| 6.1: `threats` led 80 of 154 error explanations, **49 with no material change** | the engine's own mistakes were dominated by phantom threat swings |
+| bench **−17.2% nodes** at identical depth | the search cuts faster once the score stops lying to it |
+
+Wall clock improved 6.2% as well (569.9k → 504.2k nps against 17.2% fewer
+nodes), measured interleaved over three rounds — `see()` costs about 13% per
+node and pays for itself several times over.
+
+**Two things this number is not.** It is **self-play Elo and does not convert to
+Lichess rating** — both sides share every remaining blind spot, and differ in
+exactly the thing being measured, which is the arrangement that most flatters a
+change. And it measures one point in the design space, with the divisor at 2;
+see below.
+
+*Still open in 6.2:* the general Texel-style tune, now over an evaluation whose
+largest term has stopped lying.
+
+### The original target, for the record
 
 The values in `evaluation.cpp` are conventional guesses. Tuning them against
 real game outcomes (Texel-style: pick the weights that best predict results over
@@ -127,6 +166,25 @@ full A/B gated on nodes through the two-binary path (`BUGS.md` 8), not a toggle.
 `evalref` will diff and `bench` will move; read both before regenerating either.
 Do this **before** the general tune — tuning weights over a term that
 double-counts material would only find weights that paper over it.
+
+**The divisor is an unmeasured constant, and it is the most exposed decision in
+6.2.** The rebuilt term charges `see() / HANGING_THREAT_DIVISOR`, and the
+divisor was set to 2 by argument — only one side's threat can be executed next,
+so the other side has a move in which to save the piece — not by evidence. This
+project has a scar in exactly that place: delta pruning swung from **−50.0 to
++7.1 on a single constant**, and the first value looked as reasonable as the
+second right up until it was measured.
+
+So whatever the first gate returns, it measures *one point* in this term's
+design space, not the idea. The follow-up is two more pairwise gates at the same
+3 360 games — divisor 1 (charge the whole exchange) and divisor 3 — against
+whichever wins, and it belongs before any general weight tune: a term still
+moving is not a term worth tuning around. The honest expectation is that two of
+the three are indistinguishable, which is still worth knowing, because it bounds
+how much the constant matters.
+
+Do **not** fold this into the same gate as the SEE rebuild. A and B must differ
+in exactly one thing, and "rebuilt on SEE, charged at half" is two.
 
 **6.3 Add the terms a blind-spot list demands** — **deferred; there is no such
 list.** 6.1 was supposed to produce it and returned four moves, one of which is

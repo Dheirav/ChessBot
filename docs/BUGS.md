@@ -291,13 +291,61 @@ because the process was gone.
 Stop the bot **between** games, never during one. Check for a live game first:
 
 ```bash
-pgrep -f 'chessbot --uci' && echo "in a game — wait"
+pgrep -x chessbot && echo "in a game — wait"
 ```
+
+`pgrep -x` on the command name, not `pgrep -f` on a pattern — see 9. This entry
+recommended the `-f` form until 2026-08-15, which is its own small instance of
+the same lesson.
 
 The position was also losing on the board (`19.Qd4` walked the queen onto the
 a1-h8 diagonal against `Bf6`, met by `Bxd4` with no recapture), so the forfeit
 did not cost a won game. It cost 120 rating points that a normal loss would not
 have.
+
+### SIGINT does not finish the current game — 2026-08-15
+
+`lichess-bot`'s handler looks reassuring: the first SIGINT only sets
+`stop.terminated = True`, and a second sets `force_quit`. Reading that, it is
+natural to conclude the first one is graceful and lets the live game finish.
+**It does not.** Signalled during `Crimsy_Bot vs JDoss_BOT`
+([gUH04Bb7](https://lichess.org/gUH04Bb7)), the bot stopped playing the game and
+exited, leaving our clock running with nobody to answer.
+
+The game survived only because the opponent was slow and it was noticed within
+minutes; restarting `lichess-bot` made it reconnect and resume the game in
+progress. It still cost **eight minutes of clock** — 12.2 down to 4.4 — in a
+rated 900+10 game against a 2161. It was one slow reply away from being a second
+time forfeit.
+
+**And the check afterwards proves nothing.** The obvious way to confirm it was
+safe is to look for the engine process after signalling:
+
+```bash
+kill -INT "$botpid"; sleep 3
+pgrep -x chessbot || echo "no game was running"     # WRONG
+```
+
+That reports "no game" every time, because the engine exits *as a consequence*
+of the signal. It measures the effect of the action, not the precondition for
+it. The reading was taken on 2026-08-15 and was believed.
+
+The signal to wait on is the **game's result on Lichess**, which no local
+process can fake:
+
+```bash
+curl -s "https://lichess.org/game/export/$GAME?moves=false&tags=true" | grep '^\[Result'
+# [Result "*"] means still playing
+```
+
+Then stop the bot only once `pgrep -x chessbot` finds nothing *before* any
+signal is sent — that gap is what "between games" actually means.
+
+The general form of the mistake is worth keeping, because it is not really
+about `lichess-bot`: **reading an implementation is not the same as having
+tested it.** `ROADMAP.md` already says a documented command that has never been
+run is a guess. Inferring behaviour from source is the same guess wearing better
+clothes.
 
 ---
 
@@ -393,6 +441,27 @@ flag-form equivalent.
 was not running, a poll loop that could never terminate, and a watcher reported
 alive after it had exited. Use `pgrep -x` on the command name.
 
+**It came back three more times on 2026-08-15**, which is why this is written
+out rather than left as a one-line warning. `pgrep -f 'lichess-bot\.py'`
+reported the bot alive after it had exited — the match was the shell running the
+check, whose command line contained the string. Acting on that would have meant
+signalling the wrong process, and a script that looked up the PID that way was
+written before the problem was spotted.
+
+`pgrep -x` fixes the process check but not the general case, because sometimes
+the full command line is genuinely what you need — to tell one Python process
+from another, say. Then the pattern has to exclude the shells:
+
+```bash
+ps -eo pid,args --no-headers | grep 'lichess-bot\.py' \
+  | grep -v 'bash -c' | grep -v grep | awk '{print $1}'
+```
+
+The same trap catches `ps | grep` output being read by eye: a listing of
+"`chessbot` processes" on 2026-08-15 showed four, three of which were shell
+commands that merely mentioned the path. **Before believing any process listing,
+check whether the tooling doing the looking is in it.**
+
 The lesson is the cheap one, and it cost a day to learn three times: a
 documented command that has never been run is a guess. The `shard-gate.sh` one
 sat at the top of `HANDOFF.md` and was carried forward through two separate
@@ -455,6 +524,72 @@ See `ROADMAP.md` 6.1.
 **A reference measured through a broken instrument is worse than no reference**,
 because it gets quoted. `REVIEW.md`'s 92.6% archive accuracy and its
 won/drawn/lost table predate this fix and have not been regenerated.
+
+---
+
+## 11. The clock is hoarded, not spent — and no test can see it
+
+Noticed from watching games on 2026-08-15, and the impression was the opposite
+of the fact: the bot looked like it was always about to lose on time. It is the
+*opponents* who run low. Over the 19 games in the bot log with clock traces:
+
+| | |
+|---|---|
+| our per-game **minimum** clock, median | **472 s** of a 900 s start |
+| games where we fell below 60 s | **0** |
+| games where the opponent did | 3, the worst at 10.9 s |
+| our lowest ever | 252.7 s, and that was the outage in 7, not the engine |
+
+**The cause is `parseGo` (`uci.cpp:154`).**
+
+```cpp
+int moves = (movestogo > 0) ? movestogo : 30;
+long budget = remaining / moves + increment / 2;
+```
+
+Two independent leaks:
+
+- **It divides whatever is left by 30 on every move, forever.** There is no
+  estimate of moves remaining, so the allocation decays geometrically instead of
+  being spent: 35 s on move 1 of 900+10, ~21 s once 472 s remain, less after
+  that. Spending settles where `remaining/30 + inc/2 == inc`, i.e. at
+  **`15 × increment`** — about 150 s for a 10 s increment. The clock converges to
+  a floor rather than being used, which is precisely the 250-470 s floors in the
+  games.
+- **It banks half the increment.** With a 10 s increment, spending the whole
+  10 s every move keeps the clock level indefinitely. `increment / 2` gives away
+  5 s a move to buy nothing.
+
+The result is a game finished with more than half the thinking time unused. On
+this engine that is not a rounding error: every gate that paid did so by buying
+*quality per node* (`checkext` +23.0 Elo at 9.2% more nodes), and unspent time
+is exactly that, unbought.
+
+### The instrument cannot see it, which is why it survived
+
+This is the same shape as 8, and it is the reason this is filed rather than
+fixed. `tests/match`'s `-t <ms>` is a budget **per move**, and
+`UciEngine::bestMove` only ever sends `go nodes`, `go movetime` or `go depth`.
+The in-process path takes the same `SearchLimits.moveTimeMs`. **Neither path has
+ever sent `wtime`, `btime`, `winc` or `binc`**, so the clock branch of
+`parseGo` — the code with the defect in it — is not reached by any test, gate or
+smoke run in this repository. It only ever runs on Lichess.
+
+So a fix cannot be gated as things stand: at a fixed per-move budget, time
+management is *definitionally* invisible, because the harness has already made
+the decision the manager exists to make.
+
+What it needs first is a real clock in the harness: `--tc <base>+<inc>`,
+decrementing per side per move, with `UciEngine` sending the clock tokens and
+the driver failing a side that oversteps. That is the honest prerequisite, and
+it is worth noting it also buys the first instrument that can catch a *forfeit*
+— which 7 shows is this project's most expensive failure mode and is currently
+detectable only by losing a rated game.
+
+Until then, do not "fix" the formula on argument alone. A time manager that
+spends more is not obviously better — it could as easily walk into the overrun
+the `remaining / 4` cap exists to prevent — and this project has already learned
+twice what a plausible constant is worth without a measurement.
 
 ---
 
