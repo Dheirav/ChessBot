@@ -94,9 +94,10 @@ ChessBot needs `--engine-arg --uci`. It has been used in anger once — that is
 6.1 under *Next* — and it has a known 3% phantom-loss floor from successive
 searches disagreeing, so a lone inaccuracy under ~5 win% is not evidence.
 
-The bench signature is **1,323,943 nodes** at depth 6, since the 6.2 SEE rebuild
-landed on 2026-08-15 (from 1,599,675, −17.2%). Any change claiming to
-preserve search behaviour must reproduce it exactly. It has moved five times this
+The bench signature is **1,086,693 nodes** at depth 6, after 6.2 removed the
+hanging-piece penalty on 2026-08-15 (1,599,675 → 1,323,943 → 1,086,693, −32.1%
+across the day). Any change claiming to preserve search behaviour must reproduce
+it exactly. It has moved six times this
 week — 2,056,371 until `seeordering` was turned on (2026-08-13); then 1,465,771,
 1,725,755 and 1,759,990 as the three Phase 4 evaluation fixes landed
 (2026-08-14); then back down to 1,464,599 when the quiescence bound landed the
@@ -259,13 +260,18 @@ It found two things on the way, and both are now the work:
   parser (94.9%, not the 92.6% older documents quote).
 - **`threats` was the largest-magnitude term in the evaluation, larger than
   material**, because `hangingPiecePenalty` charged the *full piece value* for
-  anything merely attacked and undefended, without asking whose move it is or
-  whether the capture even wins material. **Rebuilt on `see()` and gated the
-  same day at +121.2 Elo, 95% CI [+110.8, +131.9]** — the largest measured gain
-  in this project by a factor of five. See `ROADMAP.md` 6.2, and read the null
-  control recorded there before quoting the number: the baseline against itself
-  returned exactly 50.00% over 1 120 games, which is what makes +121 a
-  measurement. It is **self-play Elo and does not convert to Lichess rating**.
+  anything merely attacked and undefended. Rebuilding it on `see()` gated at
+  **+121.2 Elo**; then gating the divisor it carried showed the score still
+  climbing as the charge shrank, all the way to charging nothing. **The term is
+  now deleted, worth a further +155.0 Elo [+144.3, +166.0]**, and the engine is
+  32.1% fewer nodes and 21.6% faster on the clock than it was this morning.
+
+  Read `ROADMAP.md` 6.2 before quoting any of it. The short version: **the gain
+  was never accuracy, it was silence** — a static score cannot know whether a
+  threatened piece will be saved, and the search settles it a ply later anyway.
+  The controls are recorded there too (baseline against itself: 1 120 games,
+  exactly 50.00%), and all of it is **self-play Elo, which does not convert to
+  Lichess rating**.
 
 Still open in the existing plan: 3.4 (futility/razoring — **read 3.1's result
 first**, the same bet swung 57 Elo on one constant), 3.5 (IID, the safe one),

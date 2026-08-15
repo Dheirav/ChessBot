@@ -26,7 +26,7 @@ Every measurement this week points at it:
 | `deltapruning` **−50 → +7.1** on a margin change | pruning that trusts the static score is fragile because the score is |
 | `checkext` **+23.0**, costing 9.2% *more* nodes | quality per node wins; speed per node has returned ~zero, three times |
 | accuracy **96.6% → 93.2%** as opponents strengthen | a small uniform quality gap, not rare catastrophes — 9 blunders in 2 575 moves |
-| `threats` swings **±830 at p90**, more than material | the largest term in the evaluation double-counts material (6.2) |
+| `threats` swung **±830 at p90**, more than material | it double-counted material; **deleting it was worth +155.0 Elo** (6.2) |
 
 ~~review says "no term accounts for it" → there are positions this evaluation
 cannot see at all~~ — **withdrawn 2026-08-15.** It was one example, and the
@@ -87,42 +87,82 @@ not for hunting blunders.**
 **6.2 Retune piece values and term weights** — *now first. The first piece of it
 is done and is the largest gain this project has measured.*
 
-### The SEE rebuild — gated 2026-08-15 at **+121.2 Elo, 95% CI [+110.8, +131.9]**
+### The hanging-piece term is gone, and removing it is worth **+155.0 Elo**
 
-3 360 games at `-N 100000`, two binaries over UCI, 14 shards pooled. Score
-66.77%; pentanomial 68-154-559-381-518.
+Final: **+155.0 Elo, 95% CI [+144.3, +166.0]**, 3 360 games at `-N 100000`, two
+binaries over UCI, 14 shards pooled, measured against the SEE rebuild that
+shipped earlier the same day.
 
-**The control matters as much as the result.** A gain five times larger than
-anything else in this project (`seeordering` +25.6, `checkext` +23.0) is a
-reason to doubt the instrument first. So the same harness was run with the
-*baseline binary against itself*, from two different paths so the
-"A and B differ" guard still passed: 1 120 games, **50.00%**, pentanomial
-`0-0-560-0-0`. Every pair a perfect mirror, no A-side advantage of any kind. The
-binaries were also confirmed distinct by node count — the baseline reproduces
-the stored bench reference exactly at 27 986 nodes on startpos at depth 6, the
-rebuild gives 45 278.
+It took three steps to get here and the middle one was wrong in an instructive
+way, so all three are recorded.
 
-Three independent lines agree on why it is this large, which is the part worth
-trusting more than the interval:
+**1. The term was broken.** `hangingPiecePenalty` charged the *full piece value*
+of anything attacked and not defended. That is material counted twice, since the
+material term was still counting the piece, and it made `threats` the largest
+term in the evaluation — p90 950 centipawns, max 2 755, both larger than
+material's. It also asked the wrong question: "undefended" is not "does the
+exchange win material", so it fired on threats worth nothing and stayed silent
+on a defended queen attacked by a pawn.
 
-| evidence | reading |
+**2. Rebuilding it on `see()` was worth +121.2 Elo** [+110.8, +131.9], charging
+half of what the exchange actually wins. That looked like the answer.
+
+**3. It was not.** Gating the divisor — the constant picked by argument rather
+than evidence — found the score still climbing as the charge shrank:
+
+| divisor | Elo vs the shipped 2 |
 |---|---|
-| `evalref`: `\|threats\|` p90 950 → 591, max **2755 → 1339** | the old term routinely outweighed material, and could exceed two queens |
-| 6.1: `threats` led 80 of 154 error explanations, **49 with no material change** | the engine's own mistakes were dominated by phantom threat swings |
-| bench **−17.2% nodes** at identical depth | the search cuts faster once the score stops lying to it |
+| 1 (charge the whole exchange) | **−177.7** [−189.1, −166.7] |
+| 2 (shipped) | 0 — reference |
+| 3 | +66.8 [+57.0, +76.7] |
+| 4 | +98.1 [+80.9, +115.7] |
+| 6 | +105.2 [+87.4, +123.5] |
+| **none** | **+152.0** [+133.1, +171.8] → confirmed **+155.0** at full size |
 
-Wall clock improved 6.2% as well (569.9k → 504.2k nps against 17.2% fewer
-nodes), measured interleaved over three rounds — `see()` costs about 13% per
-node and pays for itself several times over.
+Monotone, with no peak between 6 and infinity, so no larger divisor could beat
+deleting it. **The gain never came from pricing threats accurately. It came from
+this term saying less.**
 
-**Two things this number is not.** It is **self-play Elo and does not convert to
-Lichess rating** — both sides share every remaining blind spot, and differ in
-exactly the thing being measured, which is the arrangement that most flatters a
-change. And it measures one point in the design space, with the divisor at 2;
-see below.
+That is the finding worth carrying: a static score cannot know whether a
+threatened piece will be saved. The search settles it a ply later, for real, and
+the guess was noise laid over an answer that was already coming. A 178 Elo swing
+between divisor 1 and divisor 2 says the same thing from the other end — the
+term's *magnitude* mattered enormously and its *accuracy* barely at all, which
+is not what a term that measures something true looks like.
+
+**Deleting it is also cheaper.** No `see()` per attacked piece, no
+cheapest-attacker tracking. Bench 1 599 675 → 1 086 693 across the day (−32.1%),
+and the wall clock 21.6% faster than the divisor-2 build measured interleaved.
+Simpler, stronger and quicker together, which is rare enough to be suspicious —
+hence the controls below.
+
+### Why these numbers are believed
+
+A +121 followed by a +155 in one afternoon is a reason to doubt the instrument,
+not to celebrate.
+
+- **The harness has no side bias.** The baseline was run against *itself* from
+  two paths so the "A and B differ" guard still passed: 1 120 games, **50.00%**,
+  pentanomial `0-0-560-0-0`. Every pair a perfect mirror.
+- **The binaries were confirmed distinct** by node count at depth 6, every time.
+- **The shipped build was confirmed identical to the one gated** — the deletion
+  and the huge-divisor build both give 27 458 nodes and the same move on
+  startpos, so the measured result transfers to the code that ships.
+- **The cheap scan agreed with the full gate**: +152.0 over 1 120 games against
+  +155.0 over 3 360. Ranking candidates at ±17 Elo and confirming the winner at
+  ±10 is sound, and three times faster than gating every candidate at full size.
+- **`evalref` was audited before regenerating**, twice: exactly two columns moved
+  each time, and `total`'s delta equalled `threats`' delta on every changed row.
+  Mirror symmetry held throughout, and it cannot be regenerated into agreement.
+
+**What it is still not: Lichess Elo.** Both sides share every remaining blind
+spot and differ in exactly the thing being measured, which is the arrangement
+that most flatters a change. `HANDOFF.md` says do not translate self-play into
+pool Elo, and a day that produced +121 and +155 is precisely when that rule is
+hardest to keep and most necessary.
 
 *Still open in 6.2:* the general Texel-style tune, now over an evaluation whose
-largest term has stopped lying.
+largest term has stopped shouting.
 
 ### The original target, for the record
 
@@ -167,24 +207,28 @@ full A/B gated on nodes through the two-binary path (`BUGS.md` 8), not a toggle.
 Do this **before** the general tune — tuning weights over a term that
 double-counts material would only find weights that paper over it.
 
-**The divisor is an unmeasured constant, and it is the most exposed decision in
-6.2.** The rebuilt term charges `see() / HANGING_THREAT_DIVISOR`, and the
-divisor was set to 2 by argument — only one side's threat can be executed next,
-so the other side has a move in which to save the piece — not by evidence. This
-project has a scar in exactly that place: delta pruning swung from **−50.0 to
-+7.1 on a single constant**, and the first value looked as reasonable as the
-second right up until it was measured.
+**The divisor was the most exposed decision in 6.2, and gating it overturned
+the change it belonged to.** It was set to 2 by argument — only one side's
+threat can be executed next, so the other has a move in which to save the piece
+— and the argument was half right: the *direction* was correct and the stopping
+point was not. Charging less kept helping all the way to charging nothing.
 
-So whatever the first gate returns, it measures *one point* in this term's
-design space, not the idea. The follow-up is two more pairwise gates at the same
-3 360 games — divisor 1 (charge the whole exchange) and divisor 3 — against
-whichever wins, and it belongs before any general weight tune: a term still
-moving is not a term worth tuning around. The honest expectation is that two of
-the three are indistinguishable, which is still worth knowing, because it bounds
-how much the constant matters.
+The precedent held exactly. Delta pruning swung **−50.0 to +7.1 on a single
+constant**; this one swung **−177.7 to +155.0** across its range, on a change
+whose headline number was +121.2. **A gated feature carrying an ungated constant
+is not a gated feature.** The constant was worth more than the feature.
 
-Do **not** fold this into the same gate as the SEE rebuild. A and B must differ
-in exactly one thing, and "rebuilt on SEE, charged at half" is two.
+Two habits paid for themselves here and are worth reusing:
+
+- **Sample the curve, do not test one alternative.** Had only divisor 3 been
+  tried it would have read +66.8, looked like a win, and shipped — leaving 88
+  Elo on the table and the wrong conclusion in the file. The shape is the
+  finding; a single comparison cannot show one.
+- **Scan cheap, confirm dear.** 1 120-game gates (±17 Elo) ranked five
+  candidates in the time two full gates would have taken, and the winner's
+  full-size confirmation landed within 3 Elo of its scan. Match the precision to
+  the effect: chasing ±10 on a 178-Elo difference is buying nothing at four
+  times the price.
 
 **6.3 Add the terms a blind-spot list demands** — **deferred; there is no such
 list.** 6.1 was supposed to produce it and returned four moves, one of which is
