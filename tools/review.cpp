@@ -25,7 +25,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -170,6 +172,64 @@ std::vector<TermDelta> termDiff(const Board& before, const Board& after) {
     return out;
 }
 
+// The board is drawn with the same piece images the GUI uses, inlined as data
+// URIs. "Self-contained" is the constraint that decides this: a <img src> to a
+// file beside the report breaks the moment the report is moved or mailed, and
+// the whole point of one file is that it survives being sent to someone.
+//
+// 12 PNGs at 45x45 come to about 16 KB, roughly 21 KB once base64'd, on a
+// report that is otherwise ~20 KB. That is a real cost and it buys the
+// difference between a chess diagram and a row of text characters.
+//
+// If the images cannot be found the report still works: the drawing code falls
+// back to Unicode glyphs, which is why this returns "{}" rather than failing.
+std::string base64(const std::string& in) {
+    static const char* T = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out;
+    out.reserve((in.size() + 2) / 3 * 4);
+    for (size_t i = 0; i < in.size(); i += 3) {
+        const unsigned a = (unsigned char)in[i];
+        const unsigned b = (i + 1 < in.size()) ? (unsigned char)in[i + 1] : 0;
+        const unsigned c = (i + 2 < in.size()) ? (unsigned char)in[i + 2] : 0;
+        const unsigned v = (a << 16) | (b << 8) | c;
+        out += T[(v >> 18) & 63];
+        out += T[(v >> 12) & 63];
+        out += (i + 1 < in.size()) ? T[(v >> 6) & 63] : '=';
+        out += (i + 2 < in.size()) ? T[v & 63] : '=';
+    }
+    return out;
+}
+
+std::string pieceImages() {
+    // Relative to the executable, like the move tables, so running from another
+    // directory does not silently produce a board with no pieces on it.
+    std::error_code ec;
+    std::filesystem::path exe = std::filesystem::read_symlink("/proc/self/exe", ec);
+    const std::filesystem::path base = ec ? std::filesystem::path(".") : exe.parent_path();
+    const std::filesystem::path candidates[] = {
+        base / ".." / "src" / "gui" / "assets" / "piece_images",
+        base / "src" / "gui" / "assets" / "piece_images",
+        std::filesystem::path("src") / "gui" / "assets" / "piece_images",
+    };
+    static const char* NAMES[12] = {"wK","wQ","wR","wB","wN","wP",
+                                    "bK","bQ","bR","bB","bN","bP"};
+    for (const std::filesystem::path& dir : candidates) {
+        std::string out = "{";
+        bool all = true;
+        for (const char* n : NAMES) {
+            std::ifstream f(dir / (std::string(n) + ".png"), std::ios::binary);
+            if (!f) { all = false; break; }
+            const std::string bytes((std::istreambuf_iterator<char>(f)),
+                                     std::istreambuf_iterator<char>());
+            if (bytes.empty()) { all = false; break; }
+            if (out.size() > 1) out += ",";
+            out += std::string("\"") + n + "\":\"data:image/png;base64," + base64(bytes) + "\"";
+        }
+        if (all) return out + "}";
+    }
+    return "{}";
+}
+
 // The report is one self-contained file: no CDN, no fonts, no images. A review
 // is something you send to someone, and a page that fetches anything is a page
 // that breaks on the machine you sent it to. Pieces are Unicode glyphs for the
@@ -282,6 +342,8 @@ h1 .vs{color:var(--faint);font-style:italic;font-size:22px;padding:0 6px}
    centred on the glyph outline, so without this the stroke eats half the fill
    and a white piece reads as a dark one -- the two sides became almost
    indistinguishable in the light theme. Stroke behind fill keeps both solid. */
+#board img{width:86%;height:86%;object-fit:contain;
+  filter:drop-shadow(0 1px 1px rgba(0,0,0,.28));pointer-events:none}
 .wp,.bp{paint-order:stroke fill}
 .wp{color:var(--wp-fill);-webkit-text-stroke:1.6px var(--wp-edge)}
 .bp{color:var(--bp-fill);-webkit-text-stroke:1.6px var(--bp-edge)}
@@ -382,7 +444,8 @@ svg{display:block;width:100%;height:150px;overflow:visible}
 <p class="note" id="note"></p>
 </div>
 <script>
-const H=__HEAD__, M=__MOVES__;
+const H=__HEAD__, M=__MOVES__, P=__PIECES__;
+const HAVE_IMG=Object.keys(P).length===12;
 const S={k:"♚",q:"♛",r:"♜",b:"♝",n:"♞",p:"♟"};
 let cur=-1;
 const winPct=cp=>50+50*(2/(1+Math.exp(-0.00368208*cp))-1);
@@ -396,13 +459,17 @@ function board(fen,uci){
   for(let r=0;r<8;r++){let f=0;
     for(const ch of rows[r]){
       if(ch>="1"&&ch<="8"){for(let k=0;k<+ch;k++,f++)cell(b,r,f,"",false,mark)}
-      else cell(b,r,f++,S[ch.toLowerCase()]||"",ch===ch.toUpperCase(),mark);
+      else cell(b,r,f++,ch,ch===ch.toUpperCase(),mark);
     }}
 }
-function cell(b,r,f,g,white,mark){
+function cell(b,r,f,p,white,mark){
   const d=document.createElement("div");
+  const g=p?(HAVE_IMG?p.toUpperCase():S[p.toLowerCase()]||""):"";
   d.className=((r+f)%2?"dk":"lt")+(mark.includes(r*8+f)?" hl":"");
-  if(g){const s=document.createElement("span");s.className=white?"wp":"bp";s.textContent=g;d.appendChild(s)}
+  if(g){
+    if(HAVE_IMG){const im=new Image();im.src=P[(white?"w":"b")+g];im.alt="";d.appendChild(im)}
+    else{const s=document.createElement("span");s.className=white?"wp":"bp";s.textContent=g;d.appendChild(s)}
+  }
   if(r===7)d.insertAdjacentHTML("beforeend",'<span class="co f">'+"abcdefgh"[f]+'</span>');
   if(f===0)d.insertAdjacentHTML("beforeend",'<span class="co r">'+(8-r)+'</span>');
   b.appendChild(d);
@@ -516,6 +583,7 @@ render();
     sub("__TITLE__", game.tags.white + " vs " + game.tags.black);
     sub("__HEAD__", head);
     sub("__MOVES__", j);
+    sub("__PIECES__", pieceImages());
     return html;
 }
 

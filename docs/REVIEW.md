@@ -338,10 +338,21 @@ graph and the glyphs; it cannot give you what this engine's evaluation thought.
 So the two outputs answer different questions and both are kept. Use
 `--annotate` to study the game, `--html` to study the engine.
 
-**One file, no dependencies.** No CDN, no webfont, no images — a review is
-something you send to someone, and a page that fetches anything is a page that
-breaks on the machine you sent it to. Pieces are Unicode glyphs for the same
-reason. A generated report is ~15 KB.
+**One file, no dependencies.** No CDN, no webfont, nothing fetched — a review is
+something you send to someone, and a page that fetches anything breaks on the
+machine you sent it to.
+
+The board uses the same piece images the SFML GUI does, inlined as base64 data
+URIs: 12 PNGs at 45×45, about 16 KB on disk and 21 KB encoded, taking a report
+from roughly 20 KB to **~42 KB**. That is the one place the no-dependency rule
+is paid for in bytes rather than avoided, and it buys the difference between a
+chess diagram and a row of text characters. Unicode glyphs remain as a fallback
+when the images cannot be found, so a report generated from an odd working
+directory still renders a board.
+
+A webfont is *not* embedded, and the distinction is worth keeping: the pieces
+are the content, a display face would be decoration, and one of them is worth
+21 KB on every file the tool ever writes.
 
 **What it shows.** Board with the played move framed, a scoresheet with a
 severity rail so criticised moves are findable in a list of eighty, per-side
