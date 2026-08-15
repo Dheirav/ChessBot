@@ -1,4 +1,4 @@
-# Handoff — 2026-08-14
+# Handoff — 2026-08-15
 
 Current state, what is in flight, and what to pick up. This is the file to read
 first; it is meant to be rewritten as state changes, unlike `BACKLOG.md`, which
@@ -90,7 +90,9 @@ about where the time goes.
 UCI engine (`docs/REVIEW.md`). It is complete: classification in win
 probability, accuracy, annotated-PGN output, and `--explain` naming which
 evaluation terms changed. Stockfish 16 is installed at `/usr/games/stockfish`;
-ChessBot needs `--engine-arg --uci`.
+ChessBot needs `--engine-arg --uci`. It has been used in anger once — that is
+6.1 under *Next* — and it has a known 3% phantom-loss floor from successive
+searches disagreeing, so a lone inaccuracy under ~5 win% is not evidence.
 
 The bench signature is **1,599,675 nodes** at depth 6. Any change claiming to
 preserve search behaviour must reproduce it exactly. It has moved four times this
@@ -236,16 +238,32 @@ point estimate barely moved; the interval is what shrank. One shard is a
 
 ## Next, in order
 
-**`ROADMAP.md` is now the answer to this question.** It was written on
-2026-08-15 because measurement moved the priorities twice and `PLAN.md`'s
-ordering no longer reflects what is worth doing. In one line: **the evaluation
-is the ceiling and no phase of the plan addresses it**, so `ROADMAP.md` proposes
-a Phase 6 and puts it first.
+**`ROADMAP.md` is the answer to this question.** In one line: **the evaluation
+is the ceiling and no phase of `PLAN.md` addresses it**, so `ROADMAP.md`
+proposes a Phase 6 and puts it first.
 
-The cheapest first step is 6.1 — run `./tools/review --explain` over the game
-archive and collect every large loss where no evaluation term accounts for it.
-That names this engine's blind spots directly, is a scripted afternoon, and
-needs no engine changes.
+**6.1 ran on 2026-08-15 and came back negative.** The review was pointed at all
+62 games (`--explain`, Stockfish 16 at depth 14, 2 575 of the bot's own moves)
+to collect the losses no evaluation term accounts for. There are four, one of
+which is search noise. **The terms move on 97% of this engine's own errors, so
+there is no blind-spot list and 6.3 is deferred.** One afternoon retired a
+phase, which is what the cheap instrument was for.
+
+It found two things on the way, and both are now the work:
+
+- **`BUGS.md` 10**, in the review tool's own scoring: `score mate 0` was read as
+  a win for the side that had just been mated. Fixed. It had corrupted every
+  published archive number in the direction that flattered them — see the entry,
+  and note that `REVIEW.md`'s profile has been regenerated on the corrected
+  parser (94.9%, not the 92.6% older documents quote).
+- **`threats` is the largest-magnitude term in the evaluation, larger than
+  material** — median |Δ| 148, p90 830, max 1555 — because
+  `hangingPiecePenalty` (`evaluation.cpp:547`) charges the *full piece value*
+  for anything merely attacked and undefended, without asking whose move it is
+  or whether the capture even wins material. `see.cpp` answers exactly that
+  question, is unit-tested, and is not consulted. **This is 6.2's first job**,
+  before any general weight tune: tuning over a term that double-counts material
+  would only find weights that hide it.
 
 Still open in the existing plan: 3.4 (futility/razoring — **read 3.1's result
 first**, the same bet swung 57 Elo on one constant), 3.5 (IID, the safe one),

@@ -130,30 +130,43 @@ Two things it turned up on the way:
 Moves are judged in **win probability**, not centipawns, and running the whole
 game archive is what forced that.
 
-### The measurement that decided it
+### The measurement that decided it — **taken through a broken instrument**
 
-Reviewed all 49 games with Stockfish 16 at depth 14, and raw average centipawn
-loss came out **83.0 in games the bot won** and **29.8 in games it lost**. That
-reads as "it plays worse when it wins", which is not a fact about the bot — it
-is the metric failing.
+The original argument here was empirical: over 49 games, raw average centipawn
+loss came out **83.0 in games the bot won** against **29.8 in games it lost**,
+which reads as "it plays worse when it wins" and was taken as the metric
+failing.
 
-In a decided position a 300-centipawn slip changes nothing: +900 to +600 still
-wins, and costs **6.4** percentage points of win probability. The same 300 from
-level is the whole game, and costs **25.1**. Raw loss scores them identically,
-so a game full of winning positions looks badly played. Won games contain more
-lopsided positions, so they score worst.
+**That inversion was mostly `BUGS.md` 10.** `score mate 0` was parsed as a win
+for the side that had just been mated, so every game the bot won by mate carried
+a phantom 2 000-centipawn blunder on the mating move. Won games contain more
+mates, so won games scored worst. Re-measured on the corrected parser over the
+62 games now in the archive, centipawn loss does not invert:
 
-Switching the unit fixes it, and the fix is visible in the same data:
+| | accuracy | avg cp loss | games | moves |
+|---|---|---|---|---|
+| games won | 95.8% | 16.4 | 40 | 1 479 |
+| games drawn | 95.4% | 18.8 | 6 | 369 |
+| games lost | 92.8% | 30.7 | 16 | 727 |
+| **overall** | **94.9%** | **20.8** | **62** | **2 575** |
 
-| | accuracy | avg cp loss |
-|---|---|---|
-| games won | 92.6% | 83.0 |
-| games drawn | 92.1% | 31.0 |
-| games lost | 92.8% | 29.8 |
+Two claims this section used to make are withdrawn: that centipawn loss inverts,
+and that accuracy is flat across results. Neither survives the fix. Accuracy is
+*lower* in lost games, by three points, which is the direction it should run —
+games are lost partly by playing worse in them.
 
-Accuracy is flat across results — which is what a metric measuring *play* rather
-than *position* should look like. Centipawn loss still inverts, and is kept in
-the output as a diagnostic rather than a judgement.
+**The decision to judge moves in win probability stands**, and it now rests on
+the argument rather than on that data. In a decided position a 300-centipawn
+slip changes nothing: +900 to +600 still wins, and costs **6.4** percentage
+points of win probability. The same 300 from level is the whole game, and costs
+**25.1**. Centipawns score those identically and win probability does not. That
+compression is real whether or not the measurement above ever demonstrated it,
+which is why the unit is not being changed back. Centipawn loss is kept in the
+output as a diagnostic rather than a judgement.
+
+The lesson is `BUGS.md` 10's: a metric validated against a broken instrument can
+be right for the wrong reason, and nobody finds out until the instrument is
+fixed.
 
 ### What was built
 
@@ -165,19 +178,35 @@ the output as a diagnostic rather than a judgement.
   ≥ 5, then Good, Excellent, Best.
 - Per-side accuracy, average centipawn loss, and a count of each label.
 
-### Whole-archive profile, 2026-08-15
+### Whole-archive profile, regenerated 2026-08-15 on the corrected parser
 
-49 games, 1 934 moves analysed, Stockfish 16 at depth 14:
+62 games, 2 575 of the bot's own moves, Stockfish 16 at depth 14:
 
-| | accuracy | games | score |
-|---|---|---|---|
-| overall | **92.6%** | 49 | — |
-| as White | 92.3% | 27 | 61% |
-| as Black | 92.8% | 22 | 77% |
+| | accuracy | avg cp | games | score |
+|---|---|---|---|---|
+| overall | **94.9%** | 20.8 | 62 | 69% |
+| as White | 94.4% | 23.3 | 33 | 62% |
+| as Black | 95.4% | 18.4 | 29 | 78% |
 
-**Do not compare that 92.6% to a Chess.com number.** Accuracy is a function of
+By opponent strength, which is the cut that matters and the one the first
+profile did not make:
+
+| opponent | games | score | accuracy | avg cp |
+|---|---|---|---|---|
+| under 1500 | 17 | 97% | 96.6% | 14.2 |
+| 1500-1900 | 18 | 86% | 95.4% | 19.3 |
+| 1900-2100 | 11 | 73% | 94.6% | 24.3 |
+| 2100-2300 | 13 | 23% | 93.9% | 22.0 |
+| 2300+ | 3 | 0% | 93.2% | 29.2 |
+
+Three and a half accuracy points separate the band the bot beats 97% of the time
+from the one it has never scored in. `ROADMAP.md` 6.1 is what that implies.
+
+**Do not compare that 94.9% to a Chess.com number.** Accuracy is a function of
 the analysing engine, its depth, and the curve — all three differ. It is a
 baseline to compare *this* engine against itself over time, and nothing else.
+It is also not comparable to the 92.6% this file used to quote: different
+parser, different archive size.
 
 ### Not implemented, deliberately
 
