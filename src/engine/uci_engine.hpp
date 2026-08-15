@@ -108,8 +108,17 @@ public:
     // not a delta. It is also what lets the engine see repetitions (BUGS.md 1).
     //
     // Returns the bestmove string, or "" if the child died.
+    //
+    // The clock arguments are the only way to exercise an engine's *time
+    // manager*, which is a different thing from giving it a budget: `movetime`
+    // states the answer, `wtime/btime/winc/binc` states the situation and makes
+    // the engine decide. ChessBot's allocation lives in parseGo() behind
+    // exactly those tokens, so until this existed no test in the repository
+    // reached it (BUGS.md 11).
     std::string bestMove(const std::vector<std::string>& moves,
-                         long moveTimeMs, uint64_t maxNodes, int maxDepth) {
+                         long moveTimeMs, uint64_t maxNodes, int maxDepth,
+                         long wtimeMs = 0, long btimeMs = 0,
+                         long wincMs = 0, long bincMs = 0) {
         std::string pos = "position startpos";
         if (!moves.empty()) {
             pos += " moves";
@@ -117,10 +126,18 @@ public:
         }
         send(pos);
 
+        const bool haveClock = (wtimeMs > 0 || btimeMs > 0);
         std::string go = "go";
         if (maxNodes > 0)  go += " nodes " + std::to_string(maxNodes);
         if (moveTimeMs > 0) go += " movetime " + std::to_string(moveTimeMs);
-        if (maxNodes == 0 && moveTimeMs == 0) go += " depth " + std::to_string(maxDepth);
+        if (haveClock) {
+            go += " wtime " + std::to_string(wtimeMs > 0 ? wtimeMs : 0);
+            go += " btime " + std::to_string(btimeMs > 0 ? btimeMs : 0);
+            if (wincMs > 0) go += " winc " + std::to_string(wincMs);
+            if (bincMs > 0) go += " binc " + std::to_string(bincMs);
+        }
+        if (maxNodes == 0 && moveTimeMs == 0 && !haveClock)
+            go += " depth " + std::to_string(maxDepth);
         send(go);
 
         haveScore_ = false;

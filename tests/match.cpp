@@ -36,6 +36,14 @@
 //   -d <depth>      fixed depth for both sides (default 4)
 //   -t <ms>         per-move time budget for both sides; 0 = depth only
 //   -N <nodes>      per-move node budget for both sides; 0 = no node budget
+//   --tc <b>[+<i>]  a real game clock in seconds, e.g. --tc 60+1. Each side
+//                     gets a clock that runs down and is handed it over UCI, so
+//                     the *engine* decides what to spend; overstepping loses on
+//                     time. Needs --engineA/--engineB, refuses to combine with
+//                     -t/-N, and cannot be sharded. This is the only way to
+//                     measure time management, which -t makes invisible by
+//                     answering the question the time manager exists to answer
+//                     (BUGS.md 11).
 //   --da/--db <d>   per-side depth, for comparing two depth settings
 //   --ta/--tb <ms>  per-side time budget
 //   --na/--nb <n>   per-side node budget
@@ -100,6 +108,28 @@ struct GameOutcome {
     const char* how;   // "mate", "stalemate", "50-move", ... "adjudicated"
 };
 
+// A real game clock, as opposed to a budget per move.
+//
+// `-t` states how long a move may take, which is the decision an engine's time
+// manager exists to make -- so a match run that way cannot see time management
+// at all, and ChessBot's allocation (uci.cpp parseGo) had never been executed
+// by any test in this repository (BUGS.md 11). This gives each side a clock
+// that runs down, hands it the position and the clock, and lets it choose.
+//
+// It also makes a *forfeit* observable. That is this project's most expensive
+// failure mode (BUGS.md 7, -120 rating) and until now it could only be detected
+// by losing a rated game on Lichess.
+//
+// Deliberately not shardable and not reproducible from a seed: wall-clock time
+// depends on machine load, so parallel shards would each play a weaker engine
+// than they would alone. shard-gate.sh already refuses anything that is not
+// node-limited, which covers this without a new rule.
+struct TimeControl {
+    long baseMs = 0;    // 0 = no clock; use depth/time/node budgets instead
+    long incMs  = 0;
+    bool active() const { return baseMs > 0; }
+};
+
 // --- Adjudication ---
 //
 // Without it every won game is played out to mate and every dead ending grinds
@@ -143,7 +173,8 @@ static GameOutcome playGame(const std::vector<Move>& opening, bool aPlaysWhite,
                             const EngineConfig& A, const EngineConfig& B,
                             TranspositionTable& ttA, TranspositionTable& ttB,
                             int maxPlies,
-                            UciEngine* extA, UciEngine* extB) {
+                            UciEngine* extA, UciEngine* extB,
+                            const TimeControl& tc = TimeControl()) {
     Board board;
     board.setFromFEN(Board::INITIAL_FEN);
     // Positions the game has visited, handed to each search so the engines can
@@ -178,6 +209,10 @@ static GameOutcome playGame(const std::vector<Move>& opening, bool aPlaysWhite,
     // evaluation bug produces.
     int whiteWinning = 0, blackWinning = 0, level = 0;
 
+    // Clocks are per colour, not per engine, because that is what the protocol
+    // states and what the engine has to reason about.
+    long clockMs[2] = { tc.baseMs, tc.baseMs };   // [0] = white, [1] = black
+
     for (int ply = 0; ply < maxPlies; ++ply) {
         MoveList legal = generateLegalMoves(board, board.activeColor);
         if (legal.empty()) {
@@ -206,8 +241,25 @@ static GameOutcome playGame(const std::vector<Move>& opening, bool aPlaysWhite,
         if (ext) {
             // External binary: it keeps its own board, transposition table and
             // eval cache, so nothing crosses between the two sides.
+            const auto t0 = std::chrono::steady_clock::now();
             std::string mv = ext->bestMove(uciMoves, cfg.limits.moveTimeMs,
-                                           cfg.limits.maxNodes, cfg.limits.maxDepth);
+                                           cfg.limits.maxNodes, cfg.limits.maxDepth,
+                                           tc.active() ? clockMs[0] : 0,
+                                           tc.active() ? clockMs[1] : 0,
+                                           tc.incMs, tc.incMs);
+            if (tc.active()) {
+                const long spent = (long)std::chrono::duration_cast<std::chrono::milliseconds>(
+                                       std::chrono::steady_clock::now() - t0).count();
+                const int side = whiteToMove ? 0 : 1;
+                clockMs[side] -= spent;
+                if (clockMs[side] < 0) {
+                    // Overstepping is a loss, exactly as it is on Lichess. The
+                    // engine that ran out is the one to move.
+                    const bool whiteLost = whiteToMove;
+                    return {(whiteLost == aPlaysWhite) ? B_WINS : A_WINS, ply, "time forfeit"};
+                }
+                clockMs[side] += tc.incMs;
+            }
             g_haveScore = ext->haveScore();
             g_lastScore = ext->lastScore();
             bool matched = false;
@@ -338,6 +390,7 @@ int main(int argc, char** argv) {
 
     int pairs = 25, depth = 4;
     long timeMs = 0;
+    TimeControl tc;
     uint64_t nodes = 0, nodesA = 0, nodesB = 0;
     int depthA = -1, depthB = -1;
     long timeA = -1, timeB = -1;
@@ -407,6 +460,20 @@ int main(int argc, char** argv) {
             else if (a == "-s")      seed = (unsigned)std::atoi(next());
             else if (a == "-d")    { depth = std::atoi(next()); depthGiven = true; }
             else if (a == "-t")      timeMs = std::atol(next());
+            else if (a == "--tc") {
+                // "<base>+<inc>" in seconds, the notation every chess tool uses
+                // ("60+1"). Fractional base allowed so short controls are
+                // expressible; "60" alone means no increment.
+                const std::string v = next();
+                const size_t plus = v.find('+');
+                tc.baseMs = (long)(std::atof(v.substr(0, plus).c_str()) * 1000.0);
+                tc.incMs  = (plus == std::string::npos)
+                          ? 0 : (long)(std::atof(v.substr(plus + 1).c_str()) * 1000.0);
+                if (tc.baseMs <= 0) {
+                    std::printf("--tc wants <base>[+<inc>] in seconds, e.g. --tc 60+1\n");
+                    return 1;
+                }
+            }
             else if (a == "-N")      nodes = std::strtoull(next(), nullptr, 10);
             else if (a == "--na")    nodesA = std::strtoull(next(), nullptr, 10);
             else if (a == "--nb")    nodesB = std::strtoull(next(), nullptr, 10);
@@ -428,6 +495,16 @@ int main(int argc, char** argv) {
                 return 1;
             }
         }
+    }
+
+    // A clock and a per-move budget are two different experiments, and running
+    // both makes the answer meaningless: whichever binds first decides, and the
+    // one that binds is the one the time manager was supposed to choose.
+    if (tc.active() && (timeMs > 0 || timeA >= 0 || timeB >= 0 || nodes > 0 || nodesA || nodesB)) {
+        std::printf("refusing: --tc is a game clock, -t/-N are budgets per move.\n"
+                    "Pass one or the other; together, whichever binds first "
+                    "makes the time manager's decision for it.\n");
+        return 1;
     }
 
     // A depth ceiling is always set. Under a time budget it is a safety limit
@@ -477,12 +554,24 @@ int main(int argc, char** argv) {
     // that a feature added there cannot go missing from the header here.
     std::string nameA = describeSearchOptions(A.opts);
     std::string nameB = describeSearchOptions(B.opts);
+    // Under --tc neither side has a budget of its own: the clock is the whole
+    // condition, and it is the same for both, so it is named once.
+    // %g so a sub-second increment does not print as "+0" -- the label is how
+    // the result gets quoted later, and "60+0" for a 60+0.5 match is a wrong
+    // record of what was run.
+    char tcBuf[64] = {0};
+    if (tc.active())
+        std::snprintf(tcBuf, sizeof tcBuf, " @%g+%g", tc.baseMs / 1000.0, tc.incMs / 1000.0);
+    const std::string tcLabel = tcBuf;
+    if      (tc.active())  { nameA += tcLabel; nameB += tcLabel; }
+    else {
     if      (nodeA > 0)   nameA += " @" + std::to_string(nodeA) + "n";
     else if (budgetA > 0) nameA += " @" + std::to_string(budgetA) + "ms";
     else                  nameA += " @d" + std::to_string(ceilA);
     if      (nodeB > 0)   nameB += " @" + std::to_string(nodeB) + "n";
     else if (budgetB > 0) nameB += " @" + std::to_string(budgetB) + "ms";
     else                  nameB += " @d" + std::to_string(ceilB);
+    }
     A.binary = binA;
     B.binary = binB;
     if (!binA.empty()) nameA = binA + " " + nameA;
@@ -500,6 +589,16 @@ int main(int argc, char** argv) {
     // side gets — and so a sharded run's memory stays bounded.
     const int EXT_HASH_MB = 32;
     UciEngine extEngineA, extEngineB;
+    // The time manager lives behind the UCI clock tokens (uci.cpp parseGo), so
+    // only an engine driven as a binary can be measured on a clock at all. The
+    // in-process path is handed a SearchLimits and never makes the decision.
+    if (tc.active() && (A.binary.empty() || B.binary.empty())) {
+        std::printf("refusing: --tc needs --engineA and --engineB.\n"
+                    "The in-process search takes a budget it is given; only a "
+                    "UCI binary chooses its own time (BUGS.md 11).\n");
+        return 1;
+    }
+
     UciEngine* extA = nullptr;
     UciEngine* extB = nullptr;
     if (!A.binary.empty()) {
@@ -587,7 +686,7 @@ int main(int argc, char** argv) {
         for (int side = 0; side < 2; ++side) {
             bool aWhite = (side == 0);
             GameOutcome g = playGame(opening, aWhite, A, B, ttA, ttB, MAX_PLIES,
-                                     extA, extB);
+                                     extA, extB, tc);
 
             if (g.result == A_WINS)      { ++wins;   pairScore += 2; }
             else if (g.result == B_WINS) { ++losses; }

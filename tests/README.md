@@ -95,6 +95,8 @@ Key options — the full list is in the header of `match.cpp`:
 | `-d <depth>` | fixed depth for both sides |
 | `-s <seed>` | opening-line seed |
 | `--optA/--optB` | per-side heuristics, e.g. `--optA seepruning=on` |
+| `--engineA/--engineB` | drive two engine *binaries* over UCI (BUGS.md 8) |
+| `--tc <b>[+<i>]` | a real game clock in seconds, e.g. `--tc 60+1` |
 | `--sprt` | stop as soon as the result is conclusive |
 
 ### Why matches are node-limited, not time-limited
@@ -115,6 +117,25 @@ It costs one thing worth stating plainly: **a change whose value is speed per
 node rather than quality per node is invisible to a node-limited match.** A
 faster evaluation makes no difference at fixed nodes. Gate those on the clock
 (`-t`) instead.
+
+### `--tc` is a different instrument from `-t`, and the difference is the point
+
+`-t` says how long a move may take. That is precisely the decision an engine's
+time manager exists to make, so a match run under `-t` cannot see time
+management *at all* — the harness has already answered the question. ChessBot's
+allocation lives in `parseGo` (`uci.cpp`) behind the UCI clock tokens, and until
+2026-08-15 no test in this repository had ever sent them: the code that decides
+how the bot spends its clock in every rated game ran nowhere else. `BUGS.md` 11
+is what was hiding there.
+
+`--tc 60+1` gives each side a clock that runs down, hands it over on every move,
+and lets the engine choose. Overstepping loses the game on time, which also
+makes a **forfeit** observable — this project's most expensive failure mode
+(`BUGS.md` 7) and previously detectable only by losing a rated game.
+
+It inherits every drawback of a timed match: not reproducible from a seed, load
+dependent, and **not shardable**, so it is sequential and slow. Reach for it only
+when the thing under test is the clock itself. For everything else, `-N`.
 
 ### Why fixed-depth matches mislead
 

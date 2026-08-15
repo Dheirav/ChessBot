@@ -579,17 +579,35 @@ So a fix cannot be gated as things stand: at a fixed per-move budget, time
 management is *definitionally* invisible, because the harness has already made
 the decision the manager exists to make.
 
-What it needs first is a real clock in the harness: `--tc <base>+<inc>`,
-decrementing per side per move, with `UciEngine` sending the clock tokens and
-the driver failing a side that oversteps. That is the honest prerequisite, and
-it is worth noting it also buys the first instrument that can catch a *forfeit*
-— which 7 shows is this project's most expensive failure mode and is currently
-detectable only by losing a rated game.
+### The instrument now exists — 2026-08-15
 
-Until then, do not "fix" the formula on argument alone. A time manager that
-spends more is not obviously better — it could as easily walk into the overrun
-the `remaining / 4` cap exists to prevent — and this project has already learned
-twice what a plausible constant is worth without a measurement.
+`./tests/match --tc <base>[+<inc>]`, in seconds. Each side gets a clock that
+runs down, `UciEngine` sends `wtime/btime/winc/binc`, and a side that oversteps
+loses the game on time. It refuses to combine with `-t`/`-N` (whichever bound
+first would make the time manager's decision for it), refuses without
+`--engineA/--engineB` (the in-process path takes a budget it is given and never
+chooses), and is not shardable — `shard-gate.sh` already turns away anything
+that is not node-limited, which covers it without a new rule.
+
+Verified, in the order that matters:
+
+- **The engine now reaches the branch.** `go wtime 30000 btime 30000 winc 1000
+  binc 1000` produces a 602 ms search against the ~1 500 ms that formula
+  allocates. Before this, nothing in the repository had ever sent those tokens.
+- **A forfeit is actually detected**, which is the half worth distrusting: a
+  test that has never failed is not known to work. Forced at `--tc 0.05+0`,
+  where even the 10 ms floor plus process overhead outruns the clock, and both
+  games ended `B wins time forfeit`. At a sane control nothing forfeits, which
+  is why the pathological one had to be constructed on purpose.
+
+So the fix is now gateable. **It is still not written**, deliberately. A time
+manager that spends more is not obviously better — it could as easily walk into
+the overrun the `remaining / 4` cap exists to prevent — and the whole reason to
+build the instrument first was to stop this being decided by argument. Gate it
+at a control resembling the one the bot actually plays; 900+10 is ~15 minutes a
+side, so a meaningful match needs either a scaled-down control or a lot of
+patience, and that trade-off is itself worth measuring before committing to a
+long run.
 
 ---
 
