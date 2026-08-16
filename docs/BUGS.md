@@ -584,13 +584,40 @@ budget by construction: `-N` pays both sides the same nodes, so an engine that
 wastes *time* looks identical to one that does not. It needed `--tc`, which is
 why building the instrument first was worth a day.
 
-### Still open: the allocation itself
+### The allocation itself: gated 2026-08-17, and it stays as it is
 
-`parseGo` still computes `remaining / 30 + increment / 2`, and both halves of
-that are wrong for the reasons below. Fixing it is a **separate change and wants
-its own gate** — gating two time-management changes at once would leave neither
-attributable, which is the mistake the king-safety work made on 2026-08-16 and
-paid for. The original analysis follows.
+`timealloc` counts the moves down — `remaining / max(80 - moveNumber, 30) +
+increment` — instead of dividing by a constant forever and banking half the
+increment. **200 games at `--tc 30+0.33`: +14 Elo, 95% CI [-22, +50]**, zero
+forfeits. The interval spans zero. It is kept as a toggle, off, exactly as
+`seepruning` and `deltapruning` are.
+
+**What the attempt found is worth more than the result.** Simulating it first
+showed that once `softtime` is on, *every* allocation formula converges to the
+same total — about 97% of the clock — because the `remaining/4` cap and the
+increment dominate. There is no more time to extract. This entry's original
+premise, that the allocation is too small, stopped being true the moment the
+first half shipped.
+
+What the formula still controls is *where* the time goes, and the first 900+10
+game on the new build showed that is genuinely skewed:
+
+| moves | seconds each |
+|---|---|
+| 1-10 | **44.2** (78 s on move 2) |
+| 11-30 | 29.1 |
+| 31-50 | 15.4 |
+| 51-70 | **4.3** |
+
+It spends the clock in the opening and plays the endgame at a second a move.
+Flattening that is what `timealloc` does, and 200 games could not show it was
+worth anything. Resolving +14 needs roughly four times the sample — about
+twenty hours, since `--tc` cannot be sharded — which is the honest reason this
+stops here rather than a claim that the distribution does not matter.
+
+The original analysis of the allocation follows, and remains accurate about
+*how* the formula behaves; it is only its conclusion — that fixing it is worth
+Elo — that is now measured and unproven.
 
 ---
 

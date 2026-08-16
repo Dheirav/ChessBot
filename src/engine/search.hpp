@@ -103,9 +103,22 @@ struct SearchOptions {
     // max(80 - moveNumber, 30) + increment`), which flattens the curve and
     // moves time out of the opening and into the middlegame.
     //
-    // Off until its own `--tc` gate. Deliberately separate from softTime: two
-    // time-management changes in one match leaves neither attributable, which
-    // is the mistake the king-safety work made on the same day and paid for.
+    // **Gated 2026-08-17 and stays off: +14 Elo, 95% CI [-22, +50]** over 200
+    // games at `--tc 30+0.33`, zero forfeits. The interval spans zero, so this
+    // demonstrates nothing in either direction — it is not a rejection.
+    //
+    // The point estimate is positive and the argument is sound, which is
+    // exactly the position `seepruning` and `deltapruning` are in, and it gets
+    // the same treatment: kept, off, with its number recorded so nobody re-runs
+    // the experiment by accident. Resolving a +14 effect needs roughly four
+    // times the games — about twenty hours of unshardable wall clock, because
+    // `--tc` cannot be sharded — which is why this is where it stops.
+    //
+    // Worth knowing before reopening it: after softTime shipped, *every*
+    // allocation formula converges to the same total, about 97% of the clock.
+    // The `remaining/4` cap and the increment dominate. So there is no more
+    // time to find, and this only redistributes what is already being spent —
+    // which bounds how much it could ever have been worth.
     bool timeAlloc = false;
 
     // There is no king-safety toggle here, and on 2026-08-16 there briefly were
