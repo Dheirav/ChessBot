@@ -11,6 +11,49 @@
 // Piece values indexed by PieceType (NONE=0, KING=1, PAWN=2, KNIGHT=3, BISHOP=4, ROOK=5, QUEEN=6)
 const int pieceValues[] = { 0, 20000, 100, 325, 335, 525, 950 };
 
+// There is no king-danger term here -- no charge for enemy pieces attacking
+// the squares around the king -- and like the hanging-piece penalty below, the
+// absence is measured rather than an oversight. See ROADMAP.md 6.4.
+//
+// The defect is real and still true of the code: king safety is a placement
+// term plus a pawn shield capped at 24 centipawns that switches off the moment
+// the king leaves the back rank, so a queen, rook and knight swarming the king
+// score the same as an empty board. It was found by reviewing the three games
+// this engine lost to 2300+ opposition, in all of which it walked its king up
+// the board while counting the material it had been paid to do it.
+//
+// One was built anyway: attackers into a nine-square king zone, weighted by
+// piece (N/B 20, R 40, Q 80), charged on a saturating curve in the number of
+// *distinct* attackers ({0,0,50,75,88,94,97,99}%), faded out by game phase. It
+// was mirror-symmetric, it moved the tree by -1.4% nodes, and on the position
+// that lost the CookieCompote28 game it re-scored a mating attack by -135
+// centipawns where the shipped evaluation read +4. Every reason to expect it to
+// work.
+//
+//   king danger on, 1x            +1.3 Elo  [ -7.9,   +10.6]   3 360 games
+//   legacy centralisation off     +2.2 Elo  [ -6.8,   +11.1]   3 360 games
+//   both together                -11.0 Elo  [-20.4,    -1.6]   3 360 games
+//   king danger on, 8x          -216.9 Elo  [-241.9, -193.8]     960 games
+//
+// Monotone in magnitude with no peak above zero, which is 6.2's threat-term
+// scan in mirror image and licenses the same conclusion: the best charge is
+// none. The combination is the one interval clear of zero and it is negative,
+// most likely because PST_KING_MG already prices middlegame king placement and
+// a danger term charges a second time for the same exposure.
+//
+// It was also not free when switched off. The king-zone test ran per attacked
+// square in the attack loop below, which is the hottest loop in the evaluation:
+// bench 6 went 2007 -> 2114 ms, 5% slower, for a term contributing nothing.
+// That is what settled deleting it over keeping it behind its toggle the way
+// seepruning and deltapruning are kept -- those cost nothing when off.
+//
+// What the gates cannot rule out: self-play may be structurally unable to see
+// this. A king-safety term pays against opponents who attack kings, and in
+// self-play both sides share this engine's disinclination to. The losses that
+// prompted it were against engines rated 2567 to 3042. Settling that needs a
+// gauntlet against a stronger attacking opponent, which the harness cannot yet
+// run -- not another arm of the same experiment.
+
 // Threat bonus - bonus for threatening to capture valuable pieces.
 // The KING slot is 0 and must stay in place to keep the PieceType indexing:
 // the threat loop skips king targets entirely (a king can never be captured),
@@ -426,7 +469,15 @@ EvalDetails evaluate_details(const Board& board) {
     blackMobility = countMobility(board, COLOR_BLACK, blackKingSq);
     mobilityScore = 2 * (whiteMobility - blackMobility);
 
-    // King safety
+    // King safety.
+    //
+    // `-distFromCenter * 4` is a *centralisation* term wearing king safety's
+    // name, and it applies in every phase — so it pays the king to walk toward
+    // the middle of the board in a middlegame, against PST_KING_MG, which is
+    // simultaneously paying it not to. Fading it out with the game phase
+    // instead was gated on 2026-08-16: +2.2 Elo, 95% CI [-6.8, +11.1] over
+    // 3 360 games. No difference demonstrated, so it stays as it is; see
+    // ROADMAP.md 6.4 and the note at the top of this file.
     if (whiteKingFile != -1 && whiteKingRank != -1) {
         int distFromCenter = centreDistance(whiteKingFile, whiteKingRank);
         whiteKingSafety = -distFromCenter * 4; // Reduced from 5 to 4

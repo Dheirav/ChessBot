@@ -161,6 +161,26 @@ that most flatters a change. `HANDOFF.md` says do not translate self-play into
 pool Elo, and a day that produced +121 and +155 is precisely when that rule is
 hardest to keep and most necessary.
 
+### It survived contact with the pool — 2026-08-16
+
+The rule above is still the rule, and the reason to keep it is visible in the
+result: the *direction* transferred and the *magnitude* did not. 31 rated games
+on the shipped build went **31-0-0**, average centipawn loss fell 20.9 → 16.3,
+and **10 blunders in 2 730 moves became 0 in 1 358** — five expected at the old
+rate, P(0) = 0.7%. Rating moved 2102 → 2200, roughly +97 where self-play had
+said +276.
+
+The useful detail is *where* it moved. Within each opponent band, the gain
+concentrates in **2100-2300** (accuracy 93.8 → 95.2, cp 22.0 → 15.7) and is flat
+or marginally worse below 1500. That is this section's own argument showing up
+in real games: a term that shouted about phantom threats costs most against
+opponents who can punish a wasted tempo. It is also the reading that survives the
+obvious objection, since the after-cut field was *easier* on average and a
+band-by-band cut divides that out.
+
+`HANDOFF.md`'s third measurement has the full tables and the caveats — chiefly
+that no 2300+ opponent has been met since, so the ceiling is untested.
+
 *Still open in 6.2:* the general Texel-style tune, now over an evaluation whose
 largest term has stopped shouting.
 
@@ -236,6 +256,96 @@ search noise. Do not add terms speculatively — that is how the current
 evaluation acquired 25 of them, several of which were wrong for months. Re-run
 6.1 after 6.2 lands; a corrected `threats` may expose blind spots it was
 previously masking.
+
+---
+
+## 6.4 — King safety: a real defect that fixing does not fix *(closed 2026-08-16, negative)*
+
+**The engine cannot see an attack on its own king, and giving it that ability
+does not win games.** Both halves of that sentence are measured. Read the second
+before proposing this again.
+
+### How it was found
+
+Not from theory. The 2300+ band was the one this engine had never scored in —
+0-0-3 — so those three games were reviewed. What came back was not what the
+"ceiling" framing predicted:
+
+| opponent | rating | accuracy | blunders | mistakes |
+|---|---|---|---|---|
+| CookieCompote28 | 3042 | 93.6% | 0 | 0 |
+| zero3-noW | 2876 | 93.7% | 0 | 0 |
+| KirinChessBot | 2567 | 92.1% | 0 | 1 |
+
+**Zero blunders across three losses**, at accuracy barely below this engine's
+own average, against opponents playing at 98-99%. It was not punished for an
+error; it was outplayed. And in all three it was *checkmated*, having walked its
+king across the board — e1→f1→e2→f2→g2→g3→h2 in the first.
+
+The cause is in `evaluation.cpp` and was unchanged since the base bot. King
+safety is `-4 * distance from centre` — a centralisation term, applied in every
+phase, which *pays* the king to walk up the board and pulls against
+`PST_KING_MG` — plus a pawn shield capped at 24 centipawns that switches off the
+moment the king leaves the back rank. **Nothing counts attackers.** A queen,
+rook and knight swarming the king score exactly what an empty board does.
+
+`tests/evaltrace` was built to confirm it rather than argue it, and did: king
+safety read **+4** at the point the engine was being mated in nine while its
+total evaluation read +222, and **−16** while its king sat uncastled on e1 for
+twenty-seven moves in the AshNostromo loss.
+
+### What was built, and what it measured
+
+A conventional king-danger term: attackers into a nine-square king zone,
+weighted by piece (N/B 20, R 40, Q 80), charged on a saturating curve in the
+number of *distinct* attackers, faded by game phase. Mirror-symmetric, −1.4%
+nodes, and on the losing position it re-scored the attack by −135 where the
+shipped evaluation read +4. Separately, the legacy centralisation term was
+faded out with game phase so it stops fighting the king PST.
+
+Four gates, 10 080 games, `-N 100000`, two binaries over UCI:
+
+| arm | Elo | 95% CI | games |
+|---|---|---|---|
+| null control, same build both sides | 0.0 | *(zero variance, `0-0-480-0-0`)* | 960 |
+| king danger on | +1.3 | [−7.9, +10.6] | 3 360 |
+| legacy centralisation off | +2.2 | [−6.8, +11.1] | 3 360 |
+| both together | **−11.0** | **[−20.4, −1.6]** | 3 360 |
+| king danger at 8× | **−216.9** | **[−241.9, −193.8]** | 960 |
+
+**The only interval clear of zero is negative, twice.** The magnitude scan is
+6.2's threat-term scan in mirror image — monotone, no peak above zero — and
+licenses the same conclusion: the best charge is none. The combination is worse
+than either half, most likely because `PST_KING_MG` already prices middlegame
+king placement and a danger term charges a second time for the same exposure.
+
+It was also **not free when off**: the king-zone test ran per attacked square in
+the evaluation's hottest loop, and bench 6 went 2 007 → 2 114 ms, 5% slower for
+a term contributing nothing. That is what settled deleting it rather than
+keeping it behind a toggle the way `seepruning` and `deltapruning` are kept —
+those cost nothing when off.
+
+### The caveat, stated so it is not used as an escape
+
+**Self-play may be structurally unable to see this.** A king-safety term pays
+against opponents who attack kings, and in self-play both sides share this
+engine's disinclination to. The games that prompted the work were against
+engines rated 2567-3042.
+
+That is a real limitation and it is *testable*: play the variant against
+Stockfish held near 2300 and compare scores with and without. It needs a
+gauntlet mode `tests/match` does not have — a common opponent, two challengers,
+scores compared — which is a new instrument, not another arm of this
+experiment. **Do not reopen 6.4 without building it first.** Four arms have
+already been spent asking self-play a question it may not be able to answer.
+
+### What the same investigation says is worth doing instead
+
+Reviewing the most recent loss (AshNostromo, 2147, 2026-08-16) found the engine
+finishing with **535 seconds of its 900+10 clock unused** against an opponent
+who spent down to 84. That is `BUGS.md` 11, it is costing rated games now, the
+instrument to gate it exists (`--tc`), and it is unblocked. It is a better use
+of the next day than a fifth king-safety arm.
 
 ---
 
