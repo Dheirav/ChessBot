@@ -527,7 +527,74 @@ won/drawn/lost table predate this fix and have not been regenerated.
 
 ---
 
-## 11. The clock is hoarded, not spent — and no test can see it
+## 11. The clock is hoarded, not spent — **half fixed 2026-08-16, +78 Elo**
+
+**There were two leaks, not one.** This entry described the allocation being too
+small, which is real and still unfixed. It missed the larger half: the engine
+did not spend even the allocation it made.
+
+### The second leak, found 2026-08-16
+
+Simulating this entry's own formula over a 900+10 game predicts 1 252 seconds
+spent. The real game it was checked against spent **1 015**. The formula was not
+the whole story, and the gap was measured directly — five positions at a 90s+1s
+clock, comparing what `parseGo` allocated against wall time actually used:
+
+```
+position 1: allocated 3500 ms, used 1890 ms  ( 54%)
+position 2: allocated 3500 ms, used 2016 ms  ( 58%)
+position 3: allocated 3500 ms, used 2855 ms  ( 82%)
+position 4: allocated 3500 ms, used 2811 ms  ( 80%)
+position 5: allocated 3500 ms, used 3502 ms  (100%)
+                                   overall     75%
+```
+
+The cause is in `search.cpp`, not `uci.cpp`. Iterative deepening refused to
+*begin* an iteration unless the whole predicted iteration fitted in what was
+left — a sound rule on its own terms, since a partial iteration is discarded and
+its time buys nothing. But the prediction is 2.3× the last iteration, so the
+rule abandons up to that much of every move's budget. One deadline was serving
+two questions: "may I still be searching?" (wants the hard limit — an overrun is
+a forfeit) and "should I begin another iteration?" (wants a smaller one).
+
+### The fix
+
+Split them. `SearchLimits.moveTimeMs` is the target that governs *beginning* an
+iteration; `SearchLimits.hardTimeMs` — three times the target, still bounded by
+the existing quarter-of-the-clock cap — governs abandoning one already running.
+The search may now begin an iteration it is not certain to finish and keep the
+result if it lands.
+
+| | before | after |
+|---|---|---|
+| budget used | 72% | **167%** |
+| mean depth over five positions | 8.8 | **10.0** |
+
+**Gated at `--tc 30+0.33`, 200 games: +78 Elo, 95% CI [+40, +117]**, 61.0%,
+**zero time forfeits**. The forfeit count is the half that was worth
+distrusting: the change spends 1.67× more clock per move, and an overrun on a
+clock costs a game rather than an interval. Simulation said it self-stabilises —
+below about 35 seconds left the `remaining/4` cap makes it spend less than the
+increment and the clock recovers — and 200 games agreed.
+
+`softtime` is on by default from 2026-08-16.
+
+**Why this survived every gate before it.** The defect is invisible to a node
+budget by construction: `-N` pays both sides the same nodes, so an engine that
+wastes *time* looks identical to one that does not. It needed `--tc`, which is
+why building the instrument first was worth a day.
+
+### Still open: the allocation itself
+
+`parseGo` still computes `remaining / 30 + increment / 2`, and both halves of
+that are wrong for the reasons below. Fixing it is a **separate change and wants
+its own gate** — gating two time-management changes at once would leave neither
+attributable, which is the mistake the king-safety work made on 2026-08-16 and
+paid for. The original analysis follows.
+
+---
+
+### Original entry (the allocation, still unfixed)
 
 Noticed from watching games on 2026-08-15, and the impression was the opposite
 of the fact: the bot looked like it was always about to lose on time. It is the

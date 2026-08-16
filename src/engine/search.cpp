@@ -106,6 +106,7 @@ const SearchOptionEntry SEARCH_OPTIONS[] = {
     {"qbound",      "qbound",   "QBound",      &SearchOptions::qBound},
     {"deltapruning","delta",    "DeltaPruning",&SearchOptions::deltaPruning},
     {"checkext",    "checkext", "CheckExt",    &SearchOptions::checkExtension},
+    {"softtime",    "softtime", "SoftTime",    &SearchOptions::softTime},
 };
 const size_t SEARCH_OPTION_COUNT = sizeof(SEARCH_OPTIONS) / sizeof(SEARCH_OPTIONS[0]);
 
@@ -142,6 +143,30 @@ static bool g_hasDeadline = false;
 static bool g_outOfTime = false;
 static std::chrono::steady_clock::time_point g_deadline;
 static uint64_t g_nextTimeCheck = 0;
+
+// A *soft* deadline, separate from the hard one above (BUGS.md 11).
+//
+// One deadline has to serve two different questions and answers the second one
+// badly. "May I still be searching?" wants the hard limit -- passing it on a
+// clock is a forfeit. "Should I begin another iteration?" wants a smaller one,
+// because an iteration that cannot finish is discarded and its time buys
+// nothing.
+//
+// Using the hard limit for both means the search stops as soon as the *whole*
+// predicted next iteration no longer fits, and the prediction is 2.3x the last
+// one -- so it routinely abandons a large tail of its budget. Measured on
+// 2026-08-16 over five positions at a 90s+1s clock: the engine used **75%** of
+// what parseGo had allocated it, and the two effects together left a real
+// 900+10 game finished with 535 of 1 500 available seconds unspent.
+//
+// Split, the soft limit governs starting an iteration and the hard limit
+// governs abandoning one already running. The search may now begin an iteration
+// it is not certain to finish, and keep the result if it lands, which is where
+// the unspent quarter goes.
+//
+// g_softDeadline == g_deadline reproduces the old behaviour exactly, which is
+// what SearchLimits leaves it at unless a caller asks otherwise.
+static std::chrono::steady_clock::time_point g_softDeadline;
 // Node budget, in the same place and for the same reason. 0 = unlimited, which
 // is the only state tests/bench and tests/perft ever see.
 static uint64_t g_nodeLimit = 0;
@@ -611,8 +636,15 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
     g_nextTimeCheck = TIME_CHECK_INTERVAL;
     g_nodeLimit = limits.maxNodes;
     if (g_hasDeadline) {
-        g_deadline = std::chrono::steady_clock::now() +
-                     std::chrono::milliseconds(limits.moveTimeMs);
+        const auto now = std::chrono::steady_clock::now();
+        g_softDeadline = now + std::chrono::milliseconds(limits.moveTimeMs);
+        // hardTimeMs of 0 means "no separate hard limit", i.e. the two coincide
+        // and the search behaves exactly as it did before the split existed.
+        // A hard limit below the soft one would be nonsense, so it is clamped
+        // rather than trusted.
+        const long hard = (limits.hardTimeMs > limits.moveTimeMs)
+                              ? limits.hardTimeMs : limits.moveTimeMs;
+        g_deadline = now + std::chrono::milliseconds(hard);
     }
     
     MoveList moves = generateLegalMoves(board, board.activeColor);
@@ -813,11 +845,36 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
         if (g_hasDeadline && currentDepth < maxDepth) {
             auto now = std::chrono::steady_clock::now();
             auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
-                g_deadline - now).count();
+                g_softDeadline - now).count();
             auto lastIteration = std::chrono::duration_cast<std::chrono::milliseconds>(
                 now - depthStart).count();
             const double BRANCHING = 2.3;
-            if (remaining <= 0 || (double)lastIteration * BRANCHING > (double)remaining) {
+
+            // Two rules, and which one applies is the whole of BUGS.md 11's
+            // second half.
+            //
+            // The prediction rule refuses to begin an iteration unless the
+            // *entire* predicted iteration fits in what is left. It never
+            // wastes time on an iteration that cannot finish — and it pays for
+            // that by abandoning, on average, most of a predicted iteration's
+            // worth of budget on every move. Measured: 75% of the allocation
+            // used, over five positions at a 90s+1s clock.
+            //
+            // The elapsed rule begins an iteration whenever the target has not
+            // yet passed, and relies on the hard deadline to end one that runs
+            // long. It spends the budget; the price is that an iteration which
+            // does not finish is discarded, because this search never uses a
+            // partial result.
+            //
+            // Which trade is better is not decidable from here — unused time
+            // and wasted time are both losses and only a game says which costs
+            // more. That is what the `--tc` gate is for, and until it rules,
+            // the prediction rule is what ships.
+            const bool stop = g_searchOptions.softTime
+                                  ? (remaining <= 0)
+                                  : (remaining <= 0 ||
+                                     (double)lastIteration * BRANCHING > (double)remaining);
+            if (stop) {
                 if (!g_searchOptions.quiet) {
                     std::cout << "Stopping at depth " << currentDepth << ": next iteration needs ~"
                               << (long)((double)lastIteration * BRANCHING) << "ms, "

@@ -159,6 +159,25 @@ SearchLimits parseGo(std::istringstream& is) {
         if (budget > cap) budget = cap;
         if (budget < 10) budget = 10;
         limits.moveTimeMs = budget;
+
+        // Spend the budget instead of merely allocating it (BUGS.md 11).
+        //
+        // `budget` is a target, not a boundary: the cost of passing it slightly
+        // is a few seconds off a clock with hundreds on it, while the cost of
+        // stopping short of it is a whole iteration's worth of depth, thrown
+        // away every move. Only overrunning the *clock* is fatal, and that is
+        // what `cap` guards.
+        //
+        // So the search is given room to finish an iteration it has started —
+        // three times the target — bounded by the same quarter-of-the-clock cap
+        // the target itself respects. It rarely uses it: the soft limit still
+        // governs whether an iteration begins, and this only decides what
+        // happens to one already running.
+        if (g_searchOptions.softTime) {
+            long hard = budget * 3;
+            if (hard > cap) hard = cap;
+            limits.hardTimeMs = hard;
+        }
     }
     // Nothing specified: fall back to a depth-limited search rather than
     // thinking forever. A node budget counts as something specified.

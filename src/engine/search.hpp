@@ -70,6 +70,40 @@ struct SearchOptions {
     // measured — see PLAN.md's gate for it — and so the old behaviour is one
     // flag away if the measurement ever disagrees.
     bool ttAging = true;
+
+    // Time management: begin an iteration whenever the per-move target has not
+    // passed and let it run to a separate hard cap, instead of refusing to
+    // begin one unless the whole predicted iteration fits inside the target
+    // (BUGS.md 11).
+    //
+    // **ON since 2026-08-16: +78 Elo, 95% CI [+40, +117]** over 200 games at
+    // `--tc 30+0.33`, and **zero time forfeits**, which was the half worth
+    // distrusting — the change makes the engine spend 1.67x more clock per
+    // move, and an overrun on a clock is a lost game rather than a lost
+    // interval.
+    //
+    // The largest accepted gain since Phase 6, and the first ever measured on a
+    // *clock* rather than at equal nodes. That is not incidental: the defect it
+    // fixes is invisible to a node budget by construction, which is why it
+    // survived every gate this project has run. The engine was using 75% of the
+    // time it allocated itself and the instrument could not see it.
+    //
+    // It changes nothing except when a caller states a clock: the split is
+    // armed in parseGo's clock branch alone, so `-t`, `-N` and every depth
+    // search are untouched by construction — which is why `bench` and
+    // `evalref` are unmoved by a change worth 78 Elo.
+    bool softTime = true;
+
+    // There is no king-safety toggle here, and on 2026-08-16 there briefly were
+    // two. Both were gated and neither earned its place; the numbers and the
+    // reasoning are in evaluation.cpp beside the term they describe, and in
+    // ROADMAP.md 6.4.
+    //
+    // Worth carrying forward: unlike every toggle above, an *evaluation* toggle
+    // cannot be gated by --optA/--optB, because tests/match runs both sides in
+    // one process and g_evalCache is keyed on position alone (BUGS.md 8). It
+    // needs two processes -- which now means tests/engine and the per-side
+    // setoption forwarding added the same day, not two hand-maintained builds.
 };
 extern SearchOptions g_searchOptions;
 
@@ -138,6 +172,19 @@ struct SearchLimits {
     int maxDepth = 64;       // hard ceiling on iterations
     long moveTimeMs = 0;     // wall-clock budget for this move; 0 = no budget
     uint64_t maxNodes = 0;   // node budget for this move; 0 = no budget
+
+    // The point past which a running iteration is abandoned, as opposed to
+    // moveTimeMs, which is the point past which a *new* one is not begun
+    // (BUGS.md 11). 0 means the two coincide, which is how every caller that
+    // states a plain budget behaves and what tests/bench and tests/timecontrol
+    // rely on.
+    //
+    // Only a caller playing to a real clock has any use for the distinction: it
+    // is the difference between "spend about this much" and "never exceed
+    // this", and collapsing them costs a quarter of the budget in unstarted
+    // iterations. A per-move budget like `-t` has no such distinction to make,
+    // which is why it is not the default.
+    long hardTimeMs = 0;
 
     SearchLimits() = default;
     explicit SearchLimits(int depth) : maxDepth(depth) {}
