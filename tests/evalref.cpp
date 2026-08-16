@@ -20,6 +20,7 @@
 #include "engine/movegen.hpp"
 #include "engine/move_lookup.hpp"
 #include "engine/evaluation.hpp"
+#include "engine/search.hpp"   // setSearchOption, for --opt
 
 #include <cctype>
 #include <cstdio>
@@ -357,6 +358,33 @@ int main(int argc, char** argv) {
 
     bool regen = (argc > 1 && std::strcmp(argv[1], "--regen") == 0);
 
+    // --opt <name>=<on|off>, as tests/bench takes it.
+    //
+    // The reference file describes the default evaluation, so a modified one
+    // cannot be compared against it — and is refused below. What *can* be
+    // checked under any option set is mirror symmetry, which has no reference
+    // file and cannot be regenerated into agreement. An evaluation toggle that
+    // is not colour-symmetric makes the engine play White and Black by
+    // different rules, and this is the only thing that would catch it before a
+    // gate spent a day measuring the asymmetry instead of the feature.
+    bool optionsChanged = false;
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--opt") != 0 || i + 1 >= argc) continue;
+        std::string spec = argv[++i];
+        size_t eq = spec.find('=');
+        if (eq == std::string::npos) {
+            std::cerr << "--opt wants <name>=<on|off>, got '" << spec << "'\n";
+            return 1;
+        }
+        std::string name = spec.substr(0, eq), value = spec.substr(eq + 1);
+        if (!setSearchOption(g_searchOptions, name,
+                             value == "on" || value == "true" || value == "1")) {
+            std::cerr << "unknown search option '" << name << "'\n";
+            return 1;
+        }
+        optionsChanged = true;
+    }
+
     if (regen) {
         std::ofstream out(REF_PATH, std::ios::binary);
         if (!out) {
@@ -370,9 +398,16 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    std::ostringstream produced;
-    generate(produced);
-    int rc = compare(produced.str());
+    int rc = 0;
+    if (optionsChanged) {
+        std::cout << "--opt given: skipping the reference comparison, which "
+                     "describes the default evaluation.\n"
+                     "Checking the two invariants that hold under any options.\n";
+    } else {
+        std::ostringstream produced;
+        generate(produced);
+        rc = compare(produced.str());
+    }
     if (checkEvalCache() != 0) rc = 1;
     if (checkMirrorSymmetry() != 0) rc = 1;
     return rc;

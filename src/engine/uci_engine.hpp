@@ -97,6 +97,25 @@ public:
         return waitFor("readyok");
     }
 
+    // Set one UCI option, after the handshake and before any search.
+    //
+    // Two-binary mode exists because two processes share no eval cache and no
+    // transposition table (BUGS.md 8), and that is the only honest way to gate
+    // an *evaluation* change. But until this existed, the two processes could
+    // only differ by being different builds — the harness had no way to tell a
+    // running engine which configuration to be, so gating a toggle that
+    // evaluation reads meant maintaining two binaries by hand.
+    //
+    // Returns false if the engine did not acknowledge, which matters: an
+    // unknown option name is answered with `info string unknown option` and
+    // otherwise ignored, and a gate whose variable under test was silently
+    // dropped measures the null hypothesis while reporting the feature.
+    bool setOption(const std::string& name, const std::string& value) {
+        send("setoption name " + name + " value " + value);
+        send("isready");
+        return waitFor("readyok");
+    }
+
     void newGame() {
         send("ucinewgame");
         send("isready");

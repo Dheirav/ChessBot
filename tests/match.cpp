@@ -599,6 +599,30 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    // Hand an external engine the side's whole configuration, not just the
+    // options that differ from its build defaults.
+    //
+    // Stating all of them is the point. A gate is only interpretable if exactly
+    // one thing differs, and "the rest were left at whatever this binary
+    // defaults to" is not a statement about what was compared — it is a promise
+    // about a build, and builds are what change between the two sides.
+    //
+    // Only ChessBot understands these names, so a foreign engine (Stockfish, in
+    // a sanity check) is left alone: it answers `info string unknown option`,
+    // which is not a failure worth aborting on but is not something to send
+    // fourteen of either.
+    auto configure = [&](UciEngine& eng, const EngineConfig& side, const char* which) {
+        for (size_t i = 0; i < SEARCH_OPTION_COUNT; ++i) {
+            const bool on = side.opts.*(SEARCH_OPTIONS[i].field);
+            if (!eng.setOption(SEARCH_OPTIONS[i].uciName, on ? "true" : "false")) {
+                std::printf("engine %s stopped responding while being configured "
+                            "(option %s)\n", which, SEARCH_OPTIONS[i].uciName);
+                return false;
+            }
+        }
+        return true;
+    };
+
     UciEngine* extA = nullptr;
     UciEngine* extB = nullptr;
     if (!A.binary.empty()) {
@@ -606,6 +630,7 @@ int main(int argc, char** argv) {
             std::printf("could not start engine A: %s\n", A.binary.c_str());
             return 1;
         }
+        if (!configure(extEngineA, A, "A")) return 1;
         extA = &extEngineA;
     }
     if (!B.binary.empty()) {
@@ -613,6 +638,7 @@ int main(int argc, char** argv) {
             std::printf("could not start engine B: %s\n", B.binary.c_str());
             return 1;
         }
+        if (!configure(extEngineB, B, "B")) return 1;
         extB = &extEngineB;
     }
 

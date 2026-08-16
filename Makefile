@@ -106,6 +106,19 @@ tests/bitboard_test: tests/bitboard_test.o $(ENGINE_OBJ)
 tests/guiinput: tests/guiinput.o $(ENGINE_OBJ) $(GM_OBJ) $(GUI_OBJ)
 	$(CXX) $^ -o $@ $(SFML_LIBS) $(LDFLAGS)
 
+# engine is the UCI engine with no GUI, for two-binary gates. Building it never
+# touches ./chessbot, and it is not named `chessbot`, so a running gate cannot
+# make `pgrep -x chessbot` lie about whether a rated game is live.
+tests/engine: tests/engine.o $(ENGINE_OBJ)
+	$(CXX) $^ -o $@ $(LDFLAGS)
+
+# evaltrace replays a game and prints this engine's own evaluation, term by
+# term, at each of the last plies. Deliberately NOT in $(TESTS): it needs a PGN
+# to point at and has no pass/fail line, so it is an instrument rather than a
+# test. See ROADMAP.md 6.4, which is the investigation it was built for.
+tests/evaltrace: tests/evaltrace.o $(ENGINE_OBJ)
+	$(CXX) $^ -o $@ $(LDFLAGS)
+
 # pgn guards the SAN export. Notation is unambiguous only if the writer does
 # the disambiguation work, and a viewer handed "Nf3" where it needed "Nbd2"
 # replays a different game than the one that was played.
