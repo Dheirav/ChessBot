@@ -36,6 +36,7 @@ Phase 3 is in progress. What is wired in:
 | `qbound` | **on** | quiescence capped 8 plies past the horizon; −16.8% nodes, no best move changed. Ungated repair |
 | `checkext` | **on** | **accepted**, +23.0 Elo [+13.3, +32.7] — on by default since 2026-08-14 |
 | `deltapruning` | off | −50.0 [−60.3, −39.7] at 200cp; **+7.1 [−2.9, +17.2] at 900cp** — spans zero, so stays off |
+| `softtime` | **on** | **accepted, +78 Elo [+40, +117]** on a *clock*, 200 games at `--tc 30+0.33`, zero forfeits — on by default since 2026-08-16 |
 
 All three gates ran 2026-08-13 at 14 shards × 120 pairs (3 360 games each,
 `-N 100000`). TT aging defaults on because it is a repair, not a feature — the
@@ -205,13 +206,90 @@ the +23.0 Elo from check extensions is real against a diverse field rather than
 against this engine's own blind spots, that band is where it shows up first. The
 rating will move for reasons that have nothing to do with the engine.
 
+### Third measurement — 2026-08-16 10:30, and the answer to the question
+
+**This is the measurement the whole project was waiting on**, and it came back
+positive. The question was whether self-play Elo means anything here: 6.2
+produced +121.2 and then +155.0 against the engine itself, and every gate ever
+run in this project is worth exactly what that answer says it is.
+
+Lichess `/api/user/Crimsy_Bot`, live, and the archive at 98 games:
+
+| | 08-15 00:49 | now |
+|---|---|---|
+| rating | 2080 | **2200**, rd=**52**, prog +45 |
+| 95% band | 1922-2238 | **2096-2304** |
+| record | 30-13-2 | **72-8-14** over 94 rated |
+
+**Split at `2026.08.15-13:27:00` UTC — commit `4a81fe8`, the hanging-piece
+deletion, at 17:27 local.** Results either side of it:
+
+| opponent | before, 61 games | after, 31 games |
+|---|---|---|
+| under 1500 | 97.1% (16-1-0) | 100% (4-0-0) |
+| 1500-1900 | 91.7% (16-1-1) | 100% (16-0-0) |
+| 1900-2100 | 70.8% (7-3-2) | 100% (6-0-0) |
+| 2100-2300 | **31.8%** (2-3-6) | **100%** (5-0-0) |
+| 2300+ | 0% (0-0-3) | *none played* |
+| **all** | **73.8%** | **100% — 31-0-0** |
+
+Thirty-one games, thirty-one wins, including kopyto_dev (2191), mate1-bot
+(2176) and stickshark99 twice (2187, 2169), an opponent that had beaten it
+twice before.
+
+**Move quality says the same thing, which is the part that is not luck.**
+`./tools/archive-profile.py --compare 2026.08.15-13:27:00`, Stockfish 16 at
+depth 14:
+
+| | before (2 730 moves) | after (1 358 moves) |
+|---|---|---|
+| accuracy | 94.9% | 95.4% |
+| avg centipawn loss | 20.9 | **16.3** (−22%) |
+| criticised moves | 172 (6.30%) | 68 (5.01%) |
+| **blunders** | **10** | **0** |
+
+**The blunder count is the finding.** Zero in 1 358 moves where the old rate
+predicts five; P(0) = 0.7%. It is the one number here that does not lean on the
+accuracy metric's soft parts, and unlike the score it cannot be produced by an
+easy draw of opponents.
+
+**The within-band cut is what defeats the "softer field" objection.** The
+after-cut opponent mix *is* easier, and accuracy always falls against stronger
+opponents, so the headline could have been mix rather than merit:
+
+| opponent | accuracy | avg cp |
+|---|---|---|
+| under 1500 | 96.6 → 96.4 | 14.2 → 16.5 |
+| 1500-1900 | 95.4 → 96.0 | 19.0 → 14.0 |
+| 1900-2100 | 94.5 → 94.5 | 24.5 → 20.0 |
+| 2100-2300 | **93.8 → 95.2** | **22.0 → 15.7** |
+
+The gain concentrates in **2100-2300** — largest accuracy jump and largest
+cp-loss drop both — and is flat or marginally worse against weak opposition.
+That is the shape 6.2 predicts: a term that shouted about phantom threats costs
+most against opponents able to punish a wasted tempo, and nothing against
+opponents who cannot. `threats` also stopped dominating the error attributions,
+leading 51 of 172 criticised moves before and 15 of 68 after.
+
+**What this does not license.** The magnitude does not convert: +276 Elo of
+self-play produced roughly +97 of rating. One change, measured once, is not a
+general warrant for self-play Elo — it is one instance of the instrument
+agreeing with the field. **No 2300+ opponent has been met since the cut** (0-0-3
+before), so the ceiling has not been shown to move, only the tier below it. And
+`BUGS.md` 6 still applies: play is deterministic, so the repeated opponents in
+that 31 are correlated and the sample is worth less than its count.
+
 ---
 
 ## In flight
 
-**Nothing is running.** The Lichess bot was stopped cleanly between games on
-2026-08-15 at 17:32, with no game in progress and none left unfinished. `./chessbot`
-holds the gated build, so it can be restarted as-is:
+**The Lichess bot is running.** Restarted 2026-08-16 at 02:08 on the post-6.2
+build, and it has been playing rated 900+10 since. **Do not `make` the engine
+without checking first** — it relinks `./chessbot`, and the bot spawns a fresh
+engine per game, so the next rated game would silently get an ungated binary.
+`make review` and `make tests` do not touch it.
+
+To stop it, wait for a gap between games:
 
 ```bash
 pgrep -x chessbot     # a PID means a game is live — WAIT
@@ -233,10 +311,41 @@ top of unverified changes.
 **SIGINT does not finish the game in progress** (`BUGS.md` 7). It cost eight
 minutes of clock in a rated game on 2026-08-15 and nearly a second forfeit.
 
-**Today's work is not externally validated.** The bot played one game on the
-post-6.2 build before being stopped, so the +121.2 and +155.0 are self-play
-only. An uninterrupted night of rated games is the outstanding measurement, and
-`ROADMAP.md` 6.2 explains why it matters more than the gate numbers do.
+**6.2 is now externally validated** — see the third measurement above. The
+uninterrupted night happened, 31 games came out of it, and both the results and
+the move quality moved. That was the outstanding measurement; it is closed.
+
+**The clock fix shipped: +78 Elo** (`BUGS.md` 11). The bug entry described one
+leak — the allocation being too small — and there were two. The larger one was
+that the engine spent only **75% of even that**: iterative deepening refused to
+begin an iteration unless the whole predicted iteration fitted in the budget, so
+it abandoned the tail of every move. Splitting the deadline into a target that
+governs *starting* an iteration and a hard cap that governs *abandoning* one
+took budget usage from 72% to 167% and mean depth from 8.8 to 10.0 plies.
+
+**Gated on a clock, which is the point.** 200 games at `--tc 30+0.33`: **+78
+Elo, 95% CI [+40, +117]**, zero time forfeits. This defect was invisible to
+every gate this project has ever run, because `-N` pays both sides the same
+nodes and an engine wasting *time* looks identical to one that is not. It needed
+`--tc`. **The allocation formula itself is still unfixed and wants its own
+gate** — see the entry.
+
+**King safety is closed and negative** (`ROADMAP.md` 6.4). It came out of
+reviewing the three losses to 2300+ opposition, which turned out to contain
+**zero blunders between them** — the engine was outplayed and mated, not caught
+out. The cause is real and still in the code: king safety counts no attackers
+at all, so a queen, rook and knight around the king score what an empty board
+does. Building the missing term measured **+1.3 [−7.9, +10.6]**; at 8× it
+measured **−216.9**; combined with the other half it measured **−11.0
+[−20.4, −1.6]**. Monotone, no peak above zero, and 5% slower even switched off.
+It was deleted. The engine is byte-identical to before the experiment — `evalref`
+and `bench` prove it — and the reasoning lives in `evaluation.cpp` beside the
+absence, as the hanging-piece penalty's does.
+
+**The instruments it left behind are the lasting part**, and `TODO.md` §2b
+lists them: `tests/engine` (gate evaluation without relinking `./chessbot`),
+per-side `setoption` forwarding in `tests/match`, `tests/evalref --opt`,
+`tests/evaltrace`, `tests/gate-progress.sh`, `tests/gate-pause.sh`.
 
 **No gate is running.** Logs are kept; re-pool any with
 `./tests/pool-shards.sh <dir>/`.
@@ -259,6 +368,11 @@ only. An uninterrupted night of rated games is the outstanding measurement, and
 | `shard-20260815-155045/` | divisor 6 vs 2, scan | +105.2 [+87.4, +123.5] |
 | `shard-20260815-160908/` | no penalty vs 2, scan | +152.0 [+133.1, +171.8] |
 | `shard-20260815-163117/` | **no penalty vs 2, full** | **+155.0 [+144.3, +166.0]** — shipped |
+| `shard-20260816-114039/` | **null control**, two binaries, same build | **50.00%**, `0-0-480-0-0` |
+| `shard-20260816-115624/` | `kingdanger` on vs off | +1.3 [−7.9, +10.6] |
+| `shard-20260816-131704/` | `kingcentre` off vs on | +2.2 [−6.8, +11.1] |
+| `shard-20260816-140940/` | both king-safety changes | **−11.0 [−20.4, −1.6]** |
+| `shard-20260816-150140/` | `kingdanger` at 8× magnitude | **−216.9 [−241.9, −193.8]** |
 
 **Run a null control when a result is surprising.** The +121.2 was five times
 anything previously measured here, so the same harness was pointed at the
@@ -310,30 +424,22 @@ It found two things on the way, and both are now the work:
   Lichess rating**.
 
 **`TODO.md` is the queue**, with sizes and blockers for everything open. The
-three that matter most, in the order I would take them:
+old item 1 — the uninterrupted night of rated games — **is done and came back
+positive**; the third measurement above is its write-up. What matters most now,
+in the order I would take it:
 
-1. **An uninterrupted night of rated games.** The single outstanding
-   measurement, and there is now one command for reading it:
-
-   ```bash
-   ./tools/archive-profile.py --compare 2026.08.15-13:27:00
-   ```
-
-   That stamp is Lichess **UTC**, and it is the moment the engine with the
-   hanging-piece term removed started playing. Everything before it is the
-   62-game baseline this project has been quoting; everything after is the
-   build that gated at +121.2 and then +155.0. Everything gained today is self-play, and self-play differs
-   from the pool in exactly the way that flatters a change. Whether +121 and
-   +155 survive contact with a real field decides how much every gate in this
-   project is worth — including the ones already banked. Watch the 2100-2300
-   band, which sat at 23% before today, rather than the rating headline.
-2. **The time-management fix** (`BUGS.md` 11). The bot spends under half its
+1. **The time-management fix** (`BUGS.md` 11). The bot spends under half its
    clock; `parseGo` divides what is left by a hardcoded 30 and banks half the
-   increment. The instrument to gate it now exists (`--tc`), and the fix does
-   not — deliberately, because "spend more clock" is exactly the kind of
-   plausible argument that has been wrong twice here.
-3. **The general Texel tune** — the rest of 6.2, now over an evaluation whose
-   largest term has stopped shouting.
+   increment. The instrument to gate it now exists (`--tc`), and `tools/review`
+   charts the clock, so a real game can show whether a fix worked and not only a
+   gate. The fix is deliberately unwritten, because "spend more clock" is exactly
+   the kind of plausible argument that has been wrong twice here.
+2. **The general Texel tune** — the rest of 6.2, now over an evaluation whose
+   largest term has stopped shouting, and now with a reason to believe a gate
+   on it will mean something.
+3. **Meet the 2300+ tier.** The band that defined the ceiling is 0-0-3 and has
+   not been played since 6.2 landed, so nothing measured on 08-16 speaks to it.
+   Everything else is a measurement of the tier below.
 
 Still open in the existing plan: 3.4 (futility/razoring — **read 3.1's result
 first**, the same bet swung 57 Elo on one constant), 3.5 (IID, the safe one),

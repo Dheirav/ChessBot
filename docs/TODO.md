@@ -1,7 +1,7 @@
 # TODO — the work queue
 
 Every open piece of work, with what blocks it and roughly what it costs. Kept
-current; the last entry here was checked on **2026-08-16**.
+current; the last entry here was checked on **2026-08-16**, after §1 closed.
 
 **This file deliberately does not explain anything.** The reasoning lives where
 it was earned — `ROADMAP.md` for why the priorities are what they are, `BUGS.md`
@@ -29,24 +29,33 @@ afternoon, **L** is a day or a night of machine time.
 
 ---
 
-## 1. The measurement everything else is waiting on
+## 1. ~~The measurement everything else is waiting on~~ — **done 2026-08-16**
 
-**Does self-play Elo mean anything here?** — **L** (machine time, not yours)
+**Does self-play Elo mean anything here? Yes, this time.** 31 games on the
+post-6.2 build: **31-0-0**, avg centipawn loss 20.9 → 16.3, **10 blunders → 0**,
+and the 2100-2300 band 31.8% → 100%. `HANDOFF.md`'s third measurement is the
+write-up; do not re-derive it here.
+
+Kept as an entry because the *habit* is the item, not this run. Re-run it after
+anything that ships:
 
 ```bash
-./tools/archive-profile.py --compare 2026.08.15-13:27:00
+./tools/archive-profile.py --compare <stamp> --jobs 4 --nice 19 \
+    --work ~/reviews/profile-cache
 ```
 
-The stamp is Lichess **UTC**, and it is when the build with the hanging-piece
-term removed started playing. 2026-08-15 produced **+121.2** and then **+155.0**
-in self-play; **16 games** had accumulated by 2026-08-16 00:20, which is not
-enough. Wants 30+.
+The stamp is Lichess **UTC**. `--jobs 4 --nice 19` is what makes it safe to run
+while the bot is playing — its games are on a real clock and starving them
+corrupts the evidence being collected. `--work` must be a persistent directory:
+the default is a fresh `mktemp` that a reboot discards, and re-analysing the
+whole archive costs ~7 minutes where re-analysing only the new games costs
+seconds.
 
-This ranks first because its answer changes how every other gate in this project
-should be read, including the ones already banked. Watch the 2100-2300 band,
-which sat at 25% before, rather than the rating headline. **Write down what it
-says even if it says nothing** — a null result here is the more valuable one and
-the easiest to quietly not record.
+**Still write down what it says even when it says nothing.** A null result is
+the more valuable one and the easiest to quietly not record.
+
+**What it did not answer:** no 2300+ opponent has been met since 6.2 landed
+(0-0-3 before it), so the ceiling itself is still unmeasured.
 
 ---
 
@@ -54,7 +63,10 @@ the easiest to quietly not record.
 
 | item | size | blocked by | note |
 |---|---|---|---|
-| **Time management** (`BUGS.md` 11) | M | nothing | The fix is deliberately unwritten. The instrument exists (`--tc`), and "spend more clock" is exactly the kind of plausible argument that has been wrong twice here. `tools/review` now charts the clock, so real games can show whether a fix worked, not only a gate. |
+| **Time management, part 1: spend the budget** (`BUGS.md` 11) | — | **done 2026-08-16** | `softtime` on by default. **+78 Elo [+40, +117]**, 200 games at `--tc 30+0.33`, zero forfeits. |
+| **Time management, part 2: size the budget** (`BUGS.md` 11) | M | nothing | `parseGo` still does `remaining/30 + increment/2` — divides by a constant 30 forever so allocation decays geometrically, and gives away half the increment for nothing. **Its own gate**, separately from part 1: two time-management changes in one match leaves neither attributable. |
+| **Re-measure the clock on Lichess** | S | rated games | `softtime` was gated at `--tc 30+0.33`; the bot plays 900+10. `tools/review` charts the clock, so a handful of real games shows directly whether the 535-seconds-unused pattern is gone. Cheap, and the only check at the control that matters. |
+| **King safety** (`ROADMAP.md` 6.4) | — | **closed, negative** | Four gates, 10 080 games: +1.3, +2.2, −11.0, −216.9. The defect is real and documented in `evaluation.cpp`; fixing it does not win games. **Do not reopen without building a gauntlet first** — self-play may be unable to see it, and four arms have already asked it. |
 | **6.2 remainder: the general tune** | L | nothing | Texel-style, over an evaluation whose largest term has stopped shouting. Position set exists: the game archive plus `evalref`'s 23 603 positions. |
 | **Re-run 6.1** | S | 6.2 landing | A corrected `threats` may expose blind spots it was masking. `ROADMAP.md` 6.3. |
 | **`deltapruning`** | L | different seeds | One gate short of a verdict at +7.1 [−2.9, +17.2]. Needs twice the games and **different seeds** — `shard-gate.sh` derives them from a fixed base and would replay the same games. |
@@ -63,6 +75,26 @@ the easiest to quietly not record.
 | **PLAN 3.6 — retune LMR** | L | 6.2 | Deliberately last, against a search that has stopped changing shape. |
 | **PLAN 5.4 — lazy evaluation** | M | nothing | Evaluation is ~33% of search time, but speed-per-node has returned ~zero Elo three times. Do it for the wall clock, not for a gate. |
 | **`BUGS.md` 6 — deterministic play** | M | nothing | Results against a repeated opponent are correlated, so the archive is worth less than its game count and every accuracy figure inherits that. A seeded random tiebreak among near-equal root moves; weigh against gate reproducibility before committing. |
+
+---
+
+## 2b. Instruments added 2026-08-16
+
+Built for `ROADMAP.md` 6.4 and kept because they outlived it.
+
+| thing | what it is for |
+|---|---|
+| `tests/engine` | the UCI engine with no GUI. **Gate evaluation changes with this, never `./chessbot`** — building that relinks the binary the bot spawns per game, and 24 processes named `chessbot` make `pgrep -x chessbot` lie about whether a rated game is live (`BUGS.md` 9). |
+| per-side `setoption` forwarding in `tests/match` | two-binary mode could drive two *builds* but could not tell a running engine which configuration to be, so an eval toggle needed two hand-maintained binaries. It now sends every option explicitly and aborts if one is not acknowledged. |
+| `tests/evalref --opt <name>=<on\|off>` | skips the reference comparison (which describes the defaults) and still checks the two invariants that hold under any options — chiefly mirror symmetry, which cannot be regenerated into agreement. |
+| `tests/evaltrace <game.pgn> [plies]` | replays a game and prints **this** engine's evaluation term by term. `tools/review` says what a stronger engine thinks; this is the only way to catch a term saying *nothing*. |
+| `tests/gate-progress.sh [dir] [--once]` | live bar over a running gate, read from the shard logs. A gate is hours that print nothing until they are over, which is how one that died in its first minute goes unnoticed. |
+| `tests/gate-pause.sh stop\|start\|status` | freeze and thaw a gate to get the machine back. Safe **only** because the budget is nodes and `waitFor` has no deadline; both would stop being true for `-t` or `--tc`. |
+
+**Do not gate while the bot plays rated games.** The 2026-08-16 loss was played
+under a 12-shard gate and its average centipawn loss was 34.5 against a
+post-6.2 norm of 15.7 for that opponent band. The gate is immune to load — node
+budgets are — but the bot is not, and rated games cannot be re-run.
 
 ---
 

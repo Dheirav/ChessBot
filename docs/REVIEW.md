@@ -226,6 +226,38 @@ profile did not make:
 Three and a half accuracy points separate the band the bot beats 97% of the time
 from the one it has never scored in. `ROADMAP.md` 6.1 is what that implies.
 
+### The same instrument after 6.2, 2026-08-16
+
+The table above is now the **"before"** half of a comparison, and it is left
+standing rather than regenerated: overwriting it would destroy the only thing it
+is good for. 31 games on the build with the hanging-piece term deleted:
+
+| | before, 2 730 moves | after, 1 358 moves |
+|---|---|---|
+| accuracy | 94.9% | 95.4% |
+| avg cp loss | 20.9 | **16.3** |
+| criticised | 172 (6.30%) | 68 (5.01%) |
+| **blunders** | **10** | **0** |
+| score | 69% | 100% |
+
+| opponent | accuracy | avg cp |
+|---|---|---|
+| under 1500 | 96.6 → 96.4 | 14.2 → 16.5 |
+| 1500-1900 | 95.4 → 96.0 | 19.0 → 14.0 |
+| 1900-2100 | 94.5 → 94.5 | 24.5 → 20.0 |
+| 2100-2300 | 93.8 → 95.2 | 22.0 → 15.7 |
+
+**This is the run that made the tool worth building.** Everything before it was
+a reviewer nobody had checked against an outcome. Here the accuracy metric, the
+blunder count and the actual results all moved the same way after one known
+change, which is the closest this tool can come to being validated. `HANDOFF.md`
+has the results half and the caveats.
+
+Two operational notes learned running it: pass `--jobs 4 --nice 19` so the four
+Stockfish workers cannot starve a live rated game, and pass a persistent
+`--work ~/reviews/profile-cache`, since the default `mktemp` cache does not
+survive a reboot and the whole archive costs ~7 minutes to re-analyse.
+
 **Do not compare that 94.9% to a Chess.com number.** Accuracy is a function of
 the analysing engine, its depth, and the curve — all three differ. It is a
 baseline to compare *this* engine against itself over time, and nothing else.
