@@ -1,7 +1,9 @@
+#include <cstdlib>
 #include <iostream>
 #include <memory>
 #include <string>
 
+#include "coach.hpp"
 #include "config.hpp"
 #include "game_manager.hpp"
 #include "gui_manager.hpp"
@@ -13,9 +15,21 @@ int main(int argc, char** argv) {
     // UCI mode is a pure stdin/stdout protocol with no window, so it is handled
     // before anything touches SFML. This is what lets cutechess-cli, Arena and
     // the rest of the standard tooling drive the engine.
+    //
+    // Play-along mode is handled here for the same reason: it is a terminal
+    // conversation about a game happening somewhere else, and opening a window
+    // for it would be beside the point.
+    bool coach = false, coachBlack = false;
+    long coachMs = 5000;
     for (int i = 1; i < argc; ++i) {
-        if (std::string(argv[i]) == "--uci") return uciLoop();
+        const std::string a = argv[i];
+        if (a == "--uci") return uciLoop();
+        else if (a == "--coach" || a == "--play-along") coach = true;
+        else if (a == "--black") coachBlack = true;
+        else if (a == "--white") coachBlack = false;
+        else if (a == "--time" && i + 1 < argc) coachMs = std::atol(argv[++i]) * 1000;
     }
+    if (coach) return coachLoop(!coachBlack, coachMs);
 
     std::cout << "=== ChessBot ===" << std::endl;
 

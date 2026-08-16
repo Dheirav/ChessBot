@@ -46,6 +46,36 @@ That produces an executable named `chessbot` in the project root.
 
 The window opens and asks which side you want to play; pick one and the game starts against the engine.
 
+## Play-along mode
+
+For a game happening somewhere else — on a board, on another site, against a
+friend. You type the moves as they are played and the engine tells you what it
+would play. It never moves for you: it advises, and you type what you actually
+played, which may not be what it suggested.
+
+```bash
+./chessbot --coach --black            # you are Black
+./chessbot --coach --white --time 10  # you are White, 10s per suggestion
+```
+
+```
+  8  r n b q k b n r
+  7  p p p p p p p p
+  ...
+  opponent> e4
+
+  >>> play  Nc6   (+0.14, 2s)
+  you>
+```
+
+Moves go in as you would write them — `e4`, `Nf3`, `O-O`, `exd5`, `e8=Q` — and
+long form (`e2e4`) is accepted too. Pressing Enter alone on your turn plays the
+suggestion. The board is drawn from your side, and the evaluation is from your
+side as well: `+0.4` means *you* are better, whichever colour you have.
+
+`board`, `undo`, `moves`, `eval`, `help` and `quit` do what they say. `--time`
+is seconds per suggestion and defaults to 5.
+
 ## Controls
 - Click a piece, then click one of its highlighted squares, to make a move
 - Or drag and drop a piece onto its destination
