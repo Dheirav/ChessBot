@@ -31,6 +31,15 @@ void renderBoard(sf::RenderTarget& window, const Board& board,
 void renderSidePanel(sf::RenderTarget& window, const GameManager& game,
                      long whiteClockMs, long blackClockMs);
 
+// The move the engine would play, drawn on the board as an arrow.
+//
+// Play-along mode has to say "play this" about a square rather than in words,
+// and a coordinate pair in the panel makes the reader do the lookup the picture
+// is there to save. The head stops short of the destination so it does not
+// cover the piece standing on it -- the same choice tools/review made for the
+// same reason. Does nothing when the move is null.
+void renderSuggestionArrow(sf::RenderTarget& window, const Move& move, bool flipped);
+
 // A banner across the board once the game is finished. The result was reported
 // to stdout only, which is not where someone playing in the window is looking.
 void renderGameOverBanner(sf::RenderTarget& window, const GameManager& game);

@@ -37,6 +37,13 @@ private:
     
     PieceColor humanSide;
     PieceColor engineSide;
+
+    // Play-along: the engine advises instead of playing (README, "Play-along
+    // mode"). Both sides are entered by hand, and every search produces a
+    // suggestion to draw rather than a move to make.
+    bool coachMode = false;
+    Move suggestedMove;
+    bool hasSuggestion = false;
     
     GameState currentState;
     
@@ -93,7 +100,19 @@ public:
     // resignation) still have legal moves available, so "is there a legal
     // move?" is not a substitute for "is the game still running?".
     bool isGameOver() const;
-    bool isHumanTurn() const { return !isGameOver() && board.activeColor == humanSide; }
+    // In play-along mode there is no engine side: the person enters both
+    // colours, so every turn is theirs. Input is gated on this, and the state
+    // machine still moves to WAITING_FOR_ENGINE to trigger the search that
+    // produces the suggestion -- which is why this must not consult the state.
+    bool isHumanTurn() const {
+        return !isGameOver() && (coachMode || board.activeColor == humanSide);
+    }
+
+    void setCoachMode(bool on) { coachMode = on; }
+    bool isCoachMode() const { return coachMode; }
+    // The move the engine would play here, or from == -1 if it has not
+    // finished thinking about this position yet.
+    Move getSuggestion() const { return hasSuggestion ? suggestedMove : Move(); }
     bool isEngineThinking() const { return engine->isThinking(); }
     
     // Move handling

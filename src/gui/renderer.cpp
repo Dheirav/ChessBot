@@ -1,5 +1,6 @@
 #include "gui/renderer.hpp"
 #include <SFML/Graphics.hpp>
+#include <cmath>
 #include <map>
 #include <string>
 #include <vector>
@@ -377,6 +378,47 @@ void renderSidePanel(sf::RenderTarget& window, const GameManager& game,
 // ---------------------------------------------------------------------------
 // Overlays
 // ---------------------------------------------------------------------------
+
+void renderSuggestionArrow(sf::RenderTarget& window, const Move& move, bool flipped) {
+    if (move.from < 0 || move.to < 0) return;
+
+    int fx, fy, tx, ty;
+    squareToScreen(move.from, flipped, fx, fy);
+    squareToScreen(move.to, flipped, tx, ty);
+
+    const float half = TILE_SIZE / 2.0f;
+    sf::Vector2f a(fx * TILE_SIZE + half, fy * TILE_SIZE + half);
+    sf::Vector2f b(tx * TILE_SIZE + half, ty * TILE_SIZE + half);
+
+    sf::Vector2f d = b - a;
+    const float len = std::sqrt(d.x * d.x + d.y * d.y);
+    if (len < 1.0f) return;
+    d /= len;                       // unit vector along the arrow
+    const sf::Vector2f n(-d.y, d.x); // and its perpendicular
+
+    // Stop short of the centre so the head sits on the edge of the target
+    // square rather than over whatever is standing there.
+    const float HEAD = 22.0f, SHAFT = 7.0f;
+    const sf::Vector2f tip = b - d * (half * 0.55f);
+    const sf::Vector2f base = tip - d * HEAD;
+
+    const sf::Color ink(240, 170, 40, 200);
+
+    sf::ConvexShape shaft(4);
+    shaft.setPoint(0, a + n * SHAFT);
+    shaft.setPoint(1, base + n * SHAFT);
+    shaft.setPoint(2, base - n * SHAFT);
+    shaft.setPoint(3, a - n * SHAFT);
+    shaft.setFillColor(ink);
+    window.draw(shaft);
+
+    sf::ConvexShape head(3);
+    head.setPoint(0, tip);
+    head.setPoint(1, base + n * (HEAD * 0.45f));
+    head.setPoint(2, base - n * (HEAD * 0.45f));
+    head.setFillColor(ink);
+    window.draw(head);
+}
 
 void renderGameOverBanner(sf::RenderTarget& window, const GameManager& game) {
     if (!game.isGameOver()) return;

@@ -175,6 +175,10 @@ void GUIManager::render() {
     const Move* lastMove = history.empty() ? nullptr : &history.back();
 
     renderBoard(window, gameManager->getBoard(), textures, input, lastMove);
+    // Drawn over the board and under the panel, so it sits on the squares it
+    // is talking about. Null until the first search for this position lands.
+    if (gameManager->isCoachMode())
+        renderSuggestionArrow(window, gameManager->getSuggestion(), input.isFlipped());
     input.drawDraggedPiece(window, textures);
     renderSidePanel(window, *gameManager, whiteClockMs, blackClockMs);
     renderGameOverBanner(window, *gameManager);

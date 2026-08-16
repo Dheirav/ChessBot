@@ -126,7 +126,10 @@ bool GameManager::makeHumanMove(const Move& move) {
     
     // Save state for undo
     saveStateForUndo();
-    
+
+    // Whatever was suggested was suggested for the previous position.
+    hasSuggestion = false;
+
     // Make the move
     board.makeMove(move);
     moveHistory.push_back(move);
@@ -200,7 +203,18 @@ void GameManager::processPendingEngineMove() {
         std::cout << "Discarding stale engine move: " << move.toString() << std::endl;
         return;
     }
-    
+
+    // Play-along keeps the result instead of playing it. The state goes back to
+    // waiting for the player, so the search is not requested again for a
+    // position it has already answered.
+    if (coachMode) {
+        suggestedMove = move;
+        hasSuggestion = (move.from != -1);
+        if (currentState == GameState::WAITING_FOR_ENGINE)
+            currentState = GameState::WAITING_FOR_PLAYER;
+        return;
+    }
+
     onEngineMove(move);
 }
 
@@ -240,7 +254,10 @@ void GameManager::onEngineMove(const Move& move) {
     
     // Save state for undo
     saveStateForUndo();
-    
+
+    // Whatever was suggested was suggested for the previous position.
+    hasSuggestion = false;
+
     // Make the move
     board.makeMove(move);
     moveHistory.push_back(move);
@@ -426,8 +443,12 @@ void GameManager::updateGameState() {
         return;
     }
 
-    // Game continues
-    if (board.activeColor == humanSide) {
+    // Game continues. Play-along asks the engine on every turn rather than on
+    // the engine's, because the answer is advice for whoever is to move.
+    if (coachMode) {
+        currentState = hasSuggestion ? GameState::WAITING_FOR_PLAYER
+                                     : GameState::WAITING_FOR_ENGINE;
+    } else if (board.activeColor == humanSide) {
         currentState = GameState::WAITING_FOR_PLAYER;
     } else {
         currentState = GameState::WAITING_FOR_ENGINE;

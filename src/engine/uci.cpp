@@ -8,6 +8,7 @@
 
 #include <atomic>
 #include <cctype>
+#include <algorithm>
 #include <cmath>
 #include <iostream>
 #include <memory>
@@ -45,6 +46,21 @@ bool parseUciMove(const Board& board, const std::string& text, Move& out) {
 // until it was collected here (BUGS.md 1).
 std::vector<uint64_t> g_gameHistory;
 
+// How many plies the game has actually been played for, counted as `position`
+// replays them.
+//
+// The time manager needs it and had no way to know it. A UCI engine is handed a
+// clock and a position, never a move number, so an allocation of the form
+// `remaining / N` with N constant treats move 3 and move 53 identically — and
+// since `remaining` shrinks, the allocation decays geometrically. Measured on
+// the first 900+10 game after the soft/hard split landed: 44 seconds a move over
+// the first ten moves, 4.3 over the last twenty, and the endgame that decided
+// the game played at one second a move.
+//
+// g_gameHistory cannot supply this: it is deliberately cleared at every capture
+// and pawn move, because no position across an irreversible move can recur.
+int g_pliesPlayed = 0;
+
 // "position [startpos | fen <6 fields>] [moves <m1> <m2> ...]"
 void handlePosition(std::istringstream& is) {
     std::string token;
@@ -54,6 +70,7 @@ void handlePosition(std::istringstream& is) {
     // statement of the game, not a delta, so accumulating across calls would
     // add the same positions again on every move.
     g_gameHistory.clear();
+    g_pliesPlayed = 0;
 
     if (token == "startpos") {
         g_board.setFromFEN(Board::INITIAL_FEN);
@@ -85,6 +102,7 @@ void handlePosition(std::istringstream& is) {
         const uint64_t before = g_board.getHash();
         g_board.makeMove(m);
         recordGamePosition(g_gameHistory, before, g_board);
+        ++g_pliesPlayed;
     }
 }
 
@@ -151,8 +169,32 @@ SearchLimits parseGo(std::istringstream& is) {
         bool white = (g_board.activeColor == COLOR_WHITE);
         long remaining = white ? wtime : btime;
         long increment = white ? winc : binc;
-        int moves = (movestogo > 0) ? movestogo : 30;
-        long budget = remaining / moves + increment / 2;
+        // How many more moves to plan for.
+        //
+        // A constant divisor treats move 3 and move 53 alike, and since
+        // `remaining` shrinks the allocation decays geometrically — the clock
+        // gets spent where it matters least. The first 900+10 game after the
+        // soft/hard split spent 44 s a move over its first ten moves and 4.3 s
+        // over its last twenty, and drew an endgame it played at one second a
+        // move.
+        //
+        // timeAlloc counts down instead: plan for a game of about eighty moves,
+        // never assuming fewer than thirty left. The floor is what stops the
+        // allocation collapsing in a long game — with an increment there is
+        // always another move, so "moves remaining" must never reach zero.
+        //
+        // The increment is income, not savings. Spending it in full holds the
+        // clock level; halving it gives away half of that for nothing.
+        int moves;
+        if (g_searchOptions.timeAlloc) {
+            moves = (movestogo > 0) ? movestogo
+                                    : std::max(80 - g_pliesPlayed / 2, 30);
+        } else {
+            moves = (movestogo > 0) ? movestogo : 30;
+        }
+        long budget = g_searchOptions.timeAlloc
+                          ? remaining / moves + increment
+                          : remaining / moves + increment / 2;
         // Never commit more than a fraction of what is left: an overrun here is
         // a forfeit, and losing on time beats any depth gained.
         long cap = remaining / 4;
@@ -293,6 +335,7 @@ int uciLoop() {
             g_tt->clear();
             g_board.setFromFEN(Board::INITIAL_FEN);
             g_gameHistory.clear();
+            g_pliesPlayed = 0;
         } else if (command == "position") {
             stopSearch();
             handlePosition(is);

@@ -94,6 +94,20 @@ struct SearchOptions {
     // `evalref` are unmoved by a change worth 78 Elo.
     bool softTime = true;
 
+    // The other half of BUGS.md 11: how large the per-move target is, and how
+    // it changes as the game goes on.
+    //
+    // Off computes `remaining / 30 + increment / 2` — a constant divisor, so
+    // the allocation decays geometrically as the clock shrinks, and half the
+    // increment banked for nothing. On counts the moves down (`remaining /
+    // max(80 - moveNumber, 30) + increment`), which flattens the curve and
+    // moves time out of the opening and into the middlegame.
+    //
+    // Off until its own `--tc` gate. Deliberately separate from softTime: two
+    // time-management changes in one match leaves neither attributable, which
+    // is the mistake the king-safety work made on the same day and paid for.
+    bool timeAlloc = false;
+
     // There is no king-safety toggle here, and on 2026-08-16 there briefly were
     // two. Both were gated and neither earned its place; the numbers and the
     // reasoning are in evaluation.cpp beside the term they describe, and in

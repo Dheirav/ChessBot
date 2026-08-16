@@ -54,9 +54,15 @@ would play. It never moves for you: it advises, and you type what you actually
 played, which may not be what it suggested.
 
 ```bash
-./chessbot --coach --black            # you are Black
+./chessbot --coach --black            # you are Black, in the terminal
 ./chessbot --coach --white --time 10  # you are White, 10s per suggestion
+./chessbot --coach --black --gui      # the same thing in the window
 ```
+
+With `--gui` you get the normal board, drawn from your side, and the suggestion
+is an **arrow** rather than a line of text. Click or drag the moves in as they
+are played — both colours, since the engine is advising rather than playing —
+and the arrow updates once it has finished thinking about the new position.
 
 ```
   8  r n b q k b n r
@@ -68,7 +74,7 @@ played, which may not be what it suggested.
   you>
 ```
 
-Moves go in as you would write them — `e4`, `Nf3`, `O-O`, `exd5`, `e8=Q` — and
+In the terminal, moves go in as you would write them — `e4`, `Nf3`, `O-O`, `exd5`, `e8=Q` — and
 long form (`e2e4`) is accepted too. Pressing Enter alone on your turn plays the
 suggestion. The board is drawn from your side, and the evaluation is from your
 side as well: `+0.4` means *you* are better, whichever colour you have.

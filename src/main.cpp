@@ -29,7 +29,12 @@ int main(int argc, char** argv) {
         else if (a == "--white") coachBlack = false;
         else if (a == "--time" && i + 1 < argc) coachMs = std::atol(argv[++i]) * 1000;
     }
-    if (coach) return coachLoop(!coachBlack, coachMs);
+    // --coach alone is the terminal conversation; --coach --gui is the same
+    // mode in the window that already knows how to draw a board.
+    bool coachGui = false;
+    for (int i = 1; i < argc; ++i)
+        if (std::string(argv[i]) == "--gui") coachGui = true;
+    if (coach && !coachGui) return coachLoop(!coachBlack, coachMs);
 
     std::cout << "=== ChessBot ===" << std::endl;
 
@@ -63,9 +68,13 @@ int main(int argc, char** argv) {
     // Connect GUI and game manager
     guiManager.setGameManager(&gameManager);
     
-    // Ask user for side preference
-    PieceColor userSide = guiManager.askUserForSide();
+    // Ask user for side preference. In play-along the answer only decides which
+    // way the board faces and which side the evaluation is signed for: both
+    // colours are entered by hand either way.
+    PieceColor userSide = coach ? (coachBlack ? COLOR_BLACK : COLOR_WHITE)
+                                : guiManager.askUserForSide();
     gameManager.setHumanSide(userSide);
+    gameManager.setCoachMode(coach);
     
     // Start a new game
     gameManager.startNewGame();

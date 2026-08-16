@@ -107,6 +107,7 @@ const SearchOptionEntry SEARCH_OPTIONS[] = {
     {"deltapruning","delta",    "DeltaPruning",&SearchOptions::deltaPruning},
     {"checkext",    "checkext", "CheckExt",    &SearchOptions::checkExtension},
     {"softtime",    "softtime", "SoftTime",    &SearchOptions::softTime},
+    {"timealloc",   "timealloc","TimeAlloc",   &SearchOptions::timeAlloc},
 };
 const size_t SEARCH_OPTION_COUNT = sizeof(SEARCH_OPTIONS) / sizeof(SEARCH_OPTIONS[0]);
 

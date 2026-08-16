@@ -182,9 +182,7 @@ int coachLoop(bool humanIsWhite, long thinkMs) {
             continue;
         }
         if (line == "fen") {
-            // No FEN writer exists in the engine — parseFEN is one-way — so say
-            // so rather than print something that is not a FEN.
-            std::cout << "  not available: the engine parses FEN but does not write it.\n";
+            std::cout << "  " << board.getFEN() << "\n";
             continue;
         }
         if (line == "moves") {
