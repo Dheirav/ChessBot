@@ -535,8 +535,36 @@ is one you have to read upside down. The evaluation bar reorients with it, and
 the coordinates label the edges of the *view* rather than of the board, which is
 where a flipped diagram usually goes wrong.
 
-**Not done, and cheap when wanted:** an opening name, the `Book`/`Brilliant`/`Great`/`Miss` labels below, and
-a batch index across the archive to pair with `tools/archive-profile.py`.
+### The archive index — 2026-08-17
+
+An eighty-game archive behind a `<select>` is a picker, not an index. The
+archive document now opens with a sortable table: date, colour, opponent and
+rating, result, opening, moves, accuracy, average centipawn loss, blunders, and
+**time used / time left**. Clicking a row loads that game; the strength-by-band
+table sits underneath, with the same bands `HANDOFF.md` uses so the two can be
+read against each other.
+
+Every column is oriented to the side being studied, including the result: a
+table of a hundred rows is unreadable if half of them say "0-1" for a win.
+
+**Nothing was re-analysed to build it.** Accuracy, blunders and the clock come
+out of the records the page already carries; date, ratings and opening come
+from the PGN tags, read at assembly time via `--pgn-dir`. Storing them in the
+record instead would have bumped `RECORD_VERSION` and re-reviewed all eighty
+games with Stockfish to learn facts already sitting in a tag — half an hour of
+a machine that is usually playing rated games.
+
+Two defects the screenshot caught, both of which would have shipped:
+
+- Sorting on the date string alone left every game from a single day in
+  directory order. The key is date *and* time.
+- An abandoned game with no reviewed moves reported 0.0% accuracy, which is not
+  a low score but the absence of one — and it dragged the 2100-2300 band average
+  from **94.1% down to 88.2%**. Games with no moves now read `—` and are left
+  out of the band averages.
+
+**Still not done, and cheap when wanted:** the
+`Book`/`Brilliant`/`Great`/`Miss` labels below.
 
 ---
 

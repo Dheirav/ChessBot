@@ -27,6 +27,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <iterator>
 #include <cstdio>
 #include <cstdlib>
@@ -246,6 +247,55 @@ std::string pieceImages() {
 // record that announces itself.
 constexpr int RECORD_VERSION = 2;
 
+// Index metadata for one archived game, read from the PGN rather than the
+// cached record.
+//
+// The index wants date, ratings and opening; a record carries none of them,
+// because none of them costs analysis to obtain and the record is a cache of
+// analysis. Adding them to the record would bump RECORD_VERSION and re-review
+// every game in the archive with Stockfish to learn facts already sitting in a
+// tag -- half an hour of a machine that is usually busy playing rated games.
+//
+// So the assembler reads the tags directly, and everything the index needs that
+// *is* analysis -- accuracy, blunders, clock spent -- the page computes from the
+// records it already has.
+//
+// Returns "null" when no PGN can be found, which the page renders as blanks
+// rather than as an error: an archive assembled without --pgn-dir is still a
+// working archive, just without the columns that come from tags.
+std::string indexMeta(const std::string& pgnPath) {
+    std::ifstream f(pgnPath);
+    if (!f) return "null";
+    std::string text((std::istreambuf_iterator<char>(f)),
+                      std::istreambuf_iterator<char>());
+    auto tag = [&](const char* name) -> std::string {
+        const std::string key = std::string("[") + name + " \"";
+        const size_t p = text.find(key);
+        if (p == std::string::npos) return "";
+        const size_t s = p + key.size(), e = text.find('"', s);
+        if (e == std::string::npos) return "";
+        std::string v = text.substr(s, e - s);
+        // The tag values used here are dates, integers and opening names; a
+        // quote or backslash in one would break the JSON, and an opening name
+        // is the plausible source of either.
+        std::string out;
+        for (char c : v) {
+            if (c == '"' || c == '\\') out += '\\';
+            out += c;
+        }
+        return out;
+    };
+    char buf[1024];
+    std::snprintf(buf, sizeof buf,
+        "{\"date\":\"%s\",\"time\":\"%s\",\"welo\":\"%s\",\"belo\":\"%s\","
+        "\"eco\":\"%s\",\"opening\":\"%s\",\"term\":\"%s\",\"site\":\"%s\"}",
+        tag("UTCDate").c_str(), tag("UTCTime").c_str(),
+        tag("WhiteElo").c_str(), tag("BlackElo").c_str(),
+        tag("ECO").c_str(), tag("Opening").c_str(),
+        tag("Termination").c_str(), tag("Site").c_str());
+    return buf;
+}
+
 // One game as a record the page can load. Kept separate from the page itself so
 // an archive of seventy games is seventy of these inside one document, rather
 // than seventy documents each carrying its own copy of the stylesheet and the
@@ -292,7 +342,8 @@ std::string gameRecord(const PgnGame& game, const std::vector<HtmlMove>& moves,
     return std::string("{\"head\":") + head + ",\"moves\":" + j + "}";
 }
 
-std::string htmlReport(const std::string& gamesJson, const std::string& title) {
+std::string htmlReport(const std::string& gamesJson, const std::string& title,
+                       const std::string& metaJson = "[]") {
     std::string html = R"HTML(<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -451,8 +502,38 @@ button:focus-visible,.ply:focus-visible{outline:2px solid var(--accent);outline-
   letter-spacing:.06em;text-transform:uppercase;margin-bottom:7px}
 svg{display:block;width:100%;height:150px;overflow:visible}
 .note{color:var(--faint);font-size:12px;margin-top:24px;line-height:1.7;max-width:72ch}
+#index{display:none;margin-bottom:26px}
+#index.on{display:block}
+.idxbar{display:flex;align-items:baseline;gap:14px;margin-bottom:10px;flex-wrap:wrap}
+.idxbar h2{font-size:15px;margin:0;font-weight:600}
+.idxbar .sub{color:var(--faint);font-size:12px}
+.idxwrap{overflow-x:auto;max-height:420px;overflow-y:auto;
+  border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+table.idx{border-collapse:collapse;width:100%;font-size:12.5px}
+table.idx th,table.idx td{padding:6px 10px;text-align:left;white-space:nowrap;
+  border-bottom:1px solid var(--line)}
+table.idx th{position:sticky;top:0;background:var(--panel);cursor:pointer;
+  font-weight:600;user-select:none}
+table.idx th:hover{color:var(--accent)}
+table.idx th.num,table.idx td.num{text-align:right}
+table.idx tbody tr{cursor:pointer}
+table.idx tbody tr:hover{background:var(--shade)}
+table.idx tbody tr.sel{background:var(--shade2);box-shadow:inset 3px 0 0 var(--accent)}
+table.idx td.win{color:var(--ok)}table.idx td.loss{color:var(--blunder)}
+.bandtab{margin-top:14px;font-size:12.5px;border-collapse:collapse}
+.bandtab td,.bandtab th{padding:4px 12px 4px 0;text-align:left}
+.bandtab th{color:var(--faint);font-weight:500}
 @media (prefers-reduced-motion:no-preference){.ply,button{transition:background-color .12s}}
 </style></head><body><div class="wrap">
+<section id="index">
+  <div class="idxbar">
+    <h2>Archive</h2>
+    <span class="sub" id="idxsub"></span>
+    <span class="sub" style="margin-left:auto"><button id="idxtoggle">hide</button></span>
+  </div>
+  <div class="idxwrap"><table class="idx" id="idxtable"></table></div>
+  <table class="bandtab" id="bandtab"></table>
+</section>
 <div id="picker" class="picker" style="display:none">
   <span class="gcount mono" id="gcount"></span>
   <select id="pick" aria-label="Choose a game"></select>
@@ -498,7 +579,7 @@ svg{display:block;width:100%;height:150px;overflow:visible}
 <p class="note" id="note"></p>
 </div>
 <script>
-const GAMES=__GAMES__, P=__PIECES__;
+const GAMES=__GAMES__, P=__PIECES__, META=__META__;
 const HAVE_IMG=Object.keys(P).length===12;
 let gi=0, H=GAMES[0].head, M=GAMES[0].moves, POS=[];
 const S={k:"♚",q:"♛",r:"♜",b:"♝",n:"♞",p:"♟"};
@@ -731,6 +812,123 @@ function loadGame(n){
     '<div><span>Black accuracy</span><b>'+H.accB.toFixed(1)+'%</b><i>'+H.cpB.toFixed(1)+' cp avg loss</i></div>';
   buildSheet(); graph(); timeGraph(); render();
   if(GAMES.length>1)document.getElementById("pick").value=gi;
+  document.querySelectorAll("#idxtable tbody tr").forEach(tr=>
+    tr.classList.toggle("sel", +tr.dataset.i===gi));
+}
+// --- Archive index -------------------------------------------------------
+// Everything here is derived rather than stored. Accuracy, blunders and the
+// clock all come out of the records the page already carries; date, ratings
+// and opening come from META, read from the PGN tags at assembly time. Nothing
+// needed re-analysing to build this table, which is why it exists.
+function ourSide(g){ return g.head.flip ? false : true; }   // true = we are White
+function rowStats(g){
+  const white=ourSide(g), M=g.moves;
+  let spent=0, left=null, mine=0;
+  for(const m of M){
+    if(m.w!==white) continue;
+    mine++;
+    if(typeof m.ms==="number" && m.ms>0) spent+=m.ms;
+    if(typeof m.left==="number" && m.left>0) left=m.left;
+  }
+  const acc = white ? g.head.accW : g.head.accB;
+  const cp  = white ? g.head.cpW  : g.head.cpB;
+  // Result from our side, which is the only orientation worth reading a
+  // 119-row table in.
+  const r=g.head.result;
+  const sc = r==="1/2-1/2" ? 0.5 : ((r==="1-0")===white ? 1 : 0);
+  return {white,acc,cp,blunders:g.head.blunders,moves:mine,spent,left,sc};
+}
+const IDX = GAMES.map((g,i)=>{
+  const m = META[i]||{}, st = rowStats(g);
+  const opp = st.white ? g.head.black : g.head.white;
+  const oppElo = +( st.white ? m.belo : m.welo ) || 0;
+  const myElo  = +( st.white ? m.welo : m.belo ) || 0;
+  const date=(m.date||"").replace(/\./g,"-"), time=(m.time||"").slice(0,5);
+  return {i, id:m.id||"", date, time, when:date+" "+time,
+          opp, oppElo, myElo, colour: st.white?"W":"B",
+          res: st.sc===1?"win":st.sc===0?"loss":"draw", sc:st.sc,
+          eco:m.eco||"", opening:(m.opening||"").split(":")[0],
+          term:m.term||"", acc:st.acc, cp:st.cp, blunders:st.blunders,
+          moves:st.moves, spent:st.spent, left:st.left};
+});
+const COLS=[
+  {k:"when",   t:"date",     f:r=>r.when.trim()},
+  {k:"colour", t:"",         f:r=>r.colour},
+  {k:"opp",    t:"opponent", f:r=>r.opp},
+  {k:"oppElo", t:"rating",   n:1, f:r=>r.oppElo||""},
+  {k:"res",    t:"result",   f:r=>r.res, cls:r=>r.sc===1?"win":r.sc===0?"loss":""},
+  {k:"opening",t:"opening",  f:r=>r.opening},
+  {k:"moves",  t:"moves",    n:1, f:r=>r.moves},
+  {k:"acc",    t:"accuracy", n:1, f:r=>r.moves?r.acc.toFixed(1)+"%":"—"},
+  {k:"cp",     t:"cp loss",  n:1, f:r=>r.moves?r.cp.toFixed(1):"—"},
+  {k:"blunders",t:"blund.",  n:1, f:r=>r.blunders||""},
+  {k:"spent",  t:"time used",n:1, f:r=>r.spent?Math.round(r.spent/1000)+"s":""},
+  {k:"left",   t:"left",     n:1, f:r=>r.left!=null?Math.round(r.left/1000)+"s":""},
+];
+let sortKey="when", sortDir=-1;
+function drawIndex(){
+  const rows=IDX.slice().sort((a,b)=>{
+    const x=a[sortKey], y=b[sortKey];
+    if(x===y) return a.i-b.i;
+    if(typeof x==="number"&&typeof y==="number") return (x-y)*sortDir;
+    return String(x).localeCompare(String(y))*sortDir;
+  });
+  let h="<thead><tr>";
+  for(const c of COLS)
+    h+='<th class="'+(c.n?"num":"")+'" data-k="'+c.k+'">'+c.t+
+       (sortKey===c.k?(sortDir>0?" ↑":" ↓"):"")+"</th>";
+  h+="</tr></thead><tbody>";
+  for(const r of rows){
+    h+='<tr data-i="'+r.i+'"'+(r.i===gi?' class="sel"':'')+">";
+    for(const c of COLS){
+      const extra=c.cls?c.cls(r):"";
+      h+='<td class="'+(c.n?"num ":"")+extra+'">'+c.f(r)+"</td>";
+    }
+    h+="</tr>";
+  }
+  document.getElementById("idxtable").innerHTML=h+"</tbody>";
+  document.querySelectorAll("#idxtable th").forEach(th=>th.onclick=()=>{
+    const k=th.dataset.k;
+    if(sortKey===k) sortDir=-sortDir; else { sortKey=k; sortDir=(k==="when")?-1:1; }
+    drawIndex();
+  });
+  document.querySelectorAll("#idxtable tbody tr").forEach(tr=>tr.onclick=()=>{
+    loadGame(+tr.dataset.i);
+    document.getElementById("board").scrollIntoView({behavior:"smooth",block:"center"});
+  });
+}
+// Strength by opponent band, the cut that has mattered every time this archive
+// has been read. Bands match docs/HANDOFF.md so the two can be compared.
+function drawBands(){
+  const B=[[0,1500,"under 1500"],[1500,1900,"1500-1900"],[1900,2100,"1900-2100"],
+           [2100,2300,"2100-2300"],[2300,9999,"2300+"]];
+  let h="<tr><th>opponent</th><th>games</th><th>W-D-L</th><th>score</th><th>accuracy</th></tr>";
+  let any=false;
+  for(const [lo,hi,name] of B){
+    const g=IDX.filter(r=>r.oppElo>=lo&&r.oppElo<hi);
+    if(!g.length) continue;
+    any=true;
+    const w=g.filter(r=>r.sc===1).length, d=g.filter(r=>r.sc===0.5).length, l=g.filter(r=>r.sc===0).length;
+    const scored=g.filter(r=>r.moves);
+    const acc=scored.length?scored.reduce((s,r)=>s+r.acc,0)/scored.length:0;
+    h+="<tr><td>"+name+"</td><td>"+g.length+"</td><td>"+w+"-"+d+"-"+l+"</td><td>"+
+       (100*(w+d/2)/g.length).toFixed(0)+"%</td><td>"+acc.toFixed(1)+"%</td></tr>";
+  }
+  document.getElementById("bandtab").innerHTML = any ? h : "";
+}
+if(GAMES.length>1&&META.length===GAMES.length){
+  document.getElementById("index").classList.add("on");
+  const dated=IDX.filter(r=>r.date).length;
+  document.getElementById("idxsub").textContent =
+    GAMES.length+" games"+(dated<GAMES.length?"  ·  "+(GAMES.length-dated)+" without tags":"");
+  const tog=document.getElementById("idxtoggle");
+  tog.onclick=()=>{
+    const t=document.querySelector(".idxwrap"), b=document.getElementById("bandtab");
+    const hidden=t.style.display==="none";
+    t.style.display=b.style.display=hidden?"":"none";
+    tog.textContent=hidden?"hide":"show";
+  };
+  drawIndex(); drawBands();
 }
 if(GAMES.length>1){
   const sel=document.getElementById("pick");
@@ -760,6 +958,7 @@ loadGame(0);
     };
     sub("__TITLE__", title);
     sub("__GAMES__", gamesJson);
+    sub("__META__", metaJson);
     sub("__PIECES__", pieceImages());
     return html;
 }
@@ -784,7 +983,7 @@ int main(int argc, char** argv) {
     // default mode opens a window — so reviewing with it needs
     //   --engine ./chessbot --engine-arg --uci
     std::vector<std::string> engineArgs;
-    std::string annotateOut, htmlOut, jsonOut, archiveOut;
+    std::string annotateOut, htmlOut, jsonOut, archiveOut, pgnDir;
     bool explain = false, flip = false;
     std::string me;
     std::vector<std::string> archiveIn;
@@ -802,6 +1001,7 @@ int main(int argc, char** argv) {
         else if (a == "--me")         me = next();
         else if (a == "--json")       jsonOut = next();
         else if (a == "--archive")    archiveOut = next();
+        else if (a == "--pgn-dir")    pgnDir = next();
         else if (a == "--explain")    explain = true;
         else if (a[0] != '-') { if (pgnPath.empty()) pgnPath = a; archiveIn.push_back(a); }
         else { std::printf("unknown option: %s\n", a.c_str()); return 1; }
@@ -821,24 +1021,52 @@ int main(int argc, char** argv) {
     // costs no analysis: adding one game to a 70-game archive re-reviews one
     // game, not seventy.
     if (!archiveOut.empty()) {
-        std::string games = "[";
-        int n = 0;
+        // A record is named <game-id>.json, and the PGN it came from ends in
+        // " - <game-id>.pgn". That naming is the only link between the two, so
+        // the map is built once here rather than by scanning the directory per
+        // record.
+        std::map<std::string, std::string> pgnById;
+        if (!pgnDir.empty()) {
+            for (const auto& e : std::filesystem::directory_iterator(pgnDir)) {
+                const std::string name = e.path().filename().string();
+                if (name.size() < 5 || name.substr(name.size() - 4) != ".pgn") continue;
+                const std::string stem = name.substr(0, name.size() - 4);
+                const size_t dash = stem.rfind(" - ");
+                pgnById[dash == std::string::npos ? stem : stem.substr(dash + 3)] =
+                    e.path().string();
+            }
+        }
+
+        std::string games = "[", meta = "[";
+        int n = 0, withMeta = 0;
         for (const std::string& in : archiveIn) {
             std::ifstream f(in);
             if (!f) { std::printf("cannot read %s\n", in.c_str()); return 1; }
             const std::string rec((std::istreambuf_iterator<char>(f)),
                                    std::istreambuf_iterator<char>());
             if (rec.empty()) continue;
-            if (n++) games += ",";
+            if (n++) { games += ","; meta += ","; }
             games += rec;
+
+            const std::string stem = std::filesystem::path(in).stem().string();
+            auto it = pgnById.find(stem);
+            std::string m = (it == pgnById.end()) ? "null" : indexMeta(it->second);
+            if (m != "null") ++withMeta;
+            // The id travels with the metadata so a row can link to the game on
+            // Lichess, which is the one thing this page cannot reconstruct.
+            if (m != "null") m.insert(1, "\"id\":\"" + stem + "\",");
+            meta += m;
         }
-        games += "]";
+        games += "]"; meta += "]";
+        if (!pgnDir.empty() && withMeta < n)
+            std::printf("note: %d of %d records had no matching PGN in %s; "
+                        "their index rows will be blank\n", n - withMeta, n, pgnDir.c_str());
         if (!n) { std::printf("no game records given\n"); return 1; }
         std::ofstream out(archiveOut);
         if (!out.is_open()) { std::printf("cannot write %s\n", archiveOut.c_str()); return 1; }
         char t[64];
         std::snprintf(t, sizeof t, "%d reviewed games", n);
-        out << htmlReport(games, t);
+        out << htmlReport(games, t, meta);
         std::printf("archive of %d games written to %s\n", n, archiveOut.c_str());
         return 0;
     }

@@ -58,7 +58,13 @@ printf '%s\0' "${PGNS[@]}" | xargs -0 -P "$JOBS" -I{} bash -c 'one "$@"' _ {}
 mapfile -t RECS < <(ls -1t "$CACHE"/*.json 2>/dev/null)
 [ "${#RECS[@]}" -gt 0 ] || { echo "no records to assemble" >&2; exit 1; }
 HTML="$OUT/archive.html"
-"$REPO/tools/review" --archive "$HTML" "${RECS[@]}" || exit 1
+# --pgn-dir is what turns the picker into an index: date, ratings and opening
+# live in the PGN tags and nowhere in a cached record, because none of them
+# costs analysis and a record is a cache of analysis. Reading them here keeps
+# RECORD_VERSION where it is -- bumping it to store a date would re-review
+# every game in the archive with Stockfish to learn something already written
+# in a tag.
+"$REPO/tools/review" --archive "$HTML" --pgn-dir "$ARCHIVE" "${RECS[@]}" || exit 1
 du -h "$HTML"
 
 if command -v wslpath >/dev/null 2>&1 && [ -x "/mnt/c/Program Files/Google/Chrome/Application/chrome.exe" ]; then

@@ -102,8 +102,8 @@ budgets are — but the bot is not, and rated games cannot be re-run.
 
 | item | size | note |
 |---|---|---|
-| **Archive index view** | M | The biggest gap. 80 games behind a `<select>` is a picker, not an index. Wants a sortable landing table — date, opponent, rating, result, accuracy, blunders — with a game one click away, and `archive-profile.py`'s band table alongside it. |
-| **Opening names** | S | `ECO` and `ECOUrl` are already in Chess.com and Lichess exports and currently ignored. Reading the tag costs nothing; computing openings without one needs a book. |
+| ~~**Archive index view**~~ | — | **done 2026-08-17**. Sortable table with date, opponent, rating, result, opening, accuracy, cp loss, blunders and clock used/left, plus the band table. Built from the cached records plus PGN tags via `--pgn-dir`, so it costs no analysis. |
+| ~~**Opening names**~~ | — | **done 2026-08-17** with the index — the `ECO` and `Opening` tags are read straight from the export. |
 | **Phantom-loss floor** | M | ~3% of criticised moves are moves the engine itself would have played, from successive searches disagreeing across a shared transposition table (`REVIEW.md`). Clearing the table between positions would cost analysis time; measure before choosing. |
 | **`Miss` label** | S | Needs mate scores preserved rather than clamped to ±1000. |
 | **`Brilliant` label** | M | Needs "material sacrificed and still best". |
