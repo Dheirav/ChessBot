@@ -36,7 +36,7 @@ Phase 3 is in progress. What is wired in:
 | `qbound` | **on** | quiescence capped 8 plies past the horizon; −16.8% nodes, no best move changed. Ungated repair |
 | `checkext` | **on** | **accepted**, +23.0 Elo [+13.3, +32.7] — on by default since 2026-08-14 |
 | `deltapruning` | off | −50.0 [−60.3, −39.7] at 200cp; **+7.1 [−2.9, +17.2] at 900cp** — spans zero, so stays off |
-| `softtime` | **on** | **accepted, +78 Elo [+40, +117]** on a *clock*, 200 games at `--tc 30+0.33`, zero forfeits — on by default since 2026-08-16 |
+| `softtime` | **off** | gated **+78 Elo [+40, +117]** at `--tc 30+0.33`, shipped 2026-08-16, **reverted 2026-08-17 after a rated-game time forfeit** — the `budget * 3` hard limit permits a 2 s overshoot at the gated control and a **70 s** one at 900+10. `BUGS.md` 11 has the repair; re-gate at a realistic control |
 
 All three gates ran 2026-08-13 at 14 shards × 120 pairs (3 360 games each,
 `-N 100000`). TT aging defaults on because it is a repair, not a feature — the

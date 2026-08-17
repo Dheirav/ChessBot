@@ -76,23 +76,38 @@ struct SearchOptions {
     // begin one unless the whole predicted iteration fits inside the target
     // (BUGS.md 11).
     //
-    // **ON since 2026-08-16: +78 Elo, 95% CI [+40, +117]** over 200 games at
-    // `--tc 30+0.33`, and **zero time forfeits**, which was the half worth
-    // distrusting — the change makes the engine spend 1.67x more clock per
-    // move, and an overrun on a clock is a lost game rather than a lost
-    // interval.
+    // Gated at **+78 Elo, 95% CI [+40, +117]** over 200 games at
+    // `--tc 30+0.33`, zero forfeits, and shipped on that basis on 2026-08-16.
     //
-    // The largest accepted gain since Phase 6, and the first ever measured on a
-    // *clock* rather than at equal nodes. That is not incidental: the defect it
-    // fixes is invisible to a node budget by construction, which is why it
-    // survived every gate this project has run. The engine was using 75% of the
-    // time it allocated itself and the instrument could not see it.
+    // **Turned back OFF on 2026-08-17 after it forfeited a rated game**
+    // (Axiom_BOT vs Crimsy_Bot, 4OP39tbH, −11). The gate is not wrong; it
+    // measured what it measured. The defect is that the result does not
+    // transfer to the control the bot actually plays, and the reason is one
+    // line in parseGo:
     //
-    // It changes nothing except when a caller states a clock: the split is
-    // armed in parseGo's clock branch alone, so `-t`, `-N` and every depth
-    // search are untouched by construction — which is why `bench` and
-    // `evalref` are unmoved by a change worth 78 Elo.
-    bool softTime = true;
+    //     hard = min(budget * 3, remaining / 4)
+    //
+    // A *multiple* of the target means completely different things at
+    // different clocks. At `--tc 30+0.33` the budget is ~1.2 s, so 3x permits
+    // a 2.3-second overshoot — invisible, and 200 games found no forfeits. At
+    // 900+10 the budget is ~35 s, so the same 3x permits a **70-second**
+    // overshoot, and the engine takes it: 73 s on move one of that game, and
+    // 1.3x to 3.8x the target on every move after it, until the clock ran out.
+    //
+    // The lesson is not "spending more clock is dangerous" — it is that a
+    // parameter expressed as a ratio was validated at one time control and
+    // shipped for another thirty times longer. The 1.67x figure that the
+    // simulation of a whole game rested on was itself measured at a 90s+1s
+    // clock, so the simulation answered a question nobody had asked.
+    //
+    // The repair is to bound the overshoot in absolute terms as well:
+    // `min(budget + increment, budget * 3, cap)`. Overshooting by at most one
+    // increment is self-financing, since the increment arrives next move, and
+    // it collapses to roughly the current behaviour at short controls. That
+    // changes what was gated, so it needs re-gating — **at a control
+    // resembling 900+10, not a thirtieth of it**, which is the mistake that
+    // produced this entry.
+    bool softTime = false;
 
     // The other half of BUGS.md 11: how large the per-move target is, and how
     // it changes as the game goes on.

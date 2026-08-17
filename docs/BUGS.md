@@ -577,7 +577,45 @@ clock costs a game rather than an interval. Simulation said it self-stabilises �
 below about 35 seconds left the `remaining/4` cap makes it spend less than the
 increment and the clock recovers — and 200 games agreed.
 
-`softtime` is on by default from 2026-08-16.
+**`softtime` was on by default from 2026-08-16 and was turned back off on
+2026-08-17, after it forfeited a rated game** — `Axiom_BOT vs Crimsy_Bot`,
+[4OP39tbH](https://lichess.org/4OP39tbH), −11.
+
+The gate is not wrong. The defect is that its result does not transfer to the
+control the bot plays, and the cause is one line:
+
+```cpp
+hard = min(budget * 3, remaining / 4);
+```
+
+A *ratio* means different things at different clocks:
+
+| control | remaining | budget | hard | overshoot permitted |
+|---|---|---|---|---|
+| `--tc 30+0.33` | 30 s | 1.2 s | 3.5 s | **2.3 s** |
+| 900+10 | 898 s | 34.9 s | 104.8 s | **69.9 s** |
+
+At the gated control a 3x overshoot is two seconds and 200 games found no
+forfeits. At 900+10 it is seventy, and the engine takes it — **73 s on move one**
+of that game, then 1.3x to 3.8x the target on every move after, until the clock
+ran out. The engine never exceeded its stated hard limit; the hard limit was
+absurd.
+
+**The lesson is not that spending clock is dangerous.** It is that a parameter
+expressed as a ratio was validated at one time control and shipped for another
+thirty times longer. The 1.67x figure that a whole-game simulation rested on was
+itself measured at a 90s+1s clock, so the simulation was answering a question
+nobody had asked. "Gated at `--tc 30+0.33`, the bot plays 900+10" was written
+down as an open item at the time it shipped, and shipping proceeded anyway.
+
+**The repair, when it is re-gated:** bound the overshoot absolutely as well as
+proportionally — `min(budget + increment, budget * 3, cap)`. One increment is
+self-financing, since it arrives next move, and at short controls it collapses
+to roughly today's behaviour. Re-gate **at a control resembling 900+10**, which
+is the step that was skipped.
+
+Verified on the shipped default: on the position that forfeited, the engine now
+spends 0.72x, 0.64x and 0.94x of its budget at 898 s, 300 s and 26 s remaining.
 
 **Why this survived every gate before it.** The defect is invisible to a node
 budget by construction: `-N` pays both sides the same nodes, so an engine that
