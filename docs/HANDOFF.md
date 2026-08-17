@@ -1,4 +1,4 @@
-# Handoff — 2026-08-16
+# Handoff — 2026-08-17
 
 Current state, what is in flight, and what to pick up. This is the file to read
 first; it is meant to be rewritten as state changes, unlike `BACKLOG.md`, which
@@ -347,8 +347,18 @@ lists them: `tests/engine` (gate evaluation without relinking `./chessbot`),
 per-side `setoption` forwarding in `tests/match`, `tests/evalref --opt`,
 `tests/evaltrace`, `tests/gate-progress.sh`, `tests/gate-pause.sh`.
 
-**No gate is running.** Logs are kept; re-pool any with
-`./tests/pool-shards.sh <dir>/`.
+**The Lichess bot is running** on the `softtime`-off build and should be left
+alone; **no gate is running, and none should start while it plays.** Logs are
+kept; re-pool any with `./tests/pool-shards.sh <dir>/`.
+
+**The review archive is 41 games behind.** `~/reviews/records/` caches one
+review per game and stops at 2026-08-15, so the index covers 80 of 121 — none of
+the post-6.2 games it would be most useful for. Catching up costs Stockfish over
+41 games, which is why it is waiting for the bot to be idle:
+
+```bash
+./tools/review-archive.sh          # only re-reviews what is missing
+```
 
 | directory | gate | pooled result |
 |---|---|---|

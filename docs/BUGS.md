@@ -757,3 +757,21 @@ long run.
 - **The engine never resigns** (`draw_or_resign.resign_enabled: false`). That is
   a config choice, not a defect. Playing on in lost positions costs nothing but
   the opponent's time.
+- **King safety counts no attackers at all** — a queen, rook and knight around
+  the king score what an empty board does. This is a real and still-present
+  defect, and it is filed here rather than above because **fixing it was
+  measured and does not win games**: four gates over 10 080 games returned
+  +1.3, +2.2, −11.0 and −216.9. `ROADMAP.md` 6.4 is the write-up and
+  `evaluation.cpp` carries the numbers beside the absence. Anyone scanning this
+  file for evaluation defects should find it here and then not build it again.
+  Note the one thing the gates could not rule out: self-play may be unable to
+  see a king-safety term at all, because both sides share this engine's
+  disinclination to attack. Testing that needs a gauntlet against a stronger
+  attacking opponent, which the harness cannot yet run.
+- **The four losses to 2300+ opposition were at 600+5, not 900+10.** They are
+  the whole of the "0-0-3 against 2300+" ceiling this project has quoted, they
+  were all played on 2026-08-12 while the provisional rating was still 3000, and
+  they were at a third less time per move than the bot normally plays. The
+  ceiling is therefore measured at a control the engine does not play, on a
+  build four generations old. Not a defect — but not the evidence it reads as
+  either.
