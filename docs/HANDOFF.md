@@ -347,9 +347,44 @@ lists them: `tests/engine` (gate evaluation without relinking `./chessbot`),
 per-side `setoption` forwarding in `tests/match`, `tests/evalref --opt`,
 `tests/evaltrace`, `tests/gate-progress.sh`, `tests/gate-pause.sh`.
 
-**The Lichess bot is running** on the `softtime`-off build and should be left
-alone; **no gate is running, and none should start while it plays.** Logs are
-kept; re-pool any with `./tests/pool-shards.sh <dir>/`.
+### In flight right now — a `--tc` gate, started 2026-08-19 18:00
+
+**`softtime` is being re-gated at `--tc 120+1.33`, 200 games, and the run is
+detached** (parent is `init`), so it survives any session ending. **The Lichess
+bot is stopped and must stay stopped until it finishes.**
+
+```bash
+L=/tmp/claude-1000/-home-dheirav-Code-ChessBot/4d6a5f36-aa81-4f77-bcac-6642a2b30753/scratchpad/gate-softtime2.log
+grep -c '^  pair ' "$L"          # games done, of 200
+grep -c 'time forfeit' "$L"      # the number that matters most
+sed -n '/^=== result/,$p' "$L"   # the result, once it is there
+./tests/gate-progress.sh "$L"    # live bar; it also handles a single log
+```
+
+**Why the bot must not run alongside it, unlike every other gate here.** A
+`--tc` match measures the engine's clock in wall time, so anything else on the
+machine changes the effective time control *while the experiment runs* — and
+unevenly, because the arm that starts more iterations is the one more exposed to
+being cut short, which is the mechanism under test. A node budget has no such
+problem, which is why the IID gate could have coexisted with the bot and this
+one cannot.
+
+**It has already been restarted once.** The first attempt was abandoned six
+games in when the machine slept: a suspend is exactly what corrupts wall-clock
+measurement, and `ps` etime under WSL2 *understates* it, so the only symptom was
+the progress bar reporting an absurd elapsed figure. If the elapsed time ever
+looks impossible again, suspect a sleep and discard the run.
+
+**What it is deciding.** `softtime` was gated at +78 Elo at `--tc 30+0.33`,
+shipped, and forfeited a rated game, because its hard bound was a *ratio*
+(`budget * 3`) that permits a 2-second overshoot at that control and seventy at
+900+10. The bound is now absolute (`budget + increment`) and verified at 900+10
+clocks — 44.8 s spent against a 44.9 s bound where the old code took 73 s. This
+gate asks whether it is still worth Elo with the overshoot bounded, at a control
+that has the same 90:1 shape as the one the bot plays.
+
+Logs from finished gates are kept; re-pool any with
+`./tests/pool-shards.sh <dir>/`.
 
 **The review archive is 41 games behind.** `~/reviews/records/` caches one
 review per game and stops at 2026-08-15, so the index covers 80 of 121 — none of
