@@ -216,8 +216,24 @@ SearchLimits parseGo(std::istringstream& is) {
         // governs whether an iteration begins, and this only decides what
         // happens to one already running.
         if (g_searchOptions.softTime) {
-            long hard = budget * 3;
+            // Bounded absolutely as well as proportionally, which is the
+            // repair for the forfeit on 2026-08-17.
+            //
+            // `budget * 3` alone is a *ratio*, and a ratio means different
+            // things at different clocks: 2 seconds of overshoot at
+            // --tc 30+0.33, where it was gated, and seventy at 900+10, where
+            // the engine took them and lost on time. One increment is the
+            // bound that does travel -- overshooting by it is self-financing,
+            // because the increment arrives on the next move, so a move that
+            // runs one increment long costs the clock nothing over the game.
+            //
+            // The multiple is kept as well, for the case an increment is zero
+            // or tiny: with no increment the bound would otherwise be the
+            // budget itself and the soft/hard split would do nothing at all.
+            long hard = budget + increment;
+            if (hard > budget * 3) hard = budget * 3;
             if (hard > cap) hard = cap;
+            if (hard < budget) hard = budget;
             limits.hardTimeMs = hard;
         }
     }

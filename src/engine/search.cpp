@@ -107,6 +107,7 @@ const SearchOptionEntry SEARCH_OPTIONS[] = {
     {"deltapruning","delta",    "DeltaPruning",&SearchOptions::deltaPruning},
     {"checkext",    "checkext", "CheckExt",    &SearchOptions::checkExtension},
     {"softtime",    "softtime", "SoftTime",    &SearchOptions::softTime},
+    {"iid",         "iid",      "Iid",         &SearchOptions::iid},
     {"timealloc",   "timealloc","TimeAlloc",   &SearchOptions::timeAlloc},
 };
 const size_t SEARCH_OPTION_COUNT = sizeof(SEARCH_OPTIONS) / sizeof(SEARCH_OPTIONS[0]);
@@ -516,7 +517,35 @@ static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
         tt.store(hash, depth, ply, score, Move(), TTEntry::EXACT);
         return score;
     }
-    
+
+    // --- Internal iterative deepening (PLAN.md 3.5) ---
+    //
+    // Alpha-beta's whole efficiency rests on searching the best move first, and
+    // the transposition table is what usually supplies it. When the table has
+    // nothing for this position -- a node reached for the first time, or one
+    // whose entry was displaced -- the ordering falls back to killers and
+    // history, which know nothing about *this* position.
+    //
+    // So search it shallowly first and use whatever that returns. The cost is a
+    // subtree a few plies smaller; at a branching factor near 2.3 that is a
+    // small fraction of the full-depth search, and it is repaid whenever it
+    // moves the best move to the front.
+    //
+    // Only at depth: below the threshold the reduced search is nearly as
+    // expensive as the real one, so there is nothing left to win. Not in check,
+    // because evasions are few and already forcing -- there is little ordering
+    // work to do and the shallow search would mostly rediscover it.
+    if (g_searchOptions.iid && ttMove.from == -1 && depth >= 5 && !inCheck) {
+        const int R = 2;
+        minimaxWithTT(board, depth - R, ply, alpha, beta, shouldStop, tt, pathHashes);
+        // The shallow search stores its result under this same position, so the
+        // move it liked is read back the way any other TT move would be. That
+        // is deliberate: it keeps one path into the ordering rather than two.
+        int ignored;
+        if (!searchAborted(shouldStop))
+            tt.probe(hash, 0, ply, -INF, INF, ignored, ttMove);
+    }
+
     // Move ordering with killer moves and history heuristic
     g_moveOrderer.orderMoves(moves, board, depth, ttMove);
 

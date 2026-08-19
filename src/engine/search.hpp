@@ -109,6 +109,32 @@ struct SearchOptions {
     // produced this entry.
     bool softTime = false;
 
+    // Internal iterative deepening (PLAN.md 3.5): with no transposition-table
+    // move to order on, search the position shallowly first and order on
+    // whatever that finds.
+    //
+    // **Gated 2026-08-18 and stays off: -0.1 Elo, 95% CI [-4.9, +4.7]** over
+    // 3 360 games at `-N 100000`. 1 183 wins against 1 184 losses.
+    //
+    // This is the tightest null this project has produced, and it is a real
+    // answer rather than an inconclusive one: `seepruning` measured [-7.2,
+    // +11.6] and `timealloc` [-22, +50], intervals wide enough to hide
+    // something useful. +/-4.9 is not. There is nothing here worth having.
+    //
+    // The reason is structural and the bench numbers said so before the gate
+    // did. IID exists to supply an ordering move when the transposition table
+    // has none, and iterative deepening means every node at remaining depth
+    // >= 5 was visited by the previous iteration and is already in the table.
+    // It never fires at bench 6 at all, and moves the tree 0.19% at depth 7
+    // and 0.30% at depth 8. A technique that barely changes the tree cannot
+    // change the result.
+    //
+    // Kept, off, with its number recorded -- the same treatment `seepruning`
+    // and `deltapruning` get -- so nobody builds it again expecting free Elo.
+    // If the transposition table ever shrinks enough for misses to be common
+    // at depth, this becomes worth re-asking; not before.
+    bool iid = false;
+
     // The other half of BUGS.md 11: how large the per-move target is, and how
     // it changes as the game goes on.
     //
