@@ -19,6 +19,11 @@ afternoon, **L** is a day or a night of machine time.
 - **`pgrep -x chessbot`** — a PID means a rated game is live. `pgrep -f` matches
   the shell running the check and has produced false positives repeatedly
   (`BUGS.md` 9).
+- **`./lichess/bot-stop.sh` does the stopping correctly, so do not do it by
+  hand.** `--games N`, `--minutes N`, `--at HH:MM`, `--now`, `--status`. It
+  waits for the condition, then for three consecutive clear `pgrep -x` polls,
+  and only then signals — the three rules in `BUGS.md` 7 and 9 that have each
+  been got wrong here at least once.
 - **Do not `make` the engine while the bot runs.** It relinks `./chessbot`, and
   the bot spawns a fresh engine per game, so the next rated game silently gets
   an ungated binary. `make review` and `make tests` do not touch it.
