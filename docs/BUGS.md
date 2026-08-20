@@ -577,50 +577,71 @@ clock costs a game rather than an interval. Simulation said it self-stabilises �
 below about 35 seconds left the `remaining/4` cap makes it spend less than the
 increment and the clock recovers — and 200 games agreed.
 
-**`softtime` was on by default from 2026-08-16 and was turned back off on
-2026-08-17, after it forfeited a rated game** — `Axiom_BOT vs Crimsy_Bot`,
-[4OP39tbH](https://lichess.org/4OP39tbH), −11.
+**`softtime` is on by default from 2026-08-20**, after a second gate at a
+control shaped like the one the bot plays: **+42 Elo, 95% CI [+6, +79]** over
+200 games at `--tc 120+1.33`, **zero time forfeits**.
 
-The gate is not wrong. The defect is that its result does not transfer to the
-control the bot plays, and the cause is one line:
+It shipped once before, on 2026-08-16, and was reverted the next day after
+forfeiting a rated game — `Axiom_BOT vs Crimsy_Bot`,
+[4OP39tbH](https://lichess.org/4OP39tbH), −11. That failure is worth keeping
+because the gate was not wrong; the *parameter* was.
+
+The hard bound was a ratio:
 
 ```cpp
 hard = min(budget * 3, remaining / 4);
 ```
-
-A *ratio* means different things at different clocks:
 
 | control | remaining | budget | hard | overshoot permitted |
 |---|---|---|---|---|
 | `--tc 30+0.33` | 30 s | 1.2 s | 3.5 s | **2.3 s** |
 | 900+10 | 898 s | 34.9 s | 104.8 s | **69.9 s** |
 
-At the gated control a 3x overshoot is two seconds and 200 games found no
-forfeits. At 900+10 it is seventy, and the engine takes it — **73 s on move one**
-of that game, then 1.3x to 3.8x the target on every move after, until the clock
-ran out. The engine never exceeded its stated hard limit; the hard limit was
-absurd.
+At the control it was gated on, three times the budget is two seconds and 200
+games found no forfeits. At 900+10 the same expression permits seventy, and the
+engine took them — **73 s on move one**, then 1.3× to 3.8× the target every move
+until the clock ran out. It never exceeded its stated hard limit. The hard limit
+was absurd.
 
-**The lesson is not that spending clock is dangerous.** It is that a parameter
-expressed as a ratio was validated at one time control and shipped for another
-thirty times longer. The 1.67x figure that a whole-game simulation rested on was
-itself measured at a 90s+1s clock, so the simulation was answering a question
-nobody had asked. "Gated at `--tc 30+0.33`, the bot plays 900+10" was written
-down as an open item at the time it shipped, and shipping proceeded anyway.
+**The bound is now absolute as well as proportional:**
 
-**The repair, when it is re-gated:** bound the overshoot absolutely as well as
-proportionally — `min(budget + increment, budget * 3, cap)`. One increment is
-self-financing, since it arrives next move, and at short controls it collapses
-to roughly today's behaviour. Re-gate **at a control resembling 900+10**, which
-is the step that was skipped.
+```cpp
+hard = min(budget + increment, budget * 3, cap);
+```
 
-Verified on the shipped default: on the position that forfeited, the engine now
-spends 0.72x, 0.64x and 0.94x of its budget at 898 s, 300 s and 26 s remaining.
+One increment is the bound that travels between time controls, because
+overshooting by it is self-financing — the increment arrives on the next move,
+so a move that runs one increment long costs the clock nothing across the game.
+The multiple survives only for the zero-increment case, where `budget + 0` would
+collapse the split to nothing.
 
-**Why this survived every gate before it.** The defect is invisible to a node
-budget by construction: `-N` pays both sides the same nodes, so an engine that
-wastes *time* looks identical to one that does not. It needed `--tc`, which is
-why building the instrument first was worth a day.
+**It costs about half the gain — +78 down to +42 — and that is the right
+trade.** The engine now uses less of the extra time than it did when free to
+overshoot by seventy seconds. A forfeit is a whole game.
+
+Two things were done differently the second time, and both were the point:
+
+- **The bound was verified at 900+10 clocks before any gate ran.** On the
+  position from the forfeited game the engine spends 44.8 s against a 44.9 s
+  bound, where the old code took 73 s. Simulated to 140 moves it settles at 40 s
+  remaining and never flags.
+- **The gate ran at `--tc 120+1.33`**, the same 90:1 shape as 900+10 rather than
+  a thirtieth of it, so a failure that only appears at long time controls had
+  somewhere to appear. It did not.
+
+**The general lesson, which is not about clocks.** A parameter expressed as a
+ratio was validated at one time control and shipped for another thirty times
+longer, and the whole-game simulation that said it was safe was fed a 1.67×
+constant measured at a 90s+1s clock. "Gated at `--tc 30+0.33`, the bot plays
+900+10" was written down as an open item at the time it shipped, and it shipped
+anyway. A ratio is not a bound; it is a bound only once something fixes its
+scale.
+
+**One caveat that a run of this length cannot settle.** A `--tc` gate measures
+wall time, so a machine that suspends corrupts it — the first attempt at this
+run was abandoned six games in for exactly that reason, and under WSL2 the only
+symptom was the elapsed figure looking impossible. The accepted run went 17 hours
+without a gap.
 
 ### The allocation itself: gated 2026-08-17, and it stays as it is
 

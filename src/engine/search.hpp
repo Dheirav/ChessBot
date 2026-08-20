@@ -76,38 +76,41 @@ struct SearchOptions {
     // begin one unless the whole predicted iteration fits inside the target
     // (BUGS.md 11).
     //
-    // Gated at **+78 Elo, 95% CI [+40, +117]** over 200 games at
-    // `--tc 30+0.33`, zero forfeits, and shipped on that basis on 2026-08-16.
+    // **ON since 2026-08-20: +42 Elo, 95% CI [+6, +79]** over 200 games at
+    // `--tc 120+1.33`, **zero time forfeits**. The engine was spending only 75%
+    // of the time it allocated itself; this recovers it.
     //
-    // **Turned back OFF on 2026-08-17 after it forfeited a rated game**
-    // (Axiom_BOT vs Crimsy_Bot, 4OP39tbH, −11). The gate is not wrong; it
-    // measured what it measured. The defect is that the result does not
-    // transfer to the control the bot actually plays, and the reason is one
-    // line in parseGo:
+    // Read the interval against the first attempt's, because the difference is
+    // the whole story. Gated at `--tc 30+0.33` this measured **+78 [+40,
+    // +117]**, shipped on 2026-08-16, and forfeited a rated game the next day.
+    // Its hard bound was a *ratio* -- `budget * 3` -- which permits a
+    // 2-second overshoot at a 30-second control and a **seventy-second** one at
+    // 900+10. The engine took them: 73 s on move one, then 1.3x to 3.8x the
+    // target every move until the clock ran out.
     //
-    //     hard = min(budget * 3, remaining / 4)
+    // The bound is now absolute as well as proportional:
+    // `min(budget + increment, budget * 3, cap)`. One increment is the bound
+    // that travels between time controls, because overshooting by it is
+    // self-financing -- the increment arrives on the next move. The multiple
+    // survives only for the zero-increment case, where `budget + 0` would
+    // collapse the split to nothing.
     //
-    // A *multiple* of the target means completely different things at
-    // different clocks. At `--tc 30+0.33` the budget is ~1.2 s, so 3x permits
-    // a 2.3-second overshoot — invisible, and 200 games found no forfeits. At
-    // 900+10 the budget is ~35 s, so the same 3x permits a **70-second**
-    // overshoot, and the engine takes it: 73 s on move one of that game, and
-    // 1.3x to 3.8x the target on every move after it, until the clock ran out.
+    // **That bound costs about half the gain, +78 down to +42, and it is worth
+    // paying.** The engine now uses less of the extra time than it did when it
+    // was free to overshoot by seventy seconds. A forfeit is a whole game.
     //
-    // The lesson is not "spending more clock is dangerous" — it is that a
-    // parameter expressed as a ratio was validated at one time control and
-    // shipped for another thirty times longer. The 1.67x figure that the
-    // simulation of a whole game rested on was itself measured at a 90s+1s
-    // clock, so the simulation answered a question nobody had asked.
+    // Two things were done differently this time and both were the point.
+    // The bound was verified at 900+10 clocks *before* any gate ran -- 44.8 s
+    // spent against a 44.9 s bound where the old code took 73 s. And the gate
+    // ran at a control with the same 90:1 shape as the one the bot plays,
+    // rather than a thirtieth of it, so a failure that only appears at long
+    // time controls had somewhere to appear.
     //
-    // The repair is to bound the overshoot in absolute terms as well:
-    // `min(budget + increment, budget * 3, cap)`. Overshooting by at most one
-    // increment is self-financing, since the increment arrives next move, and
-    // it collapses to roughly the current behaviour at short controls. That
-    // changes what was gated, so it needs re-gating — **at a control
-    // resembling 900+10, not a thirtieth of it**, which is the mistake that
-    // produced this entry.
-    bool softTime = false;
+    // It changes nothing except when a caller states a clock: the split is
+    // armed in parseGo's clock branch alone, so `-t`, `-N` and every depth
+    // search are untouched by construction -- which is why `bench` and
+    // `evalref` are unmoved by a change worth 42 Elo.
+    bool softTime = true;
 
     // Internal iterative deepening (PLAN.md 3.5): with no transposition-table
     // move to order on, search the position shallowly first and order on
