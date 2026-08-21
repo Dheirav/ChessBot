@@ -453,6 +453,7 @@ consistent with — not evidence for — the gated result.
 | `shard-20260816-140940/` | both king-safety changes | **−11.0 [−20.4, −1.6]** |
 | `shard-20260816-150140/` | `kingdanger` at 8× magnitude | **−216.9 [−241.9, −193.8]** |
 | `shard-20260821-112153/` | `deltapruning` re-measured on the current build | **+0.9 [−5.8, +7.7]** — closed, stays off |
+| `shard-20260821-220901/` | king exposure 100% + king danger 300%, two binaries | **−33.1 [−43.2, −23.0]** — rejected |
 
 **`deltapruning` is closed — 2026-08-21.** Re-measured on the current build:
 **+0.9 Elo [−5.8, +7.7]** over 3 360 games at `-N 100000`, 14 shards × 120
@@ -576,9 +577,27 @@ in the order I would take it:
    current baseline, which is the instrument doing its job: the trade is real
    and a gate has to decide whether it is worth it.
 
-   `tests/engine-kingsafety` is that candidate, already built, with
-   `tests/engine-base` as its unchanged counterpart. The gate is one command
-   (see below).
+   **Gated 2026-08-21 and rejected: −33.1 Elo [−43.2, −23.0]** over 3 360
+   games, `shard-20260821-220901/`. The gauntlet run alongside it could not
+   separate the candidate from the baseline (30.6% against 32.5% over 80
+   games), so it neither confirms nor contradicts — at that sample its interval
+   is ±80 Elo.
+
+   **Three things this settles.**
+
+   *The term is out.* Both scales stay 0.
+
+   *6.4's caveat is not vindicated.* The whole reason to rebuild the
+   attacker-count term was that self-play might be structurally unable to see
+   it. Self-play saw it immediately, and saw it as harmful. That does not prove
+   the caveat wrong in general, but it is the first real test of it and it went
+   the other way.
+
+   *The corpus anti-predicted the result*, and this is the lasting lesson.
+   `evalerror` scored the term as 37cp better on exactly the positions the
+   engine loses games from, and the engine got 33 Elo weaker. Use the corpus to
+   kill hypotheses cheaply and to locate error; never as a proxy for strength.
+   `tests/README.md` carries the table.
 
    **What the corpus says the target really is.** Over the 363 compensation
    positions the side ahead in material is ahead by **+195cp**, we price the
@@ -605,8 +624,14 @@ in the order I would take it:
    `ZlTEweWc`, survives every depth tried and is the reproducible lead.
 
    The clock fix that used to head this list **shipped**: +78 Elo, then
-   `softtime` at +42 (`BUGS.md` 11). What is left of it is the allocation
-   formula, which still divides by a hardcoded 30 and wants its own gate.
+   `softtime` at +42 (`BUGS.md` 11). **The allocation formula is closed too** —
+   this line used to say it still wanted a gate, and it had already had one:
+   `timeAlloc` gated 2026-08-17 at **+14 Elo [−22, +50]** over 200 games and
+   stays off, with the reason it stops there recorded on the toggle in
+   `search.hpp`. Resolving +14 needs four times the games, about twenty hours
+   of unshardable `--tc` wall clock, and the upside is bounded anyway: after
+   `softTime` shipped, every allocation formula converges to spending about 97%
+   of the clock, so this only redistributes time that is already being spent.
 2. **Keep the bot on the widened pool.** The 2200+ gauntlet is the one source
    of evidence self-play cannot give, and `ROADMAP.md` 6.4 names exactly that
    as what its four negative king-safety gates could not rule out. Four games
@@ -614,6 +639,18 @@ in the order I would take it:
 3. **The general Texel tune** — the rest of 6.2, now over an evaluation whose
    largest term has stopped shouting, and now with a reason to believe a gate
    on it will mean something.
+4. **`ROADMAP.md` Phase 7 — the road to 3000.** Written 2026-08-22 after an
+   audit of this list found four dead items in it. The engine is 2160 and
+   single-threaded on a 16-core machine, has no futility pruning, razoring,
+   late-move pruning, singular extensions or probcut, no ponder, no book and no
+   tablebases. Those absences are measured; the Elo attached to each of them in
+   Phase 7 is a prior from general practice and has to be earned here. Order is
+   pruning suite → Lazy SMP → NNUE, by Elo per unit of effort.
+
+   The strategic line, which six negative gates now support: **the evaluation
+   is the ceiling and hand-crafting it is the slow road.** King safety cost
+   10 080 games across four gates and 3 360 more on 2026-08-21, for +1.3, +2.2,
+   −11.0, −216.9 and −33.1. NNUE is the item that ends that line of work.
 
 Still open in the existing plan: 3.4 (futility/razoring — **read 3.1's result
 first**, the same bet swung 57 Elo on one constant), 3.6 (retune LMR,

@@ -75,16 +75,33 @@ the more valuable one and the easiest to quietly not record.
 |---|---|---|---|
 | **Time management, part 1: spend the budget** (`BUGS.md` 11) | — | **done 2026-08-16** | `softtime` on by default. **+78 Elo [+40, +117]**, 200 games at `--tc 30+0.33`, zero forfeits. |
 | **Time management, part 2: size the budget** (`BUGS.md` 11) | — | **gated 2026-08-17, stays off** | `timealloc` measured **+14 Elo [−22, +50]** over 200 games. Spans zero. Kept as a toggle like `seepruning`. Resolving +14 needs ~4× the games and `--tc` cannot be sharded, so ~20 h — do not reopen without that budget. Key finding: after `softtime`, every allocation formula converges to ~97% of the clock, so this can only redistribute, not add. |
-| **Re-measure the clock on Lichess** | S | rated games | `softtime` was gated at `--tc 30+0.33`; the bot plays 900+10. `tools/review` charts the clock, so a handful of real games shows directly whether the 535-seconds-unused pattern is gone. Cheap, and the only check at the control that matters. |
-| **King safety** (`ROADMAP.md` 6.4) | — | **closed, negative** | Four gates, 10 080 games: +1.3, +2.2, −11.0, −216.9. The defect is real and documented in `evaluation.cpp`; fixing it does not win games. **Do not reopen without building a gauntlet first** — self-play may be unable to see it, and four arms have already asked it. |
+| **Re-measure the clock on Lichess** | — | **done 2026-08-21** | 19 rated games at 900+10: **zero time forfeits, lowest clock in any game 41 s**, and that only in two 90-plus-move games against 2100+ opposition. Everything else finished with two minutes or more in hand. The 535-seconds-unused pattern is gone at the control that matters. |
+| **King safety** (`ROADMAP.md` 6.4) | — | **closed, negative — reopened once and closed again** | Four gates, 10 080 games: +1.3, +2.2, −11.0, −216.9. The gauntlet this row demanded was built on 2026-08-21 (`tests/gauntlet.sh`) and the term was rebuilt with it: **−33.1 Elo [−43.2, −23.0]** over 3 360 games, `shard-20260821-220901/`. Self-play saw the harm immediately, so the "self-play may be unable to see it" caveat did **not** hold here. `BUGS.md` 13 has the failed hypotheses and the position that defeated both. |
 | **6.2 remainder: the general tune** | L | nothing | Texel-style, over an evaluation whose largest term has stopped shouting. Position set exists: the game archive plus `evalref`'s 23 603 positions. |
 | **Re-run 6.1** | S | 6.2 landing | A corrected `threats` may expose blind spots it was masking. `ROADMAP.md` 6.3. |
-| **`deltapruning`** | L | different seeds | One gate short of a verdict at +7.1 [−2.9, +17.2]. Needs twice the games and **different seeds** — `shard-gate.sh` derives them from a fixed base and would replay the same games. |
-| **PLAN 3.5 — IID** | M | nothing | The safe search item: pure move ordering, cannot lose a game by discarding a line. |
+| **`deltapruning`** | — | **closed 2026-08-21, stays off** | Re-measured on the current build: **+0.9 Elo [−5.8, +7.7]** over 3 360 games, `shard-20260821-112153/`. The 2026-08-14 +7.1 was a pre-6.2 engine and was deliberately **not** pooled with it. `SEED_BASE` now exists on `shard-gate.sh` for the general case. |
+| **PLAN 3.5 — IID** | — | **gated 2026-08-18, stays off** | **−0.1 Elo [−4.9, +4.7]** over 3 360 games — the tightest null in the file. Iterative deepening already fills the table at the depths IID fires at. Toggle and reasoning on `search.hpp`. |
 | **PLAN 3.4 — futility / razoring** | M | ⚠ read 3.1 first | Same bet delta pruning makes. That bet swung 57 Elo on one constant. Start conservative, not textbook. |
 | **PLAN 3.6 — retune LMR** | L | 6.2 | Deliberately last, against a search that has stopped changing shape. |
 | **PLAN 5.4 — lazy evaluation** | M | nothing | Evaluation is ~33% of search time, but speed-per-node has returned ~zero Elo three times. Do it for the wall clock, not for a gate. |
 | **`BUGS.md` 6 — deterministic play** | M | nothing | Results against a repeated opponent are correlated, so the archive is worth less than its game count and every accuracy figure inherits that. A seeded random tiebreak among near-equal root moves; weigh against gate reproducibility before committing. |
+
+### The road to 3000 — `ROADMAP.md` Phase 7
+
+2160 today, so 840 Elo away. The Elo column is a **prior from general engine
+practice, not measured here**; the middle column is measured.
+
+| item | measured state today | prior | size |
+|---|---|---|---|
+| **Lazy SMP** | single-threaded, on a 16-core machine | +200–280 | L |
+| **NNUE evaluation** | hand-crafted, material-dominated; ~290cp of addressable static error | +200–400 | XL |
+| **Search pruning suite** — futility, razoring, LMP, singular, probcut | **none of them exist** | +150–300 | M each |
+| **Ponder** | absent; `config.yml` says the engine has no support | +30–50 | M |
+| **Opening book + Syzygy 3-4-5** | neither exists | +20–50 | S |
+| **Raw speed** | ~800 knps; bitboards measured at only 1.02× | +50–100 | L |
+
+Order by Elo per effort: pruning suite → Lazy SMP → NNUE → the afternoon jobs.
+PLAN 3.4 is the first pruning item and is already in the table above.
 
 ---
 
@@ -98,6 +115,8 @@ Built for `ROADMAP.md` 6.4 and kept because they outlived it.
 | per-side `setoption` forwarding in `tests/match` | two-binary mode could drive two *builds* but could not tell a running engine which configuration to be, so an eval toggle needed two hand-maintained binaries. It now sends every option explicitly and aborts if one is not acknowledged. |
 | `tests/evalref --opt <name>=<on\|off>` | skips the reference comparison (which describes the defaults) and still checks the two invariants that hold under any options — chiefly mirror symmetry, which cannot be regenerated into agreement. |
 | `tests/evaltrace <game.pgn> [plies]` | replays a game and prints **this** engine's evaluation term by term. `tools/review` says what a stronger engine thinks; this is the only way to catch a term saying *nothing*. |
+| `tests/evalerror` + `tools/eval-corpus.py` | scores the evaluation against Stockfish over positions it misjudged in real games, in a second. **It anti-predicted a gate on 2026-08-21** — 37cp better on the corpus, −33 Elo in games — so it finds error and kills hypotheses cheaply, and never decides anything. |
+| `tests/gauntlet.sh` | plays a fixed external opponent instead of ourselves. For changes whose value depends on the opponent's behaviour, and for absolute-strength checks self-play cannot give. Shard it (`shard-gate.sh` with `--na/--nb`) or it will not resolve anything. |
 | `tests/gate-progress.sh [dir] [--once]` | live bar over a running gate, read from the shard logs. A gate is hours that print nothing until they are over, which is how one that died in its first minute goes unnoticed. |
 | `tests/gate-pause.sh stop\|start\|status` | freeze and thaw a gate to get the machine back. Safe **only** because the budget is nodes and `waitFor` has no deadline; both would stop being true for `-t` or `--tc`. |
 

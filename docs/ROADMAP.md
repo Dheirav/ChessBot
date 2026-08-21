@@ -383,6 +383,61 @@ wrong twice about where the time goes, and both corrections came from measuring.
 
 ---
 
+## Phase 7 — The road to 3000 *(the strength programme, 2026-08-22)*
+
+`Crimsy_Bot` is **2160 Lichess rapid** over 190 rated games. 3000 is about
+**840 Elo away**, which is not a tuning problem: it is the distance between a
+competent classical engine and a modern one. Every item below is ordinary
+engine work, none of it is exotic, and together they plausibly cover the gap.
+
+**Read the Elo column as a prior, not a measurement.** Those figures come from
+general engine-development experience, not from anything gated in this repo.
+Every one of them has to earn its number here the same way `checkext` and
+`softtime` did. What *is* measured here is the second column — the state of
+this engine today.
+
+| lever | measured state today | prior | how it gets gated |
+|---|---|---|---|
+| **Lazy SMP** | **single-threaded** (`std::thread` appears once, for the UCI search thread) on a **16-core** machine | **+200–280** | node-limited gates say nothing about threads; needs `--tc`, and the comparison is against itself at one thread |
+| **NNUE evaluation** | hand-crafted, material-dominated: prices a material edge at −42cp where truth is −586, and ~290cp of that is addressable (`tests/evalerror`) | **+200–400** | self-play gate, plus `tests/evalerror` as the cheap pre-filter |
+| **Search pruning suite** | futility, razoring, late-move pruning, singular extensions and probcut are **all absent** — grep finds none of them | **+150–300** | one `shard-gate.sh` each, exactly as PLAN 3.4 already describes |
+| **Ponder** | absent; `lichess/config.yml` sets `ponder: false` because the engine has no support | +30–50 | rated games, not a gate — it buys the opponent's clock |
+| **Opening book, Syzygy 3-4-5** | neither exists; `config.yml` cannot even advertise `SyzygyPath` | +20–50 | rated games |
+| **Raw speed** | ~800 knps. The bitboard module is complete and perft-verified but measured at only **1.02×**, so the win is not there | +50–100 | `-t` gates only — a node budget is blind to speed by construction |
+
+Sum of the priors: **650–1100**. So 3000 is inside the range, and the ordering
+below is by Elo per unit of effort rather than by size.
+
+**1. The pruning suite.** Cheapest, most incremental, and the existing harness
+already measures it well. PLAN 3.4 is the first one and carries its own warning:
+the same bet swung 57 Elo on one constant, so start conservative.
+
+**2. Lazy SMP.** The largest single lever available and it needs no chess
+knowledge at all — a thread-safe transposition table, split points, and the
+discipline to gate it on a clock rather than on nodes. Sixteen cores are
+sitting idle on every move the engine makes, on this machine and on Lichess.
+
+**3. NNUE.** The largest total and the hardest, and the one that ends the line
+of work this repo has been losing on. The evidence for that is unusually good:
+king safety was gated four times over 10 080 games (+1.3, +2.2, −11.0, −216.9),
+rebuilt on 2026-08-21 with two new instruments, and gated again at **−33.1**.
+Six negative results, one afternoon each at best. A net learns from games what
+six hand-crafted attempts could not state. **The evaluation is the ceiling, and
+hand-crafting it is the slow road** — that sentence has now cost this project
+more machine time than anything else in the file.
+
+**4. Ponder, book, tablebases.** Afternoon jobs that slot in anywhere and are
+worth more on Lichess than their size suggests.
+
+**One caveat on the target.** 3000 *Lichess bot rapid* is not 3000 CCRL — the
+bot pool is its own scale, and this account's rating moves with the opponents
+matchmaking finds. `opponent_max_rating` was raised to 2500 on 2026-08-21 and
+the rating fell from 2190 to 2160 within a day, because the bot finally started
+meeting opponents that beat it. That is the rating becoming honest, not the
+engine getting worse.
+
+---
+
 ## Open defects
 
 `BUGS.md` 6 (deterministic play) and 7 (restarting mid-game forfeits) are the

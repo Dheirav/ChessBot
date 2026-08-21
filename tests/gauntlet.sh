@@ -35,11 +35,41 @@
 # length between measurements is not one. OPP_NODES below is that number.
 #
 # Calibrated 2026-08-21 against ChessBot at the standing 100 000-node gate
-# budget: Stockfish at 300 nodes scored 18.8%, at 800 nodes 50.0%, at 2 500
-# nodes 87.5%, at 8 000 nodes 100%. Eight games each, so those percentages
-# carry intervals hundreds of Elo wide — which is fine for choosing where to
-# stand the ruler and useless as a measurement of anything. The number to keep
-# is 800; the percentages around it are not results.
+# budget. The first attempt used eight games per point and put the even mark at
+# 800 nodes; re-measured over forty, the same opponent scores:
+#
+#   Stockfish @400n  ->  we score 48.8%   (40 games)
+#   Stockfish @550n  ->  we score 41.2%   (40 games)
+#   Stockfish @800n  ->  we score 32.5%   (80 games)
+#
+# So 800 was wrong by a wide margin and this file said otherwise for an evening.
+# Eight games cannot place a ruler: the interval on 8 games is hundreds of Elo,
+# which was written in this very comment and then used anyway. The number to
+# keep is 400.
+#
+# On resolution. At 80 games this script could not separate a candidate from
+# the baseline (30.6% vs 32.5%) on a change self-play measured cleanly at -33
+# Elo over 3 360 games. That is a sample-size problem and not a property of the
+# method: the match is node-limited, so it shards exactly like any other -N
+# gate and the fix is to run it that way —
+#
+#   ./tests/shard-gate.sh 14 60 --na 100000 --nb 400 \
+#       --engineA tests/engine-<candidate> --engineB /usr/games/stockfish \
+#       --argsB "" --foreignB
+#
+# 1 680 games in about an hour, which is the same order as a self-play gate.
+# (An earlier version of this comment claimed a gauntlet cannot be sharded.
+# That is true of a *timed* match, where shards compete for the CPU and each
+# plays a weaker engine than it would alone. A node budget is spent identically
+# whatever else is running, which is the whole reason shard-gate.sh insists on
+# one.)
+#
+# What it is for, and what it is not. Self-play compares this engine to itself,
+# so it cannot see a change whose value depends on the opponent doing something
+# this engine does not do — attacking, most of all — and it scores 50% for a
+# change that makes both sides equally worse. Those are the two jobs here. It
+# is not a second opinion on questions self-play answers well: on 2026-08-21 it
+# added nothing to a verdict self-play had already delivered cleanly.
 #
 # Not a replacement for shard-gate.sh. This plays one engine against another
 # and cannot be sharded into a pooled result the way a self-play gate can, so
@@ -52,7 +82,7 @@ OPP=${OPP:-/usr/games/stockfish}
 # a candidate points it at that build instead, e.g.
 #   OUR=tests/engine-kingsafety ./tests/gauntlet.sh 40
 OUR=${OUR:-./chessbot-uci.sh}
-OPP_NODES=${OPP_NODES:-800}      # calibrated 2026-08-21; see above before changing
+OPP_NODES=${OPP_NODES:-400}      # calibrated 2026-08-21; see above before changing
 OUR_NODES=${OUR_NODES:-100000}   # the standing gate budget, so results compare
 SEED=${SEED:-20260821}
 

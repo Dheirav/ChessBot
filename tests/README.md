@@ -141,9 +141,19 @@ does not exist; halving the distance to Stockfish's shallow view does.
 
 Two more things it cannot do. `comp` is *selected* for material being
 misleading, so its absolute numbers are not a measure of general accuracy —
-only movement in them is meaningful. And agreement with Stockfish is not Elo:
-`ROADMAP.md` 6.4 is the standing proof that a term can look right and still
-lose games. Iterate here in seconds, decide in a gate.
+only movement in them is meaningful. And **agreement with Stockfish is not
+Elo** — which stopped being a caution and became a measurement on 2026-08-21:
+
+| | corpus `comp` | self-play, 3 360 games |
+|---|---|---|
+| baseline | 543.7 | — |
+| king exposure 100% + king danger 300% | **506.3** (better by 37cp) | **−33.1 Elo [−43.2, −23.0]** |
+
+The corpus called that term a clear improvement on exactly the positions the
+engine loses games from, and it cost 33 Elo. **The corpus anti-predicted the
+result.** Treat it as a way to kill bad hypotheses cheaply and to find where an
+evaluation is wrong — never as a proxy for strength, and never as grounds for
+shipping. Every use of it ends in a gate.
 
 ### Playing something other than yourself
 
