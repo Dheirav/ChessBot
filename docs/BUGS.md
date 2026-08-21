@@ -863,6 +863,107 @@ kind of incident that gets remembered as harmless.
 
 ---
 
+## 13. The evaluation cannot see compensation — reproducible, 2026-08-21
+
+`Crimsy_Bot vs agentc313 (2314)`, [gtB9qan7](https://lichess.org/gtB9qan7), rated
+900+10. Position after 16...Rb6:
+
+```
+2q2rk1/p2b1ppp/1r6/3Q4/1b1pP3/3B4/PPP2PPP/R1BK3R w - - 5 17
+```
+
+The engine played **17.Qxd4**, winning a pawn. It is now **+3 in material** and
+scores itself **+1.65** (its own eval, depth 10, in the game). Stockfish 16 at
+depth 16 scores the same position **−3.09** — a gap of **4.7 pawns** with no
+tactic in it. Nothing hangs; no material changes hands for the next fifteen
+moves. What Black has is compensation: the bishop pair raking the position,
+`17...Rd8` onto the file White's own king stands on, and a White king stuck on
+d1 with the rooks still on a1 and h1 and no castling rights. The evaluation
+scores all of that as zero, so it takes the pawn and calls the position good.
+
+**This one reproduces on demand**, which makes it the cheapest lead in the file:
+
+```bash
+printf 'uci\nisready\nposition fen 2q2rk1/p2b1ppp/1r6/3Q4/1b1pP3/3B4/PPP2PPP/R1BK3R w - - 5 17\ngo depth 14\n' | ./chessbot --uci | tail -1
+# bestmove d5d4  -- and the same at 100k, 2M and 25M nodes, cold table or warm,
+# node-limited or clock-limited. It is not a search-depth failure.
+```
+
+It is the same family as the `19.Qd4` blunder in 7: the queen goes pawn-hunting
+onto its own king's file. That entry read it as a one-off. It is not.
+
+### What five losses to 2100+ opposition look like — 2026-08-21
+
+14 rated games that day, **9W-0D-5L**, 2189 → 2177. Every loss was to 2100+; the
+record against **2200+ was 0-0-4** (PlayMarius 2239, Bongaclang 2404, DeepBecky
+2394, agentc313 2314). Reviewed at Stockfish depth 16, over the bot's own moves:
+
+| opponent band | games | accuracy | mean CPL | blunders | mistakes | errors/100 moves |
+|---|---|---|---|---|---|---|
+| 2200+ | 4 | 95.5% | 24.5 | 3 | 7 | **3.3** |
+| 2000–2200 | 2 | 95.3% | 16.6 | 0 | 2 | 1.2 |
+| under 2000 | 8 | 96.8% | 11.7 | **0** | **0** | **0.0** |
+
+Zero errors in 268 moves below 2000. Restricting to positions still in the
+balance (|eval| ≤ 1.00), so that "already winning" cannot flatter the easy
+games, the same shape holds: **12.9** errors per 100 moves against 2200+ (4 in
+31), 1.2 against 2000–2200 (1 in 80), 0 below 2000 (0 in 59). The 31 is small,
+and small *because* those games left the balance early — read it as direction,
+not as a rate.
+
+**This corrects the 2026-08-16 finding** that the losses to 2300+ contained
+"zero blunders between them — outplayed, not caught out". On this build, at
+900+10, they contain three blunders and eight mistakes. None were time
+pressure: each error had 21–43s of thought behind it and 150–770s left on the
+clock.
+
+### Two explanations that were tested and are wrong
+
+**Not partial iterations.** Four of the five largest errors cannot be
+reproduced offline — the engine plays the better move at every budget from
+100k to 25M nodes, cold table or warm, by nodes or by clock, at every fixed
+depth from 6 to 16. The obvious suspect was iterative deepening returning a
+move from an iteration the clock cut short. **It does not**: `search.cpp:825`
+updates `bestMove` only when `completedDepth && !searchAborted(shouldStop)`,
+and otherwise keeps the previous depth's move and breaks. What is left is that
+those choices depended on the exact transposition-table state the game had
+built, which changes the move at the same nominal depth and cannot be
+reconstructed without replaying load-dependent timed searches. The practical
+consequence is the important part: **a fixed-node gate structurally cannot see
+these failures**, so the harness will keep reporting a strength this engine
+does not have in timed play.
+
+**Not systematic overconfidence.** In the Bongaclang loss the engine scored
+itself **+6.92** at move 21 and **+3.20** at move 22 while Stockfish had it at
+−1.69 and −5.60, with its king walking (Kd1, Kc2) into knights (Nc4, Nxb2+) —
+the king-safety hole doing exactly what the file says it should. But across all
+14 games the bias does not generalise:
+
+| band | moves | mean signed error | mean absolute error |
+|---|---|---|---|
+| 2200+ | 263 | +21 | **224** |
+| 2000–2200 | 130 | +19 | 127 |
+| under 2000 | 233 | **+115** | 171 |
+
+The evaluation is *less accurate* against strong opponents, not systematically
+optimistic about them — it is most optimistic against weak ones, where being
+five pawns up makes the disagreement harmless. Quote the absolute column, not
+the signed one.
+
+### Why this matters for the king-safety question
+
+`ROADMAP.md` 6.4 closed king safety as negative over four gates, and recorded
+the one thing those gates could not rule out: **self-play may be unable to see
+the term at all, because both sides share this engine's disinclination to
+attack**, and testing it needs a gauntlet against a stronger attacking opponent
+the harness cannot run. That gauntlet now exists — 2200+ bots on Lichess, since
+`opponent_max_rating` was raised to 2500 on 2026-08-21 — and the first four
+games in it went 0-4 with one textbook king hunt among them. That is not proof
+the term belongs in the evaluation. It is the first evidence from a source
+self-play cannot provide.
+
+---
+
 ## Things that look like bugs and are not
 
 - **Two games against `ficheallrs` show `Termination "Abandoned"` after
@@ -894,4 +995,7 @@ kind of incident that gets remembered as harmless.
   they were at a third less time per move than the bot normally plays. The
   ceiling is therefore measured at a control the engine does not play, on a
   build four generations old. Not a defect — but not the evidence it reads as
-  either.
+  either. **Superseded 2026-08-21**: the current build has now played 2200+
+  opposition at 900+10 and went 0-4, with three blunders and eight mistakes
+  across the five losses to 2100+ — see 13. The ceiling is real; it is the old
+  evidence for it that was thin.

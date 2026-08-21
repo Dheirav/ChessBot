@@ -293,6 +293,18 @@ restart deployed the identical engine. It has been playing rated 900+10 since
 forfeits, and the lowest our clock reached in any game was 41s of 900+10 —
 the softtime change (`+42 Elo`, commit `ffc6e2b`) holding up in real games.
 
+**Then the opponent pool was widened and the picture changed.**
+`opponent_max_rating` was 2200 against a 2190 bot — matchmaking could not reach
+the band that defines the ceiling — and was raised to 2500 on 2026-08-21. The
+14 rated games that followed went **9W-0D-5L, 2189 → 2177**, and the record
+against 2200+ was **0-0-4**. Reviewed at Stockfish depth 16, the bot makes
+**3.3 errors per 100 moves against 2200+ and zero in 268 moves below 2000**;
+`BUGS.md` 13 has the tables, the one blunder that reproduces on demand
+(`gtB9qan7`, a queen grabbing a pawn into 4.7 pawns of unseen compensation),
+and the two explanations that were tested and are wrong. It also corrects the
+2026-08-16 reading that these losses contained no blunders — on this build they
+do.
+
 **Do not `make` the engine without checking first** — it relinks `./chessbot`,
 and the bot spawns a fresh engine per game, so the next rated game would
 silently get an ungated binary. `make review` and `make tests` do not touch it.
@@ -515,19 +527,26 @@ old item 1 — the uninterrupted night of rated games — **is done and came bac
 positive**; the third measurement above is its write-up. What matters most now,
 in the order I would take it:
 
-1. **Meet the 2300+ tier.** Costs no engineering time — the bot plays it
-   unattended on one core. `opponent_max_rating` was 2200 against a 2190 bot
-   until 2026-08-21, so matchmaking could not reach the band that defines the
-   quoted ceiling; it is 2500 now and nothing has yet confirmed the bot seeks
-   above 2200. The 0-0-3 ceiling itself rests on three games from 2026-08-12,
-   at 600+5 on a build four generations old — see the last entry under *Things
-   that look like bugs and are not* in `BUGS.md`. Confirm it or kill it before
-   doing work aimed at it.
+1. **The compensation blindness** (`BUGS.md` 13). One position, reproducible
+   at any depth, where the engine is +3 in material and 4.7 pawns wrong about
+   the position — its king uncastled on d1, rooks disconnected, against the
+   bishop pair. It needs no gate to study and no games to reproduce, which
+   makes it the cheapest lead open. Start there before the tune: an evaluation
+   that cannot price compensation will not be fixed by retuning what it
+   already measures.
+
+   Do not gate a fix on nodes alone. Four of the five largest errors that day
+   could not be reproduced offline at any node count, so a fixed-node gate
+   cannot see the failure mode at all (`BUGS.md` 13).
 
    The clock fix that used to head this list **shipped**: +78 Elo, then
    `softtime` at +42 (`BUGS.md` 11). What is left of it is the allocation
    formula, which still divides by a hardcoded 30 and wants its own gate.
-2. **The general Texel tune** — the rest of 6.2, now over an evaluation whose
+2. **Keep the bot on the widened pool.** The 2200+ gauntlet is the one source
+   of evidence self-play cannot give, and `ROADMAP.md` 6.4 names exactly that
+   as what its four negative king-safety gates could not rule out. Four games
+   is not a sample; forty is.
+3. **The general Texel tune** — the rest of 6.2, now over an evaluation whose
    largest term has stopped shouting, and now with a reason to believe a gate
    on it will mean something.
 
