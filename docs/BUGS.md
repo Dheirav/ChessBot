@@ -920,18 +920,46 @@ clock.
 
 ### Two explanations that were tested and are wrong
 
-**Not partial iterations.** None of the five largest errors reproduce offline —
-though the *first* attempt to show that was measured with the broken command in
-14 and has been re-run since. The obvious suspect was iterative deepening
-returning a move from an iteration the clock cut short. **It does not**: `search.cpp:825`
+**Not partial iterations, and mostly not phantoms either.** Re-run with a real
+UCI client (the first attempt used the broken command in 14, and its answer was
+wrong in both directions):
+
+| position | played | our depth 10 | our depth 14 |
+|---|---|---|---|
+| `ZlTEweWc` 20 | `Nxd8` (−222) | **`Nxd8`** | **`Nxd8`** |
+| `ZlTEweWc` 22 | `Bg1` (−382) | **`Bg1`** | `Ne6+` |
+| `gtB9qan7` 17 | `Qxd4` (−334) | `f3` | `a3` |
+| `4a75bE3F` 28 | `Rb6` (−257) | **`Rb6`** | `Rf7` |
+| `J5MmngQ7` 5 | `Ng5` (−172) | `Be7` | `Be7` |
+
+**Three of the five reproduce at depth 10**, which is the depth the engine
+actually reaches in a rated game — its mean over these games was 12.3 plies and
+it reported depth 10 and 11 on two of these very moves. Two of those three are
+cured by depth 14. One, `Nxd8`, survives it.
+
+That splits the failure into three kinds, and they want different fixes:
+
+- **`Nxd8` — reproducible at every depth tried.** The engine believes in it.
+  This is the reproducible lead the entry originally claimed `Qxd4` was, and
+  unlike that one it holds up.
+- **`Bg1` and `Rb6` — depth-limited.** The move the engine played is the move
+  it prefers at the depth it had; four more plies rejects it. These are bought
+  with speed, not with evaluation terms.
+- **`Qxd4` and `Ng5` — not reproducible at fixed depth.** Something in the live
+  path (transposition state carried across moves is the remaining candidate)
+  chose a move that a clean search at either depth does not.
+
+**A fixed-depth or fixed-node gate can see the first three**, which corrects
+the claim this entry used to make in the other direction. The obvious suspect
+for the third kind was iterative deepening returning a move from an iteration
+the clock cut short. **It does not**: `search.cpp:825`
 updates `bestMove` only when `completedDepth && !searchAborted(shouldStop)`,
 and otherwise keeps the previous depth's move and breaks. What is left is that
 those choices depended on the exact transposition-table state the game had
 built, which changes the move at the same nominal depth and cannot be
 reconstructed without replaying load-dependent timed searches. The practical
-consequence is the important part: **a fixed-node gate structurally cannot see
-these failures**, so the harness will keep reporting a strength this engine
-does not have in timed play.
+consequence is narrower than this entry first claimed: a fixed-node gate cannot
+see the two that do not reproduce, but it can see the three that do.
 
 **Not systematic overconfidence.** In the Bongaclang loss the engine scored
 itself **+6.92** at move 21 and **+3.20** at move 22 while Stockfish had it at

@@ -565,9 +565,11 @@ in the order I would take it:
    edge by 42 centipawns where Stockfish discounts it by 586. That 544cp is the
    number a fix has to move, and the term above moves 20 of it.
 
-   Do not gate a fix on nodes alone. Four of the five largest errors that day
-   could not be reproduced offline at any node count, so a fixed-node gate
-   cannot see the failure mode at all (`BUGS.md` 13).
+   Three of the five largest errors that day **do** reproduce at depth 10, the
+   depth the engine reaches in a rated game, so a node- or depth-limited gate
+   can see them (`BUGS.md` 13 has the table). Two of those three are cured by
+   depth 14, which makes them speed rather than evaluation; one, `Nxd8` in
+   `ZlTEweWc`, survives every depth tried and is the reproducible lead.
 
    The clock fix that used to head this list **shipped**: +78 Elo, then
    `softtime` at +42 (`BUGS.md` 11). What is left of it is the allocation
