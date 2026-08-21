@@ -134,6 +134,12 @@ the baseline of their day, not a regression.
 2026-08-22. The bot plays rated 900+10 against other bots, seeking opponents up
 to 2500 since `opponent_max_rating` was raised on 2026-08-21.
 
+**Accuracy by opponent, over 200 reviewed games:** 96.3% under 1500 scoring
+99%, down to 94.3% against 2300+ scoring **zero**. Two percentage points of
+accuracy is the whole distance between beating everyone and beating no one,
+which is what "getting stronger" has to mean here — consistent small gains, not
+one large fix. `MEASUREMENTS.md` has the table.
+
 **Every reading, and the three write-ups that established the baseline, are in
 `MEASUREMENTS.md`.** The short version: self-play Elo does not convert to
 Lichess rating, the 6.2 work was externally validated on 2026-08-16, and the

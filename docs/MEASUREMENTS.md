@@ -174,3 +174,24 @@ that 31 are correlated and the sample is worth less than its count.
 
 ---
 
+## Accuracy by opponent — 2026-08-22, 200 games
+
+The most useful reading this archive has produced, and the one that reframes
+what "getting stronger" means here.
+
+| opponent | games | score | accuracy | avg cp loss |
+|---|---|---|---|---|
+| under 1500 | 36 | **99%** | 96.3% | 14.0 |
+| 1500–1900 | 87 | 89% | 95.5% | 17.3 |
+| 1900–2100 | 34 | 81% | 94.8% | 20.0 |
+| 2100–2300 | 37 | 49% | 94.6% | 20.3 |
+| 2300+ | 6 | **0%** | 94.3% | 27.4 |
+
+**Two percentage points of accuracy separate beating everyone from beating no
+one.** The engine does not fall apart against stronger opposition — it plays
+very slightly worse, and chess converts a very slight difference into a total
+one. Whole-archive accuracy is 95.1% over 8 726 moves, and quoting that single
+figure hides the only structure in the table.
+
+Regenerate with `tools/archive-profile.py`. `REVIEW.md` has the method and the
+caveats; this is the reading.

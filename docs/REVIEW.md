@@ -7,21 +7,6 @@ Not started. This is the plan, written 2026-08-15 while the engine was still in
 Phase 3/5, so that the prerequisites can be built in the right order rather than
 discovered later.
 
-> **The numbers in this file are from a 62-game archive and are three
-> generations behind.** The archive is 185 games as of 2026-08-22 and the
-> profile below has not been regenerated against it, so **94.9% is a reading
-> from 2026-08-15, not a current figure**. Regenerate before quoting any of it:
->
-> ```bash
-> tools/review-archive.sh          # fill the review cache first
-> tools/archive-profile.py         # then the profile these tables come from
-> ```
->
-> What has changed since: the bot has played 2200+ opposition for the first
-> time on this build and lost all four games, making **3.3 errors per 100 moves
-> against them and zero in 268 moves below 2000** (`BUGS.md` 13). A
-> whole-archive accuracy figure averages that split away.
-
 ---
 
 ## The constraint that shapes everything below
@@ -165,6 +150,8 @@ mates, so won games scored worst. Re-measured on the corrected parser over the
 | games lost | 92.8% | 30.7 | 16 | 727 |
 | **overall** | **94.9%** | **20.8** | **62** | **2 575** |
 
+*(62-game reading, 2026-08-15. The current whole-archive figure is 95.1% over 200 games — see below.)*
+
 Two claims this section used to make are withdrawn: that centipawn loss inverts,
 and that accuracy is flat across results. Neither survives the fix. Accuracy is
 *lower* in lost games, by three points, which is the direction it should run —
@@ -217,18 +204,40 @@ Timestamps are **Lichess UTC**, not local time. `--compare` takes the moment a
 build went live; **2026.08.15-13:27:00** is when the engine with the
 hanging-piece term removed started playing.
 
-### Whole-archive profile, regenerated 2026-08-15 on the corrected parser
+### Whole-archive profile, regenerated 2026-08-22
 
-62 games, 2 575 of the bot's own moves, Stockfish 16 at depth 14:
+**200 games, 8 726 of the bot's own moves**, Stockfish at depth 14. Regenerate
+with `tools/archive-profile.py`; the previous reading here was 62 games and
+94.9%.
+
+**Accuracy by opponent, and the finding that matters most in this file:**
+
+| opponent | games | score | accuracy | avg cp loss |
+|---|---|---|---|---|
+| under 1500 | 36 | **99%** | 96.3% | 14.0 |
+| 1500–1900 | 87 | 89% | 95.5% | 17.3 |
+| 1900–2100 | 34 | 81% | 94.8% | 20.0 |
+| 2100–2300 | 37 | 49% | 94.6% | 20.3 |
+| 2300+ | 6 | **0%** | 94.3% | 27.4 |
+
+**Two points of accuracy separate winning every game from losing every one.**
+96.3% scores 99%; 94.3% scores nothing. The engine does not collapse against
+stronger opposition — it plays very slightly worse, and chess converts a very
+slight difference into a total one. That is the single most useful thing this
+tool has produced, and it reframes what "getting stronger" has to mean here:
+not fixing some large hole, but consistent small gains, because the whole
+distance from beating everyone to beating no one is two percentage points wide.
+
+It also warns against the headline number. A whole-archive accuracy figure
+averages that table into one digit and hides the only structure in it — quote
+the band, never the average.
 
 | | accuracy | avg cp | games | score |
 |---|---|---|---|---|
-| overall | **94.9%** | 20.8 | 62 | 69% |
-| as White | 94.4% | 23.3 | 33 | 62% |
-| as Black | 95.4% | 18.4 | 29 | 78% |
+| overall | **95.1%** | 18.8 | 200 | 79% |
 
-By opponent strength, which is the cut that matters and the one the first
-profile did not make:
+The colour split and the first band table are from the 62-game reading of
+2026-08-15 and are kept below as history, not as current figures:
 
 | opponent | games | score | accuracy | avg cp |
 |---|---|---|---|---|
@@ -273,7 +282,7 @@ Stockfish workers cannot starve a live rated game, and pass a persistent
 `--work ~/reviews/profile-cache`, since the default `mktemp` cache does not
 survive a reboot and the whole archive costs ~7 minutes to re-analyse.
 
-**Do not compare that 94.9% to a Chess.com number.** Accuracy is a function of
+**Do not compare these accuracy figures to a Chess.com number.** Accuracy is a function of
 the analysing engine, its depth, and the curve — all three differ. It is a
 baseline to compare *this* engine against itself over time, and nothing else.
 It is also not comparable to the 92.6% this file used to quote: different
