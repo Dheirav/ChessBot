@@ -469,6 +469,26 @@ games it reviews, so point `--engine` at Stockfish for anything user-facing.
 
 ## How to work on this project
 
+**One number, one home.** Write a result once, in the place that cannot drift
+from the code, and link to it everywhere else:
+
+| kind of fact | its one home |
+|---|---|
+| a verdict on a toggle | the toggle itself, in `search.hpp` or `evaluation.cpp` |
+| a pooled gate result | `GATES.md`, append-only |
+| an external strength reading | `MEASUREMENTS.md`, append-only |
+| what is running right now | `HANDOFF.md` |
+| what is open and what blocks it | `TODO.md` |
+
+On 2026-08-22 an audit found `seepruning` restated in ten files, four of twelve
+rows in the open queue pointing at work already finished, and a stale line in
+`HANDOFF.md` that sent that session off to redo a gate five days after it had
+run. A number with ten homes has ten chances to go stale, and a stale number is
+indistinguishable from a true one to the next reader. The toggle comments in
+`search.hpp` were right when three documents were wrong, because they sit next
+to the thing they describe.
+
+
 These are not principles chosen in advance. Each one cost something this week.
 
 **Measure before choosing what to optimise.** The largest performance win in the

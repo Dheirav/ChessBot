@@ -7,6 +7,21 @@ Not started. This is the plan, written 2026-08-15 while the engine was still in
 Phase 3/5, so that the prerequisites can be built in the right order rather than
 discovered later.
 
+> **The numbers in this file are from a 62-game archive and are three
+> generations behind.** The archive is 185 games as of 2026-08-22 and the
+> profile below has not been regenerated against it, so **94.9% is a reading
+> from 2026-08-15, not a current figure**. Regenerate before quoting any of it:
+>
+> ```bash
+> tools/review-archive.sh          # fill the review cache first
+> tools/archive-profile.py         # then the profile these tables come from
+> ```
+>
+> What has changed since: the bot has played 2200+ opposition for the first
+> time on this build and lost all four games, making **3.3 errors per 100 moves
+> against them and zero in 268 moves below 2000** (`BUGS.md` 13). A
+> whole-archive accuracy figure averages that split away.
+
 ---
 
 ## The constraint that shapes everything below
