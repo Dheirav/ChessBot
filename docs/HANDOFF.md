@@ -35,7 +35,7 @@ Phase 3 is in progress. What is wired in:
 | `seepruning` | off | **resolved, stays off** — +2.2 [−7.2, +11.6] at equal nodes, +4 [−7, +14] on the clock |
 | `qbound` | **on** | quiescence capped 8 plies past the horizon; −16.8% nodes, no best move changed. Ungated repair |
 | `checkext` | **on** | **accepted**, +23.0 Elo [+13.3, +32.7] — on by default since 2026-08-14 |
-| `deltapruning` | off | −50.0 [−60.3, −39.7] at 200cp; **+7.1 [−2.9, +17.2] at 900cp** — spans zero, so stays off |
+| `deltapruning` | off | −50.0 at 200cp; **closed 2026-08-21 at +0.9 [−5.8, +7.7]** on the current build (the older +7.1 was a pre-6.2 engine) |
 | `softtime` | **on** | **accepted, +42 Elo [+6, +79]**, 200 games at `--tc 120+1.33`, **zero forfeits** — on by default since 2026-08-20. Shipped once before at +78 from a 30-second control and reverted after a rated-game forfeit; the hard bound is now absolute (`budget + increment`) rather than a ratio. `BUGS.md` 11 |
 | `iid` | off | **gated, stays off** — −0.1 Elo [−4.9, +4.7] over 3 360 games. The tightest null here: iterative deepening already fills the table at the depths IID fires at |
 
@@ -440,6 +440,26 @@ consistent with — not evidence for — the gated result.
 | `shard-20260816-131704/` | `kingcentre` off vs on | +2.2 [−6.8, +11.1] |
 | `shard-20260816-140940/` | both king-safety changes | **−11.0 [−20.4, −1.6]** |
 | `shard-20260816-150140/` | `kingdanger` at 8× magnitude | **−216.9 [−241.9, −193.8]** |
+| `shard-20260821-112153/` | `deltapruning` re-measured on the current build | **+0.9 [−5.8, +7.7]** — closed, stays off |
+
+**`deltapruning` is closed — 2026-08-21.** Re-measured on the current build:
+**+0.9 Elo [−5.8, +7.7]** over 3 360 games at `-N 100000`, 14 shards × 120
+pairs, `SEED_BASE=20260821`. The 2026-08-14 result (+7.1 [−2.9, +17.2]) was
+**not pooled with it and must not be**: that run measured a pre-6.2 engine, one
+`threats` deletion and two clock fixes ago, so it is a different experiment
+rather than fewer games of the same one. The point estimate collapsed from +7.1
+to +0.9, which is the answer — the old number was a property of that engine,
+not of this one.
+
+The clock side was checked too, cheaply, because `-N` cannot see per-node cost:
+`./tests/bench 6` reaches the same depth in **~2.7% less wall time** with the
+toggle on (1938/1921/2055 ms vs 2001/2008/2067 ms), so the 6.8% node saving is
+real but the per-capture check eats most of it. At the usual doubling-is-70-Elo
+rule of thumb that is worth +2–3 Elo — inside the interval already measured,
+and far below what a timed match could resolve. **A `-t` gate was deliberately
+not run**: timed matches cannot be sharded, 200 of them took 17 hours and
+returned ±36 Elo, so matching today's ±6.7 would cost weeks to answer a
+1-Elo question. It stays off, which is the default, so no code changed.
 
 **Run a null control when a result is surprising.** The +121.2 was five times
 anything previously measured here, so the same harness was pointed at the
@@ -495,12 +515,18 @@ old item 1 — the uninterrupted night of rated games — **is done and came bac
 positive**; the third measurement above is its write-up. What matters most now,
 in the order I would take it:
 
-1. **The time-management fix** (`BUGS.md` 11). The bot spends under half its
-   clock; `parseGo` divides what is left by a hardcoded 30 and banks half the
-   increment. The instrument to gate it now exists (`--tc`), and `tools/review`
-   charts the clock, so a real game can show whether a fix worked and not only a
-   gate. The fix is deliberately unwritten, because "spend more clock" is exactly
-   the kind of plausible argument that has been wrong twice here.
+1. **Meet the 2300+ tier.** Costs no engineering time — the bot plays it
+   unattended on one core. `opponent_max_rating` was 2200 against a 2190 bot
+   until 2026-08-21, so matchmaking could not reach the band that defines the
+   quoted ceiling; it is 2500 now and nothing has yet confirmed the bot seeks
+   above 2200. The 0-0-3 ceiling itself rests on three games from 2026-08-12,
+   at 600+5 on a build four generations old — see the last entry under *Things
+   that look like bugs and are not* in `BUGS.md`. Confirm it or kill it before
+   doing work aimed at it.
+
+   The clock fix that used to head this list **shipped**: +78 Elo, then
+   `softtime` at +42 (`BUGS.md` 11). What is left of it is the allocation
+   formula, which still divides by a hardcoded 30 and wants its own gate.
 2. **The general Texel tune** — the rest of 6.2, now over an evaluation whose
    largest term has stopped shouting, and now with a reason to believe a gate
    on it will mean something.
@@ -509,11 +535,10 @@ in the order I would take it:
    Everything else is a measurement of the tier below.
 
 Still open in the existing plan: 3.4 (futility/razoring — **read 3.1's result
-first**, the same bet swung 57 Elo on one constant), 3.5 (IID, the safe one),
-3.6 (retune LMR, deliberately last), 5.4 (lazy evaluation). `deltapruning` is
-one gate short of a verdict at +7.1 [−2.9, +17.2]; settling it needs twice the
-games and **different seeds**, since `shard-gate.sh` derives them from a fixed
-base and would otherwise replay the same games.
+first**, the same bet swung 57 Elo on one constant), 3.6 (retune LMR,
+deliberately last), 5.4 (lazy evaluation). **3.5 (IID) and `deltapruning` are
+both settled and both stay off** — −0.1 [−4.9, +4.7] and +0.9 [−5.8, +7.7]
+respectively; the deltapruning write-up sits with the gate table above.
 
 
 ---
