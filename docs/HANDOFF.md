@@ -528,7 +528,10 @@ positive**; the third measurement above is its write-up. What matters most now,
 in the order I would take it:
 
 1. **The compensation blindness** (`BUGS.md` 13), and **the two instruments
-   for it now exist** (2026-08-21).
+   for it now exist** (2026-08-21). Note 13's own correction: the "one
+   reproducible blunder" it used to lead with was an artifact of the truncated
+   search in `BUGS.md` 14. The evaluation gap is real and measured; the single
+   position is not the lead it looked like.
 
    `./tests/evalerror` scores the evaluation against Stockfish over 1 051
    positions harvested from the reviewed archive, in about a second. Today it
@@ -546,9 +549,21 @@ in the order I would take it:
    2026-08-21; `OPP_NODES` is the handicap that keeps the opponent a fixed
    ruler.
 
-   Then the term itself, narrow rather than global — an uncastled king with
-   disconnected rooks and open lines, not an attacker count over every
-   position, which is what measured −216.9 at 8× magnitude.
+   **The narrow term exists and is off** (`KING_EXPOSURE_SCALE = 0` in
+   `evaluation.cpp`): a king that has lost castling rights and still sits on
+   the centre files, plus files at the king with no pawn of its own, scaled by
+   the enemy's remaining heavy pieces and by game phase. The corpus priced it
+   before any gate was run — at 100% it moves `comp` from 543.7 to 533.5 with
+   `ctl` flat, and the effect is linear in scale, so it fires on roughly an
+   eighth of the positions and is worth about 4% of the gap. **Not worth
+   gating as it stands**, which took ninety seconds to establish rather than a
+   night of games. It is left in, off, because the next attempt starts from it.
+
+   What the corpus says the real target is: over the 363 compensation
+   positions, the side ahead in material is ahead by **+195cp**, we price the
+   position at **+153**, and the truth is **−391**. We discount a material
+   edge by 42 centipawns where Stockfish discounts it by 586. That 544cp is the
+   number a fix has to move, and the term above moves 20 of it.
 
    Do not gate a fix on nodes alone. Four of the five largest errors that day
    could not be reproduced offline at any node count, so a fixed-node gate

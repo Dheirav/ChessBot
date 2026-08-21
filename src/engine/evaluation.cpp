@@ -294,6 +294,57 @@ static int countMobility(const Board& board, PieceColor color, int kingSq) {
 // and keeps the same units. Range is 0..6 rather than the old 0..7, so king
 // safety is slightly smaller in magnitude than before; the multiplier is a
 // tuning question and a separate, gated one.
+// --- King exposure ---------------------------------------------------------
+//
+// The compensation the evaluation could not price (BUGS.md 13). The term above
+// is `-distFromCenter * 4` plus a pawn shield capped at 24 centipawns, so the
+// most it can ever say about a king is a quarter of a pawn. In `gtB9qan7` the
+// engine was +3 in material with its king stuck on d1, both rooks still at
+// home and the enemy bishop pair bearing down, and scored the position +1.65
+// where the truth was -3.09. A term whose entire range is 24cp cannot express
+// that, whatever its sign.
+//
+// Deliberately narrow. ROADMAP.md 6.4 built the general form — count the
+// attackers around the king, weight them by piece — and gated it four times
+// over 10 080 games: +1.3, +2.2, -11.0, and -216.9 at 8x magnitude. Repeating
+// that shape and expecting a different number is not a plan. This charges
+// three specific and cheap facts instead:
+//
+//   * a king that has lost the right to castle and is still on the centre files
+//   * files at the king carrying no pawn of its own
+//   * both, only in proportion to the heavy pieces the enemy has left to use
+//
+// The last one is what keeps it out of endgames, where a central king is
+// correct play and kingActivityBonus is already paying for it.
+//
+// Off by default, as an unmeasured term must be. KING_EXPOSURE_SCALE is the
+// single knob: 0 disables it exactly, and the shipped default stays 0 until a
+// gate says otherwise.
+static const int KING_EXPOSURE_STRANDED = 60;  // no castling rights, still on d/e
+static const int KING_EXPOSURE_OPEN     = 25;  // a file at the king with no pawn at all
+static const int KING_EXPOSURE_SEMI     = 12;  // ... or none of ours
+static const int KING_EXPOSURE_HEAVY    = 4;   // queen + two rooks = fully armed
+static const int KING_EXPOSURE_SCALE    = 0;   // percent; 0 is off, 100 is as written
+
+static int kingExposure(int kingFile, int kingRank, int backRank, bool canCastle,
+                        const uint8_t* ownPawnFile, const uint8_t* theirPawnFile,
+                        int enemyHeavy) {
+    if (KING_EXPOSURE_SCALE == 0 || kingFile < 0 || enemyHeavy <= 0) return 0;
+    int penalty = 0;
+    const bool central = (kingFile >= 3 && kingFile <= 4);
+    const int  forward = (backRank == 7) ? -1 : 1;
+    const bool athome  = (kingRank == backRank || kingRank == backRank + forward);
+    if (!canCastle && central && athome) penalty += KING_EXPOSURE_STRANDED;
+    for (int df = -1; df <= 1; ++df) {
+        const int f = kingFile + df;
+        if (f < 0 || f > 7) continue;
+        if (ownPawnFile[f] == 0)
+            penalty += (theirPawnFile[f] == 0) ? KING_EXPOSURE_OPEN : KING_EXPOSURE_SEMI;
+    }
+    if (enemyHeavy > KING_EXPOSURE_HEAVY) enemyHeavy = KING_EXPOSURE_HEAVY;
+    return penalty * enemyHeavy / KING_EXPOSURE_HEAVY * KING_EXPOSURE_SCALE / 100;
+}
+
 static int centreDistance(int file, int rank) {
     return std::min(std::abs(file - 3), std::abs(file - 4)) +
            std::min(std::abs(rank - 3), std::abs(rank - 4));
@@ -342,6 +393,10 @@ EvalDetails evaluate_details(const Board& board) {
     int whiteSpace = 0, blackSpace = 0;
     int whiteDrawish = 0, blackDrawish = 0;
     int whiteBishopCount = 0, blackBishopCount = 0;
+    // Rooks and queens still on the board, as "how much is there to attack
+    // with": the king-exposure charge is proportional to it, which is what
+    // keeps the term out of endgames.
+    int whiteHeavy = 0, blackHeavy = 0;
 
     // Per-file pawn masks: bit r set means a pawn of that colour stands on
     // rank r of that file. The passed/doubled/isolated/backward tests and the
@@ -413,6 +468,8 @@ EvalDetails evaluate_details(const Board& board) {
                 if (rank == 1) whiteRooks7th++;
             }
             if (p.type() == BISHOP) whiteBishopCount++;
+            if (p.type() == ROOK) whiteHeavy += 1;
+            if (p.type() == QUEEN) whiteHeavy += 2;
         } else {
             blackMaterial += pieceValues[p.type()];
             if (p.type() == PAWN) {
@@ -440,6 +497,8 @@ EvalDetails evaluate_details(const Board& board) {
                 if (rank == 6) blackRooks7th++;
             }
             if (p.type() == BISHOP) blackBishopCount++;
+            if (p.type() == ROOK) blackHeavy += 1;
+            if (p.type() == QUEEN) blackHeavy += 2;
         }
     }
 
@@ -560,6 +619,19 @@ EvalDetails evaluate_details(const Board& board) {
 
     // Game phase scaling
     gamePhaseFactor = std::min(1.0f, totalMaterial / 3200.0f);
+
+    // King exposure, folded into kingSafety rather than given a term of its
+    // own: it is king safety, and evaltrace's kSafe column is where a reader
+    // already looks for it. It has to be applied *here*, after the phase is
+    // known — gamePhaseFactor is 1.0 until this line, so scaling it any
+    // earlier silently scales by nothing.
+    kingSafetyScore -= (int)((kingExposure(whiteKingFile, whiteKingRank, 7,
+                                           (board.castlingRights & (CASTLE_WK | CASTLE_WQ)) != 0,
+                                           whitePawnFile, blackPawnFile, blackHeavy)
+                              - kingExposure(blackKingFile, blackKingRank, 0,
+                                             (board.castlingRights & (CASTLE_BK | CASTLE_BQ)) != 0,
+                                             blackPawnFile, whitePawnFile, whiteHeavy))
+                             * gamePhaseFactor);
 
     // King piece-square tables, blended between middlegame and endgame by game phase
     if (whiteKingFile != -1 && whiteKingRank != -1) {

@@ -881,13 +881,14 @@ moves. What Black has is compensation: the bishop pair raking the position,
 d1 with the rooks still on a1 and h1 and no castling rights. The evaluation
 scores all of that as zero, so it takes the pawn and calls the position good.
 
-**This one reproduces on demand**, which makes it the cheapest lead in the file:
-
-```bash
-printf 'uci\nisready\nposition fen 2q2rk1/p2b1ppp/1r6/3Q4/1b1pP3/3B4/PPP2PPP/R1BK3R w - - 5 17\ngo depth 14\n' | ./chessbot --uci | tail -1
-# bestmove d5d4  -- and the same at 100k, 2M and 25M nodes, cold table or warm,
-# node-limited or clock-limited. It is not a search-depth failure.
-```
+**An earlier version of this entry claimed this position reproduces on demand,
+and that was wrong** — see 14. The command it recommended truncated the search,
+so the answer it printed came from about one ply of work. Searched properly the
+engine plays `Bf4` at depth 6, `h3` at 10 and `f3` at 14: it does **not** insist
+on `Qxd4`. What it does insist on is the assessment. At depth 14 it scores this
+position **+151** where Stockfish scores it **−309**, so the 4.6-pawn
+disagreement is real and measured; only the "one reproducible blunder" framing
+was an artifact of a broken instrument.
 
 It is the same family as the `19.Qd4` blunder in 7: the queen goes pawn-hunting
 onto its own king's file. That entry read it as a one-off. It is not.
@@ -919,11 +920,10 @@ clock.
 
 ### Two explanations that were tested and are wrong
 
-**Not partial iterations.** Four of the five largest errors cannot be
-reproduced offline — the engine plays the better move at every budget from
-100k to 25M nodes, cold table or warm, by nodes or by clock, at every fixed
-depth from 6 to 16. The obvious suspect was iterative deepening returning a
-move from an iteration the clock cut short. **It does not**: `search.cpp:825`
+**Not partial iterations.** None of the five largest errors reproduce offline —
+though the *first* attempt to show that was measured with the broken command in
+14 and has been re-run since. The obvious suspect was iterative deepening
+returning a move from an iteration the clock cut short. **It does not**: `search.cpp:825`
 updates `bestMove` only when `completedDepth && !searchAborted(shouldStop)`,
 and otherwise keeps the previous depth's move and breaks. What is left is that
 those choices depended on the exact transposition-table state the game had
@@ -961,6 +961,50 @@ the harness cannot run. That gauntlet now exists — 2200+ bots on Lichess, sinc
 games in it went 0-4 with one textbook king hunt among them. That is not proof
 the term belongs in the evaluation. It is the first evidence from a source
 self-play cannot provide.
+
+---
+
+## 14. Piping a `go` command into the engine truncates the search — 2026-08-21
+
+```bash
+printf 'uci\nisready\nposition startpos\ngo depth 8\n' | ./chessbot --uci | tail -1
+# bestmove a2a3
+```
+
+`a2a3` is not what this engine plays at depth 8. It is what it plays after
+about one ply, because `printf | engine` closes stdin the instant the `go` line
+is written: the UCI loop reads EOF, tears the process down, and the search
+thread reports whatever it had. Hold stdin open and the same command searches
+properly:
+
+```bash
+{ printf 'uci\nisready\nposition startpos\ngo depth 8\n'; sleep 6; } | ./chessbot --uci | grep '^info'
+# info depth 8 score cp 31 ... pv b1c3
+```
+
+**It fails silently and it fails plausibly.** There is no error, no warning, and
+the move that comes back is legal and often reasonable-looking — so a sweep
+across `go depth 6` through `go depth 16` returns a column of answers that look
+like a depth sweep and are all the same one-ply guess. That is exactly how it
+got into 13: the claim that one blunder "reproduces at every depth" was five
+truncated searches agreeing with each other, and it was published here before
+anyone noticed that a depth-8 search does not open with a2a3.
+
+Use a real UCI client for anything that matters. `python-chess` is already in
+the tree's orbit (`lichess-bot`'s venv, and `tools/review` drives Stockfish the
+same way):
+
+```python
+import chess, chess.engine
+eng = chess.engine.SimpleEngine.popen_uci("./chessbot-uci.sh")
+info = eng.analyse(board, chess.engine.Limit(depth=14))   # info["pv"], info["score"]
+eng.quit()
+```
+
+The general form is 9's, which this file has now made twice: **a command that
+was never run is a guess, and a command whose output was never sanity-checked
+is the same guess with evidence-shaped decoration.** `a2a3` was on screen the
+whole time.
 
 ---
 
