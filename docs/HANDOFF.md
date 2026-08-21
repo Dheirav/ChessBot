@@ -549,21 +549,54 @@ in the order I would take it:
    2026-08-21; `OPP_NODES` is the handicap that keeps the opponent a fixed
    ruler.
 
-   **The narrow term exists and is off** (`KING_EXPOSURE_SCALE = 0` in
-   `evaluation.cpp`): a king that has lost castling rights and still sits on
-   the centre files, plus files at the king with no pawn of its own, scaled by
-   the enemy's remaining heavy pieces and by game phase. The corpus priced it
-   before any gate was run — at 100% it moves `comp` from 543.7 to 533.5 with
-   `ctl` flat, and the effect is linear in scale, so it fires on roughly an
-   eighth of the positions and is worth about 4% of the gap. **Not worth
-   gating as it stands**, which took ninety seconds to establish rather than a
-   night of games. It is left in, off, because the next attempt starts from it.
+   **Two terms now exist and both are off** in `evaluation.cpp`, each behind
+   its own scale constant, and off is exact (`evalref` unchanged over 23 603
+   positions, bench still 1,086,693, `evalerror` identical to baseline):
 
-   What the corpus says the real target is: over the 363 compensation
-   positions, the side ahead in material is ahead by **+195cp**, we price the
-   position at **+153**, and the truth is **−391**. We discount a material
-   edge by 42 centipawns where Stockfish discounts it by 586. That 544cp is the
-   number a fix has to move, and the term above moves 20 of it.
+   - `KING_EXPOSURE_SCALE` — a king that has lost castling rights and still
+     sits on the centre files, plus files at the king with no pawn of its own.
+   - `KING_DANGER_SCALE` — enemy pieces bearing on the squares around the
+     king, weighted by piece and squared. This is the shape `ROADMAP.md` 6.4
+     rejected, rebuilt because 6.4 judged it on self-play alone.
+
+   Priced on the corpus, in minutes rather than nights:
+
+   | setting | comp | ctl |
+   |---|---|---|
+   | both off (baseline) | 543.7 | 181.9 |
+   | exposure 100% | 533.5 | 180.8 |
+   | danger 300% | 516.1 | 182.7 |
+   | danger 600% | 500.7 | **194.3** |
+   | **exposure 100% + danger 300%** | **506.3** | 183.0 |
+
+   Read the `ctl` column: at danger 600% the term is buying `comp` by wrecking
+   ordinary positions, which is the failure mode the control set exists to
+   catch. The candidate is **exposure 100% + danger 300%** — 37cp off `comp`
+   for 1.1cp on `ctl`. That 1.1 would fail `make test-evalerror` against the
+   current baseline, which is the instrument doing its job: the trade is real
+   and a gate has to decide whether it is worth it.
+
+   `tests/engine-kingsafety` is that candidate, already built, with
+   `tests/engine-base` as its unchanged counterpart. The gate is one command
+   (see below).
+
+   **What the corpus says the target really is.** Over the 363 compensation
+   positions the side ahead in material is ahead by **+195cp**, we price the
+   position at **+153**, and the truth is **−391** — we discount a material
+   edge by 42 centipawns where Stockfish discounts it by 586. But **282cp of
+   that 544 is dynamics**: Stockfish's *own* depth-1 evaluation is that far
+   from its depth-16 evaluation on the same positions, so no term can remove
+   it. The addressable part is our 572 against a world-class 282, and the
+   honest goal is halving that distance rather than driving `comp` to zero.
+
+   **Two hypotheses died on the flagship position** (`BUGS.md` 13's `Nxd8`,
+   static +381 against a truth of −149): the exposure term does not fire there
+   at all, because the castling rights are intact and every file at the king
+   has a pawn on it; and the danger term scores it 4cp, because exactly one
+   black piece currently attacks the king zone — the queen, the second knight
+   and the bishop are all *aimed* at it and blocked. The danger there is
+   latent, and a static count of current attacks cannot see latent danger.
+   Our own search does not see it either: depth 16 still says +444.
 
    Three of the five largest errors that day **do** reproduce at depth 10, the
    depth the engine reaches in a rated game, so a node- or depth-limited gate

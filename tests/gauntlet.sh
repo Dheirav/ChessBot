@@ -48,16 +48,21 @@ set -uo pipefail
 
 PAIRS=${1:?usage: gauntlet.sh <pairs> [match args...]}; shift
 OPP=${OPP:-/usr/games/stockfish}
+# OUR points at the engine under test. Default is the shipped binary; a gate on
+# a candidate points it at that build instead, e.g.
+#   OUR=tests/engine-kingsafety ./tests/gauntlet.sh 40
+OUR=${OUR:-./chessbot-uci.sh}
 OPP_NODES=${OPP_NODES:-800}      # calibrated 2026-08-21; see above before changing
 OUR_NODES=${OUR_NODES:-100000}   # the standing gate budget, so results compare
 SEED=${SEED:-20260821}
 
 [ -x "$OPP" ] || { echo "no opponent engine at $OPP (set OPP=<path>)" >&2; exit 1; }
+[ -x "$OUR" ] || { echo "no engine at $OUR (set OUR=<path>)" >&2; exit 1; }
 [ -x ./tests/match ] || { echo "run 'make tests' first" >&2; exit 1; }
 
-echo "ChessBot @${OUR_NODES}n  vs  $(basename "$OPP") @${OPP_NODES}n   ${PAIRS} pairs, seed ${SEED}"
+echo "$(basename "$OUR") @${OUR_NODES}n  vs  $(basename "$OPP") @${OPP_NODES}n   ${PAIRS} pairs, seed ${SEED}"
 echo "the opponent is a fixed ruler: change OPP_NODES and past results stop comparing"
 exec ./tests/match -n "$PAIRS" -s "$SEED" \
     --na "$OUR_NODES" --nb "$OPP_NODES" \
-    --engineA ./chessbot-uci.sh --engineB "$OPP" \
+    --engineA "$OUR" --engineB "$OPP" \
     --argsB "" --foreignB "$@"

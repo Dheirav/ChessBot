@@ -294,6 +294,64 @@ static int countMobility(const Board& board, PieceColor color, int kingSq) {
 // and keeps the same units. Range is 0..6 rather than the old 0..7, so king
 // safety is slightly smaller in magnitude than before; the multiplier is a
 // tuning question and a separate, gated one.
+// --- King danger -----------------------------------------------------------
+//
+// Enemy pieces bearing on the squares around the king, weighted by piece and
+// squared, which is the standard shape and the one ROADMAP.md 6.4 built and
+// rejected: +1.3, +2.2, -11.0, and -216.9 at 8x magnitude over 10 080 games.
+//
+// Rebuilt here because 6.4 judged it on self-play alone, and self-play is the
+// instrument that cannot see this term: both sides get it, both sides share
+// this engine's disinclination to attack, and a term worth something against
+// an attacker then prices at zero. That was recorded as 6.4's own caveat. Two
+// instruments it lacked now exist — tests/evalerror scores an evaluation
+// against Stockfish in a second, and tests/gauntlet.sh plays something other
+// than ourselves — so this is a different experiment on the same feature
+// rather than a rerun of the one that failed.
+//
+// The position that demands it is BUGS.md 13's:
+//
+//   r2r4/pN3pkp/Qb6/3qn1p1/3Pn3/4BP2/PP2P1PP/R3KB1R w KQ - 3 20
+//
+// White takes a rook with his king on e1 and Black's queen, two knights and a
+// bishop pointing at it, and scores it +3.81 where the truth is -1.49. The
+// king-exposure term below does not fire there at all: the castling rights are
+// still present and every file at the king has a pawn on it. Attackers are
+// what is left.
+//
+// Off by default (KING_DANGER_SCALE = 0), as an unmeasured term must be.
+static const int KING_DANGER_WEIGHT[7] = { 0, 0, 1, 3, 3, 4, 6 };  // by PieceType
+static const int KING_DANGER_SCALE = 0;   // percent; 0 is off, 100 is as written
+
+static int kingDanger(const Board& board, int kingSq, PieceColor attacker) {
+    if (KING_DANGER_SCALE == 0 || kingSq < 0) return 0;
+    uint64_t zone = 0;
+    const int kf = kingSq % 8, kr = kingSq / 8;
+    for (int df = -1; df <= 1; ++df) {
+        for (int dr = -1; dr <= 1; ++dr) {
+            const int f = kf + df, r = kr + dr;
+            if (f < 0 || f > 7 || r < 0 || r > 7) continue;
+            zone |= 1ULL << (r * 8 + f);
+        }
+    }
+    int danger = 0;
+    for (int i = 0; i < 64; ++i) {
+        const Piece& p = board.squares[i];
+        if (p.type() == NONE || p.type() == KING || p.color() != attacker) continue;
+        int hits = 0;
+        forEachAttackedSquare(board, i, [&](int sq) { if ((zone >> sq) & 1ULL) ++hits; });
+        if (hits > 0) danger += KING_DANGER_WEIGHT[p.type()] * hits;
+    }
+    // Squared, because two attackers are worth more than twice one — that is
+    // the whole reason a count is not enough. The /8 sets the units: a danger
+    // of 40, which is roughly a queen and two minor pieces bearing on the
+    // zone, comes to 200cp at 100%. Getting this divisor wrong is quiet — an
+    // earlier version divided by 40 000 and produced a term that measured
+    // exactly nothing at every scale, which reads as "the feature is
+    // worthless" rather than "the constant is wrong".
+    return danger * danger * KING_DANGER_SCALE / 100 / 8;
+}
+
 // --- King exposure ---------------------------------------------------------
 //
 // The compensation the evaluation could not price (BUGS.md 13). The term above
@@ -625,6 +683,15 @@ EvalDetails evaluate_details(const Board& board) {
     // already looks for it. It has to be applied *here*, after the phase is
     // known — gamePhaseFactor is 1.0 until this line, so scaling it any
     // earlier silently scales by nothing.
+    // Attackers around each king. Same placement rule as the exposure term:
+    // after gamePhaseFactor exists, or the phase scaling silently does nothing.
+    if (whiteKingFile != -1 && blackKingFile != -1) {
+        const int wKingSq = Board::get1DIndex(whiteKingFile, whiteKingRank);
+        const int bKingSq = Board::get1DIndex(blackKingFile, blackKingRank);
+        kingSafetyScore -= (int)((kingDanger(board, wKingSq, COLOR_BLACK)
+                                  - kingDanger(board, bKingSq, COLOR_WHITE))
+                                 * gamePhaseFactor);
+    }
     kingSafetyScore -= (int)((kingExposure(whiteKingFile, whiteKingRank, 7,
                                            (board.castlingRights & (CASTLE_WK | CASTLE_WQ)) != 0,
                                            whitePawnFile, blackPawnFile, blackHeavy)

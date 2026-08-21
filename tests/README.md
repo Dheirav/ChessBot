@@ -130,11 +130,20 @@ sign flips — a healthy static evaluation — and **544 cp** on `comp` with
 **57.9%** sign flips. That gap is the defect, stated as a number that takes a
 second to recompute.
 
-Two things it cannot do. `comp` is *selected* for material being misleading, so
-its absolute numbers are not a measure of general accuracy — only movement in
-them is meaningful. And agreement with Stockfish is not Elo: `ROADMAP.md` 6.4
-is the standing proof that a term can look right and still lose games. Iterate
-here in seconds, decide in a gate.
+**The corpus has a floor, and it is high.** Stockfish's own evaluation at
+depth 1 sits **282 cp** from its depth-16 evaluation over these positions,
+against our static evaluation's 572. Roughly half the gap is therefore
+dynamics — what search finds, not what a term can score — and **no evaluation
+change can remove it**. The addressable part is the difference between those
+two numbers: our static view is about twice as far from the truth as a
+world-class one is. Chasing `comp` toward zero is chasing something that
+does not exist; halving the distance to Stockfish's shallow view does.
+
+Two more things it cannot do. `comp` is *selected* for material being
+misleading, so its absolute numbers are not a measure of general accuracy —
+only movement in them is meaningful. And agreement with Stockfish is not Elo:
+`ROADMAP.md` 6.4 is the standing proof that a term can look right and still
+lose games. Iterate here in seconds, decide in a gate.
 
 ### Playing something other than yourself
 
