@@ -527,13 +527,28 @@ old item 1 — the uninterrupted night of rated games — **is done and came bac
 positive**; the third measurement above is its write-up. What matters most now,
 in the order I would take it:
 
-1. **The compensation blindness** (`BUGS.md` 13). One position, reproducible
-   at any depth, where the engine is +3 in material and 4.7 pawns wrong about
-   the position — its king uncastled on d1, rooks disconnected, against the
-   bishop pair. It needs no gate to study and no games to reproduce, which
-   makes it the cheapest lead open. Start there before the tune: an evaluation
-   that cannot price compensation will not be fixed by retuning what it
-   already measures.
+1. **The compensation blindness** (`BUGS.md` 13), and **the two instruments
+   for it now exist** (2026-08-21).
+
+   `./tests/evalerror` scores the evaluation against Stockfish over 1 051
+   positions harvested from the reviewed archive, in about a second. Today it
+   reads **182 cp** mean error on ordinary positions with 1.5% sign flips — a
+   healthy static evaluation — and **544 cp with 57.9% sign flips** on the
+   compensation set. That gap is the defect, and it is now a number that moves
+   when a fix works instead of a night of games. `make evalerror-baseline`
+   records the bar; `tests/README.md` says why the two tags are read
+   separately.
+
+   `./tests/gauntlet.sh` plays a fixed external opponent instead of ourselves,
+   because self-play cannot see this family: both sides get the term and
+   neither attacks, which is the caveat `ROADMAP.md` 6.4 recorded against its
+   own four negative king-safety gates. Verified working against Stockfish on
+   2026-08-21; `OPP_NODES` is the handicap that keeps the opponent a fixed
+   ruler.
+
+   Then the term itself, narrow rather than global — an uncastled king with
+   disconnected rooks and open lines, not an attacker count over every
+   position, which is what measured −216.9 at 8× magnitude.
 
    Do not gate a fix on nodes alone. Four of the five largest errors that day
    could not be reproduced offline at any node count, so a fixed-node gate

@@ -40,7 +40,7 @@ GM_SRC = src/game_manager.cpp
 # The GUI sources, for the input test. It links SFML for the types the GUI is
 # written in, but never opens a window.
 GUI_SRC = $(wildcard src/gui/*.cpp)
-TESTS = tests/perft tests/match tests/gamestate tests/evalref tests/bench tests/timecontrol tests/see_test tests/bitboard_test tests/guiinput tests/pgn
+TESTS = tests/perft tests/match tests/gamestate tests/evalref tests/evalerror tests/bench tests/timecontrol tests/see_test tests/bitboard_test tests/guiinput tests/pgn
 
 # Test binaries LINK these objects rather than recompiling the sources.
 #
@@ -80,6 +80,11 @@ tests/gamestate: tests/gamestate.o $(ENGINE_OBJ) $(GM_OBJ)
 
 # evalref guards every evaluation term against unintended change.
 tests/evalref: tests/evalref.o $(ENGINE_OBJ)
+	$(CXX) $^ -o $@ $(LDFLAGS)
+
+# evalerror scores the evaluation against Stockfish over positions it misjudged
+# in real games. evalref says whether it changed; this says whether it is right.
+tests/evalerror: tests/evalerror.o $(ENGINE_OBJ)
 	$(CXX) $^ -o $@ $(LDFLAGS)
 
 # bench produces the search's node-count signature.
@@ -150,6 +155,21 @@ test-gamestate: tests/gamestate
 # Compare every evaluation term against the stored reference.
 test-evalref: tests/evalref
 	./tests/evalref
+
+# Not pass/fail on its own: it reports how far the evaluation sits from
+# Stockfish over the corpus, and only fails when handed a baseline to beat.
+test-evalerror: tests/evalerror
+	./tests/evalerror --check tests/data/evalerr.baseline
+
+# Record today's numbers as the bar to beat. Deliberate, like evalref-regen:
+# saving a worse baseline is how a regression becomes the new normal.
+evalerror-baseline: tests/evalerror
+	./tests/evalerror --save tests/data/evalerr.baseline
+
+# Rebuild the corpus itself from the reviewed archive. Needs the review cache
+# (tools/review-archive.sh) to be current, so it is not part of `make tests`.
+evalerror-corpus:
+	tools/eval-corpus.py
 
 # Rewrite the evaluation reference. Only after reviewing the reported term
 # changes and deciding they are intended.
@@ -251,4 +271,4 @@ remake:
 	$(MAKE) all
 
 # Mark these targets as not actual files
-.PHONY: all clean remake lichess profile review tests test-perft test-match test-gamestate test-evalref evalref-regen bench test-bench bench-regen test-timecontrol test-see test-bitboard test-guiinput test-pgn test-uci
+.PHONY: all clean remake lichess profile review tests test-perft test-match test-gamestate test-evalref evalref-regen test-evalerror evalerror-baseline evalerror-corpus bench test-bench bench-regen test-timecontrol test-see test-bitboard test-guiinput test-pgn test-uci

@@ -27,6 +27,7 @@ make test-perft   # ...or any single target; see the table below
 | `test-uci` | the UCI protocol, driven as an external tool would | exact |
 | `test-guiinput` | selection, click-to-move, dragging, promotion-dialog hitboxes — headless | exact |
 | `test-pgn` | SAN export, disambiguation, numbering, whole documents | exact |
+| `test-evalerror` | how far the evaluation sits from Stockfish over positions it misjudged in real games | compares against a stored baseline; fails only if the error grew |
 
 A few of these are worth explaining, because their value is not obvious:
 
@@ -97,7 +98,62 @@ Key options — the full list is in the header of `match.cpp`:
 | `--optA/--optB` | per-side heuristics, e.g. `--optA seepruning=on` |
 | `--engineA/--engineB` | drive two engine *binaries* over UCI (BUGS.md 8) |
 | `--tc <b>[+<i>]` | a real game clock in seconds, e.g. `--tc 60+1` |
+| `--argsB ""` | the opponent's command line. ChessBot needs `--uci`; a standard UCI engine takes none and treats one as a command to run and exit on |
+| `--foreignB` | do not send ChessBot's option names to an engine that does not have them |
+| `--uciB <n>=<v>,...` | that engine's own options, e.g. `UCI_LimitStrength=true,UCI_Elo=2000` |
 | `--sprt` | stop as soon as the result is conclusive |
+
+### Measuring the evaluation, not the games
+
+`test-evalref` answers "did the evaluation change?" and `test-bench` answers
+"did the search change?". Neither asks whether the evaluation is *right*, so
+until 2026-08-21 the only instrument that could was a match — hours per verdict,
+and a verdict about games rather than about the evaluation.
+
+```bash
+./tests/evalerror                # score the corpus, ~1 second
+./tests/evalerror --worst 20     # and show where it is most wrong
+make evalerror-baseline          # record today's numbers as the bar
+make evalerror-corpus            # rebuild the corpus from the review archive
+```
+
+The corpus (`tests/data/evalerr.epd`, built by `tools/eval-corpus.py` from the
+reviewed game archive) carries two tags, and they are read separately:
+
+| tag | what it holds | why |
+|---|---|---|
+| `comp` | positions where material says one player is winning and Stockfish says the other is | the compensation blindness of `BUGS.md` 13 — the number a fix aims at |
+| `ctl` | a deterministic sample of ordinary positions | a term that fixes `comp` by wrecking everything else has to be visible somewhere |
+
+As of 2026-08-21 the evaluation scores **182 cp** mean error on `ctl` with 1.5%
+sign flips — a healthy static evaluation — and **544 cp** on `comp` with
+**57.9%** sign flips. That gap is the defect, stated as a number that takes a
+second to recompute.
+
+Two things it cannot do. `comp` is *selected* for material being misleading, so
+its absolute numbers are not a measure of general accuracy — only movement in
+them is meaningful. And agreement with Stockfish is not Elo: `ROADMAP.md` 6.4
+is the standing proof that a term can look right and still lose games. Iterate
+here in seconds, decide in a gate.
+
+### Playing something other than yourself
+
+```bash
+./tests/gauntlet.sh 40 --optA kingdanger=on --optB kingdanger=off
+```
+
+Self-play is the right instrument for most heuristics and the wrong one for
+king safety: both sides get the term, both sides share this engine's
+disinclination to attack, and a term worth something against an attacker prices
+at zero in a match between two engines that do not attack. That is the caveat
+`ROADMAP.md` 6.4 recorded against its own four negative gates, and `BUGS.md` 13
+is the same finding from real games — 0-4 against 2200+ opposition, 3.3 errors
+per 100 moves against them and zero below 2000.
+
+`tests/gauntlet.sh` plays a fixed external opponent (Stockfish, handicapped by
+node count until the score is near even) so that the score means something
+across runs. Change `OPP_NODES` and past results stop comparing — the opponent
+is a ruler.
 
 ### Why matches are node-limited, not time-limited
 

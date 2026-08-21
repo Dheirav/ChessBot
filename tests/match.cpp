@@ -79,6 +79,8 @@
 #include "engine/transposition_table.hpp"
 #include "engine/piece.hpp"
 #include "engine/uci_engine.hpp"
+
+#include <signal.h>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -97,6 +99,20 @@ struct EngineConfig {
     // an engine binary driven over UCI, which is the only way to A/B anything
     // that is not a SearchOption — evaluation, most of all (BUGS.md 8).
     std::string binary;
+    // Command line for that binary. ChessBot needs "--uci" or it opens a
+    // window; a standard UCI engine takes no arguments and treats one as a
+    // command to run and exit on — Stockfish does exactly that, and the
+    // harness then dies of SIGPIPE on the first write. Default to ChessBot's
+    // needs, let a foreign engine say otherwise.
+    std::vector<std::string> args{"--uci"};
+    // Send ChessBot's fourteen SearchOption names, or not. A foreign engine
+    // answers `info string unknown option` to every one of them, which is
+    // noise rather than failure, but it is also fourteen statements about a
+    // configuration that engine does not have.
+    bool foreign = false;
+    // Raw `setoption name <n> value <v>` pairs, for whatever the opponent's
+    // own knobs are: UCI_LimitStrength and UCI_Elo on Stockfish, most usefully.
+    std::vector<std::pair<std::string, std::string>> uciOptions;
 };
 
 
@@ -386,6 +402,13 @@ static double computeLLR(const int pentanomial[5], double elo0, double elo1) {
 }
 
 int main(int argc, char** argv) {
+    // A UCI child that exits — a foreign engine handed an argument it treats
+    // as a command, most likely — turns the next write into SIGPIPE, and the
+    // default action kills this process. The harness then reports nothing at
+    // all and exits 141, which is how a broken gauntlet looks identical to a
+    // hang. Ignore it, so the write fails and the engine wrapper can say which
+    // side died and when.
+    signal(SIGPIPE, SIG_IGN);
     initMoveLookupTables();
 
     int pairs = 25, depth = 4;
@@ -406,6 +429,10 @@ int main(int argc, char** argv) {
     // Paths to engine binaries, for comparing two *builds* instead of two
     // option sets. Empty means "search in this process" (BUGS.md 8).
     std::string binA, binB;
+    // Gauntlet plumbing: an opponent that is not this engine needs its own
+    // command line and its own option names (see EngineConfig).
+    std::string argsA = "--uci", argsB = "--uci", uciA, uciB;
+    bool foreignA = false, foreignB = false;
     unsigned seed = 20260810u;
     bool depthGiven = false;
     bool useSprt = false;
@@ -487,6 +514,12 @@ int main(int argc, char** argv) {
             else if (a == "--optB")  optsB = splitOpts(next());
             else if (a == "--engineA") binA = next();
             else if (a == "--engineB") binB = next();
+            else if (a == "--argsA") argsA = next();
+            else if (a == "--argsB") argsB = next();
+            else if (a == "--foreignA") foreignA = true;
+            else if (a == "--foreignB") foreignB = true;
+            else if (a == "--uciA") uciA = next();
+            else if (a == "--uciB") uciB = next();
             else if (a == "--sprt")  useSprt = true;
             else if (a == "--elo0")  elo0 = std::atof(next());
             else if (a == "--elo1")  elo1 = std::atof(next());
@@ -552,8 +585,12 @@ int main(int argc, char** argv) {
     // Name each side by the options it actually ends up with, not by the
     // --ha/--hb baseline. This lives in search.cpp beside the option table, so
     // that a feature added there cannot go missing from the header here.
-    std::string nameA = describeSearchOptions(A.opts);
-    std::string nameB = describeSearchOptions(B.opts);
+    // A foreign engine was never sent these options, so naming it by them
+    // would put a claim in the result line that is not true of what played.
+    // The label is how a gate gets quoted months later; it has to describe the
+    // thing that actually sat on that side of the board.
+    std::string nameA = A.foreign ? std::string("(foreign engine)") : describeSearchOptions(A.opts);
+    std::string nameB = B.foreign ? std::string("(foreign engine)") : describeSearchOptions(B.opts);
     // Under --tc neither side has a budget of its own: the clock is the whole
     // condition, and it is the same for both, so it is named once.
     // %g so a sub-second increment does not print as "+0" -- the label is how
@@ -574,6 +611,31 @@ int main(int argc, char** argv) {
     }
     A.binary = binA;
     B.binary = binB;
+
+    // Splitting on whitespace and commas: `--argsB ""` means "no arguments",
+    // which is what a standard UCI engine wants.
+    auto splitArgs = [](const std::string& in) {
+        std::vector<std::string> out;
+        std::istringstream iss(in);
+        std::string tok;
+        while (iss >> tok) out.push_back(tok);
+        return out;
+    };
+    auto splitOptions = [](const std::string& in) {
+        std::vector<std::pair<std::string, std::string>> out;
+        std::istringstream iss(in);
+        std::string pair;
+        while (std::getline(iss, pair, ',')) {
+            std::string::size_type eq = pair.find('=');
+            if (eq == std::string::npos) continue;
+            out.emplace_back(pair.substr(0, eq), pair.substr(eq + 1));
+        }
+        return out;
+    };
+    A.args = splitArgs(argsA); B.args = splitArgs(argsB);
+    A.foreign = foreignA;     B.foreign = foreignB;
+    A.uciOptions = splitOptions(uciA);
+    B.uciOptions = splitOptions(uciB);
     if (!binA.empty()) nameA = binA + " " + nameA;
     if (!binB.empty()) nameB = binB + " " + nameB;
     A.name = nameA.c_str();
@@ -612,11 +674,20 @@ int main(int argc, char** argv) {
     // which is not a failure worth aborting on but is not something to send
     // fourteen of either.
     auto configure = [&](UciEngine& eng, const EngineConfig& side, const char* which) {
-        for (size_t i = 0; i < SEARCH_OPTION_COUNT; ++i) {
-            const bool on = side.opts.*(SEARCH_OPTIONS[i].field);
-            if (!eng.setOption(SEARCH_OPTIONS[i].uciName, on ? "true" : "false")) {
+        if (!side.foreign) {
+            for (size_t i = 0; i < SEARCH_OPTION_COUNT; ++i) {
+                const bool on = side.opts.*(SEARCH_OPTIONS[i].field);
+                if (!eng.setOption(SEARCH_OPTIONS[i].uciName, on ? "true" : "false")) {
+                    std::printf("engine %s stopped responding while being configured "
+                                "(option %s)\n", which, SEARCH_OPTIONS[i].uciName);
+                    return false;
+                }
+            }
+        }
+        for (const auto& opt : side.uciOptions) {
+            if (!eng.setOption(opt.first, opt.second)) {
                 std::printf("engine %s stopped responding while being configured "
-                            "(option %s)\n", which, SEARCH_OPTIONS[i].uciName);
+                            "(option %s)\n", which, opt.first.c_str());
                 return false;
             }
         }
@@ -626,7 +697,7 @@ int main(int argc, char** argv) {
     UciEngine* extA = nullptr;
     UciEngine* extB = nullptr;
     if (!A.binary.empty()) {
-        if (!extEngineA.start(A.binary, EXT_HASH_MB)) {
+        if (!extEngineA.start(A.binary, EXT_HASH_MB, A.args)) {
             std::printf("could not start engine A: %s\n", A.binary.c_str());
             return 1;
         }
@@ -634,7 +705,7 @@ int main(int argc, char** argv) {
         extA = &extEngineA;
     }
     if (!B.binary.empty()) {
-        if (!extEngineB.start(B.binary, EXT_HASH_MB)) {
+        if (!extEngineB.start(B.binary, EXT_HASH_MB, B.args)) {
             std::printf("could not start engine B: %s\n", B.binary.c_str());
             return 1;
         }
