@@ -939,9 +939,32 @@ cured by depth 14. One, `Nxd8`, survives it.
 
 That splits the failure into three kinds, and they want different fixes:
 
-- **`Nxd8` — reproducible at every depth tried.** The engine believes in it.
+- **`Nxd8` — reproducible at every depth tried**, and it holds to depth 16.
   This is the reproducible lead the entry originally claimed `Qxd4` was, and
-  unlike that one it holds up.
+  unlike that one it survives being measured properly:
+
+  ```
+  r2r4/pN3pkp/Qb6/3qn1p1/3Pn3/4BP2/PP2P1PP/R3KB1R w KQ - 3 20
+  played Nxd8 (takes a rook), Stockfish prefers fxe4, cost 222cp
+  our search: d12 Nxd8 +597   d16 Nxd8 +444      static eval +381
+  Stockfish:                            −149
+  ```
+
+  White grabs the rook on d8 while his king sits on e1 and Black's queen on d5,
+  knights on e4 and e5 and bishop on b6 all bear on it. The engine scores that
+  **+3.81 static, +4.44 at depth 16**, where the truth is −1.49. Six pawns of
+  attack, priced at nothing.
+
+  **And the king-exposure term added on 2026-08-21 does not fire here** — 381
+  with it off, 381 with it on at full scale. Its "stranded" condition wants the
+  castling rights already gone, and White still has `KQ`; its open-file
+  condition wants a file at the king with no pawn of ours, and d4, e2 and f3
+  are all occupied. The three facts that term charges are not the three facts
+  that matter in the position the whole entry is about. What matters here is
+  enemy pieces bearing on the king's neighbourhood — which is exactly the
+  attacker-count term `ROADMAP.md` 6.4 built and rejected, on an instrument
+  (self-play, no external opponent, no evaluation corpus) that could not have
+  seen it work.
 - **`Bg1` and `Rb6` — depth-limited.** The move the engine played is the move
   it prefers at the depth it had; four more plies rejects it. These are bought
   with speed, not with evaluation terms.
