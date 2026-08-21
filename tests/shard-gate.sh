@@ -33,13 +33,19 @@ case " $* " in
     *) echo "refusing: shard only a node-limited gate (-N); see header" >&2; exit 1 ;;
 esac
 
+# Re-running a gate with the same base replays the same games, so pooling the
+# two runs double-counts every one of them. A second run that means to *add*
+# games must state a different base: SEED_BASE=20260821 ./tests/shard-gate.sh ...
+SEED_BASE=${SEED_BASE:-20260810}
+
 DIR="shard-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$DIR"
 echo "$SHARDS shards x $PAIRS pairs -> $DIR"
+echo "  seed base:  $SEED_BASE"
 echo "  match args: $*"
 
 for i in $(seq 1 "$SHARDS"); do
-    seed=$((20260810 + i * 1000))
+    seed=$((SEED_BASE + i * 1000))
     ./tests/match -n "$PAIRS" -s "$seed" "$@" > "$DIR/shard-$i.log" 2>&1 &
 done
 wait

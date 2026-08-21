@@ -394,14 +394,28 @@ elapsed figure. The accepted run went 17 hours unbroken.
 Logs from finished gates are kept; re-pool any with
 `./tests/pool-shards.sh <dir>/`.
 
-**The review archive is 41 games behind.** `~/reviews/records/` caches one
-review per game and stops at 2026-08-15, so the index covers 80 of 121 — none of
-the post-6.2 games it would be most useful for. Catching up costs Stockfish over
-41 games, which is why it is waiting for the bot to be idle:
+**The review archive is current as of 2026-08-21.** `~/reviews/records/` holds
+185 of the 186 archived games; the one gap is `HYFGxKGA`, an abandoned game
+with no moves in it, which `tools/review` correctly refuses. Re-run after new
+games — it only reviews what is missing:
 
 ```bash
-./tools/review-archive.sh          # only re-reviews what is missing
+JOBS=8 ./tools/review-archive.sh   # with the bot down; it is Stockfish per game
 ```
+
+**The profile moved the right way across 6.2**, over the bot's own moves at
+Stockfish depth 16:
+
+| | games | moves | Best | Excellent | Good | Inaccuracy | Mistake | Blunder |
+|---|---|---|---|---|---|---|---|---|
+| before 2026-08-16 | 87 | 3 546 | 61.1% | 20.7% | 12.1% | 4.7% | 1.2% | 0.3% |
+| from 2026-08-16 | 98 | 4 527 | 62.9% | 18.5% | 13.3% | 3.8% | 1.3% | 0.2% |
+
+Read it as a description, not a measurement: the two eras played different
+opponents at different ratings, so this is not a controlled comparison and
+nothing here is Elo. What it does say is that the top three labels went 93.9% →
+94.7% and inaccuracies fell by a fifth, on the same instrument, which is
+consistent with — not evidence for — the gated result.
 
 | directory | gate | pooled result |
 |---|---|---|
