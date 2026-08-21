@@ -530,9 +530,6 @@ in the order I would take it:
 2. **The general Texel tune** — the rest of 6.2, now over an evaluation whose
    largest term has stopped shouting, and now with a reason to believe a gate
    on it will mean something.
-3. **Meet the 2300+ tier.** The band that defined the ceiling is 0-0-3 and has
-   not been played since 6.2 landed, so nothing measured on 08-16 speaks to it.
-   Everything else is a measurement of the tier below.
 
 Still open in the existing plan: 3.4 (futility/razoring — **read 3.1's result
 first**, the same bet swung 57 Elo on one constant), 3.6 (retune LMR,
