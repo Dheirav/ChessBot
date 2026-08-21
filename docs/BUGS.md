@@ -802,6 +802,67 @@ long run.
 
 ---
 
+## 12. Operational: a restart *during* a game rate-limits itself into a loop
+
+**2026-08-21, `YV7XiTWZ` vs `TomokoNN` (2028), rated 900+10.** The bot played
+move 12 normally at 08:46:26. Two seconds later it re-entered
+`start_lichess_bot()` — its own restart cycle, in the same process (pid
+unchanged) — and logged `Welcome Crimsy_Bot!` again. On the way back in it
+re-opened the game stream for a game it was already in:
+
+```
+08:46:31  GET /api/bot/game/stream/YV7XiTWZ  ->  429 Too Many Requests
+08:46:31  Giving up play_game(...) after 1 tries
+```
+
+`play_game` gives up on the 429 and is retried immediately, with no backoff.
+Each retry rejoins the game, replays whatever move list it managed to read, and
+posts a move that was already played — `a2e6` and `f8e8`, both **400 Bad
+Request** — then logs `Game over` and starts again, spawning an engine process
+per iteration. **From 08:46:31 until the recovery at 08:57:10 it never made a
+move** — ten and a half minutes of wall clock, of which about five came off our
+own clock, which runs only on our turn: 8.5 minutes down to 3.3.
+
+Three things are worth keeping from it.
+
+**The log is not the state; Lichess is.** The log says `Game over` twenty-one
+times for a game that was still running, and the bot was replaying move 16
+while the real game was at move 18. The authoritative reading needs no
+guessing:
+
+```bash
+curl -s -H "Authorization: Bearer $LICHESS_BOT_TOKEN" \
+     "https://lichess.org/api/account/playing?nb=5"
+# gameId, isMyTurn, lastMove, fen, secondsLeft
+```
+
+That is the same lesson as 7 — the game's state on Lichess is the one thing no
+local process can fake — with a query that answers it directly.
+
+**A second SIGINT is not a reliable kill once
+`quit_after_all_games_finish: true` is set.** Two, four seconds apart, did not
+bring it down within seven seconds: the main loop had already handed off to
+`close_pool`'s `pool.join()`, waiting on a game process that kept restarting
+itself. `SIGTERM` ended it. `bot-stop.sh` deliberately never sends a second
+signal on the graceful path, so a bot stuck like this is a manual `SIGTERM` and
+should be — the second signal exists to abandon a game, and abandoning is the
+thing being avoided.
+
+**Do not restart while a game is live.** Re-opening a stream Lichess has just
+served is what draws the 429, and the recovery path replays a stale board into
+it. The restart afterwards was itself rate-limited on `/api/stream/event`
+(`retry in 15 seconds`) before it got in at 08:55:44, rejoined, and played
+`18...Bg4` at 08:57:10 with a 200. **`bot-stop.sh` exists so that a stop, and
+therefore a restart, lands between games** — this is the cost of one that does
+not.
+
+The engine is not at fault: every move it returned was legal in the position it
+was handed. The game was won, 0-1, `Termination "Normal"`, +3 — which is worth
+saying plainly, because a nine-minute stall that ends in a win is exactly the
+kind of incident that gets remembered as harmless.
+
+---
+
 ## Things that look like bugs and are not
 
 - **Two games against `ficheallrs` show `Termination "Abandoned"` after

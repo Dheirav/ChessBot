@@ -331,6 +331,17 @@ eight minutes of clock in a rated game on 2026-08-15 and nearly a second
 forfeit. Only a bot started with `quit_after_all_games_finish: true` may be
 signalled during a game, and only once — the second signal is force-quit.
 
+**And do not restart while a game is live** (`BUGS.md` 12). On 2026-08-21
+lichess-bot restarted itself mid-game, re-opened the game stream, was 429'd,
+and span for ten minutes replaying a stale board into 400s without making a
+move — five minutes off our clock. When the log and the game disagree, Lichess
+is the state:
+
+```bash
+curl -s -H "Authorization: Bearer $LICHESS_BOT_TOKEN" \
+     "https://lichess.org/api/account/playing?nb=5"   # isMyTurn, fen, secondsLeft
+```
+
 **6.2 is now externally validated** — see the third measurement above. The
 uninterrupted night happened, 31 games came out of it, and both the results and
 the move quality moved. That was the outstanding measurement; it is closed.
@@ -367,9 +378,11 @@ lists them: `tests/engine` (gate evaluation without relinking `./chessbot`),
 per-side `setoption` forwarding in `tests/match`, `tests/evalref --opt`,
 `tests/evaltrace`, `tests/gate-progress.sh`, `tests/gate-pause.sh`.
 
-**Nothing is running.** The `softtime` re-gate finished 2026-08-20 at +42 Elo
+**No gate is running.** The `softtime` re-gate finished 2026-08-20 at +42 Elo
 [+6, +79] with zero forfeits over 200 games at `--tc 120+1.33`, and is shipped.
-The Lichess bot is stopped and can be restarted on the current build.
+The Lichess bot is playing (see *In flight* above), so anything that wants the
+machine — a `--tc` gate, `tools/review-archive.sh` — either waits for it or
+takes a share of the 16 cores away from rated games.
 
 **If a `--tc` gate is ever run again, do not let the machine sleep.** The first
 attempt at this one was abandoned six games in for that reason: a suspend

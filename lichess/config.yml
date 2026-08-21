@@ -236,7 +236,7 @@ matchmaking:
 #    - 1
 #    - 2
   opponent_min_rating: 1200        # Absolute bounds, not a band around our own
-  opponent_max_rating: 2200        # rating — because Lichess starts BOT accounts
+  opponent_max_rating: 2500        # rating — because Lichess starts BOT accounts
                                    # at 3000 with rd 500, and a band around 3000
                                    # means every opponent is a top engine. The
                                    # first game was against a 3042.
