@@ -284,20 +284,37 @@ that 31 are correlated and the sample is worth less than its count.
 
 ## In flight
 
-**The Lichess bot is running.** Restarted 2026-08-16 at 02:08 on the post-6.2
-build, and it has been playing rated 900+10 since. **Do not `make` the engine
-without checking first** — it relinks `./chessbot`, and the bot spawns a fresh
-engine per game, so the next rated game would silently get an ungated binary.
-`make review` and `make tests` do not touch it.
+**The Lichess bot is running.** Restarted 2026-08-21 at 08:27 on the post-6.2
+build — `./chessbot` was already current with a clean tree at `00d6af0`, so the
+restart deployed the identical engine. It has been playing rated 900+10 since
+2026-08-16. **2190 rapid (rd ±45) over 173 rated games** as of
+2026-08-21 08:30. The 19 rated games between 2026-08-20 20:00 and then went
+17W 2D 0L for +28 rating: 3/4 against 2100+, clean sweeps below that, no time
+forfeits, and the lowest our clock reached in any game was 41s of 900+10 —
+the softtime change (`+42 Elo`, commit `ffc6e2b`) holding up in real games.
 
-To stop it, wait for a gap between games:
+**Do not `make` the engine without checking first** — it relinks `./chessbot`,
+and the bot spawns a fresh engine per game, so the next rated game would
+silently get an ungated binary. `make review` and `make tests` do not touch it.
+
+To stop it, use the scheduler — do not signal it by hand:
 
 ```bash
-pgrep -x chessbot     # a PID means a game is live — WAIT
-# only once that prints nothing:
-kill -INT "$(ps -eo pid,args --no-headers | grep 'lichess-bot\.py' \
-             | grep -v 'bash -c' | grep -v grep | awk '{print $1}')"
+./lichess/bot-stop.sh              # menu; --games 1 makes the game on the
+                                   # board now the last one
+./lichess/bot-stop.sh --status     # state, and whether stops are exact
+```
 
+**This bot's stops are exact.** It started after
+`quit_after_all_games_finish: true` was set in `lichess/config.yml`, and it
+confirmed so itself at startup: *"When quitting, lichess-bot will first wait
+for all running games to finish."* So `--games 1` ends on the game being
+played. `--status` says which mode is in force; any bot started before that
+config change falls back to gap-hunting and stops late (`BUGS.md` 7).
+
+Restarting, once it is down:
+
+```bash
 cd /home/dheirav/Code/lichess-bot && nohup ./venv/bin/python lichess-bot.py \
   --config /home/dheirav/Code/ChessBot/lichess/config.yml -v > /tmp/bot.log 2>&1 &
 ```
@@ -309,8 +326,10 @@ launcher but needs `LICHESS_BOT_TOKEN` exported in the calling shell; it also
 builds first, so it deploys whatever is in the working tree — do not use it on
 top of unverified changes.
 
-**SIGINT does not finish the game in progress** (`BUGS.md` 7). It cost eight
-minutes of clock in a rated game on 2026-08-15 and nearly a second forfeit.
+**A bare SIGINT does not finish the game in progress** (`BUGS.md` 7). It cost
+eight minutes of clock in a rated game on 2026-08-15 and nearly a second
+forfeit. Only a bot started with `quit_after_all_games_finish: true` may be
+signalled during a game, and only once — the second signal is force-quit.
 
 **6.2 is now externally validated** — see the third measurement above. The
 uninterrupted night happened, 31 games came out of it, and both the results and

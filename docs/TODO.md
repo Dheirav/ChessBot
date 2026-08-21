@@ -22,14 +22,18 @@ afternoon, **L** is a day or a night of machine time.
 - **`./lichess/bot-stop.sh` does the stopping correctly, so do not do it by
   hand.** Run it with no arguments for a menu; the flags (`--games N`,
   `--minutes N`, `--at HH:MM`, `--now`, `--status`, `--quiet`) are for
-  scripting. It waits for the condition, then for three consecutive clear
-  `pgrep -x` polls, and only then signals — the four rules in `BUGS.md` 7 and 9
-  that have each been got wrong here at least once.
+  scripting. `--games 1` makes the game on the board now the last one — it
+  signals *during* that game, which only works because the config sets
+  `quit_after_all_games_finish: true`. The five rules in its header are each
+  something that has been got wrong here at least once (`BUGS.md` 7 and 9).
 - **Do not `make` the engine while the bot runs.** It relinks `./chessbot`, and
   the bot spawns a fresh engine per game, so the next rated game silently gets
   an ungated binary. `make review` and `make tests` do not touch it.
-- **Stopping the bot needs a gap between games**, not a signal during one
-  (`BUGS.md` 7). SIGINT does *not* finish the game in progress.
+- **A bot started without `quit_after_all_games_finish` can only be stopped in
+  a gap between games** (`BUGS.md` 7): a bare SIGINT does *not* finish the game
+  in progress. The option is read at startup, so `bot-stop.sh --status` reports
+  which kind of stop the *running* process supports, and editing `config.yml`
+  does not change that until the next restart.
 - **Gate discipline:** `-N 100000`, never `--sprt` under sharding, A and B differ
   in exactly one thing, pool before believing. `tests/README.md` has the rest.
 

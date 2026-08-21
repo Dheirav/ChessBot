@@ -5,7 +5,8 @@
 Every strength number in this repo is self-referential. SPRT gates measure a change
 against the previous version of itself, which says a heuristic helped but says nothing
 about where the engine actually sits. Lichess fixed half of that: `Crimsy_Bot` holds a
-non-provisional **2162 rapid (rd ±45) over 149 rated games** as of 2026-08-19.
+non-provisional **2190 rapid (rd ±45) over 173 rated games** as of 2026-08-21,
+up from 2162 over 149 games on 2026-08-19.
 
 CCRL is the other half, and it is the one that matters for a rating people can compare.
 It is the standard engine-vs-engine list, run on fixed hardware, and being on it puts a
@@ -58,5 +59,5 @@ claim.
 - Do not submit while the evaluation rewrite in `ROADMAP.md` is in flight. CCRL ranks the
   best version with 150+ games, so submitting a version you are about to obsolete wastes
   the slot and their testers' time.
-- The Lichess rating moves (2198-provisional, then 2065, now 2162). Any figure quoted
-  outside the repo should be a floor, not today's reading.
+- The Lichess rating moves (2198-provisional, then 2065, 2162, now 2190). Any figure
+  quoted outside the repo should be a floor, not today's reading.

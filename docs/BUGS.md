@@ -347,6 +347,44 @@ tested it.** `ROADMAP.md` already says a documented command that has never been
 run is a guess. Inferring behaviour from source is the same guess wearing better
 clothes.
 
+### The stop that lands a game late — 2026-08-21
+
+`bot-stop.sh --games 1` armed during a game stopped the bot **after the next
+game**, not after the one on the board. Two things caused it, and both come
+from the same place: with a bare SIGINT the only safe moment is a gap between
+games, so the script could not signal the game it meant — it had to wait for
+that game to end and then find a gap, and it counted PGN files in
+`game_records/` to know when the game had ended.
+
+Counting records is a proxy for "games finished" and it slips both ways:
+
+- **no record is written for a game the bot was killed out of** — `nFYSG2BI`
+  (2026-08-17) is in the logs and has no file, so a stop armed during it would
+  have waited through the following game;
+- **a game the bot reconnects to has its record written twice** — `kvCboOh4`
+  logged `Game over` at 22:41 and again at 23:00 on 2026-08-20, with the file
+  written at the first one, so the count had already moved before the game
+  you meant had finished.
+
+The fix is not a better proxy. `lichess-bot` has the mechanism this needs:
+**`quit_after_all_games_finish: true`**, which makes the first SIGINT mean
+"play this game out, accept nothing new, then exit" (`close_pool` joins the
+game process; the main loop stops handling events). It is now set in
+`lichess/config.yml`, and `bot-stop.sh` signals **during** the last game rather
+than hunting for a gap after it. A second SIGINT is still force-quit, so the
+script never sends one on that path.
+
+Two traps come with it. The option is read at startup, so **editing
+`config.yml` does not reach a running bot** — `bot-stop.sh --status` reports
+`inexact` when the file was edited after the process started, and falls back to
+the old gap-hunting behaviour rather than signalling into a game that will not
+survive it. And per the lesson above, the option is read behaviour, not tested
+behaviour: after a graceful signal into a live game, the script waits ten
+seconds and checks that the **engine is still there**. That direction of the
+check is sound — presence cannot be manufactured by the signal — and if the
+engine is gone with no game record, it says so loudly and tells you to restart
+the bot immediately to reconnect.
+
 ---
 
 ## 8. The harness cannot gate an evaluation change — **FIXED 2026-08-14**

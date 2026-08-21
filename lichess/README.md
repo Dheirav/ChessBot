@@ -8,6 +8,7 @@ the integration:
 |---|---|
 | `config.yml` | lichess-bot's configuration, tailored to this engine |
 | `run.sh` | builds the engine, then starts lichess-bot against this config |
+| `bot-stop.sh` | stops it after N games or at a time, never mid-game |
 | `chessbot-uci.sh` (repo root) | the engine as a plain UCI binary |
 
 **lichess-bot itself is not in this repository.** It is AGPL-3.0 and has its
@@ -68,6 +69,15 @@ file is in version control.
   this engine does advertise are `Hash`, `NullMove`, `LMR`, `Aspiration`,
   `SeeOrdering` and `SeePruning` — the last two are commented out in the config
   and should be enabled once their gates pass (PLAN.md 3.2).
+- **`quit_after_all_games_finish: true`.** Without it the first Ctrl-C (or
+  SIGINT) abandons the game in progress and our clock runs out with nobody to
+  answer — that cost a −120 forfeit once (`docs/BUGS.md` 7). With it, the first
+  signal means "play this game out, accept nothing new, then exit", which is
+  what lets `bot-stop.sh --games 1` end on the game being played rather than
+  the one after it. The **second** signal is still an immediate quit, mid-game.
+  The value is read at startup, so changing it here does nothing until the bot
+  is restarted; `./lichess/bot-stop.sh --status` says which mode the running
+  process is in.
 - **`move_overhead: 2000`.** Raise it if games are lost on time despite the
   engine returning moves promptly; WSL plus network latency is what it covers.
 - **Matchmaking is on and rated**, 5+3 and 10+5, within 300 rating points. Rated
