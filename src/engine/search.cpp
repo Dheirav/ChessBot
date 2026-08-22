@@ -109,6 +109,8 @@ const SearchOptionEntry SEARCH_OPTIONS[] = {
     {"softtime",    "softtime", "SoftTime",    &SearchOptions::softTime},
     {"iid",         "iid",      "Iid",         &SearchOptions::iid},
     {"timealloc",   "timealloc","TimeAlloc",   &SearchOptions::timeAlloc},
+    {"revfutility", "revfut",   "RevFutility", &SearchOptions::revFutility},
+    {"razoring",    "razor",    "Razoring",    &SearchOptions::razoring},
 };
 const size_t SEARCH_OPTION_COUNT = sizeof(SEARCH_OPTIONS) / sizeof(SEARCH_OPTIONS[0]);
 
@@ -489,6 +491,51 @@ static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
             tt.store(hash, 0, ply, score, Move(), nodeType);
         }
         return score;
+    }
+
+    // --- Shallow-depth futility, both halves (PLAN.md 3.4) ---
+    //
+    // Margins are sized off the *measured* error of this engine's evaluation,
+    // not off textbook values — see the toggles in search.hpp. The short
+    // version: over 688 ordinary positions the static evaluation differs from
+    // Stockfish at depth 16 by a median of 125cp and a 90th percentile of
+    // 407cp, so a 100–150cp-per-ply margin would be pruning on noise. 3.1 made
+    // that mistake with delta pruning and it cost 50 Elo.
+    //
+    // A node that is *already* this far above beta, or this far below alpha, is
+    // one the evaluation is confident about by its own error bars.
+    static const int REV_FUTILITY_MARGIN = 300;   // per ply, ~90th percentile
+    static const int REV_FUTILITY_MAX_DEPTH = 3;
+    static const int RAZOR_MARGIN = 500;          // ~95th percentile
+    static const int RAZOR_MAX_DEPTH = 2;
+
+    // A null-window search (beta - alpha == 1) is a scout, not a principal
+    // variation. Pruning inside the PV would change the move actually chosen
+    // rather than only how fast it is found.
+    const bool isPV = (beta - alpha > 1);
+    const bool nearMate = (std::abs(alpha) >= MATE_SCORE - 1000)
+                       || (std::abs(beta) >= MATE_SCORE - 1000);
+
+    if (!isPV && !inCheck && !nearMate
+        && (g_searchOptions.revFutility || g_searchOptions.razoring)) {
+        const int staticEval = scoreForSideToMove(board);
+
+        // Reverse futility: so far above beta that giving the opponent the best
+        // reply this evaluation can imagine still would not bring it below.
+        if (g_searchOptions.revFutility && depth <= REV_FUTILITY_MAX_DEPTH
+            && staticEval - REV_FUTILITY_MARGIN * depth >= beta) {
+            return staticEval - REV_FUTILITY_MARGIN * depth;
+        }
+
+        // Razoring: so far below alpha that only a capture sequence could save
+        // it — so ask quiescence, which searches exactly those, and believe it
+        // only when it agrees. Falling through on disagreement is what keeps
+        // this from being the -50 Elo version of the bet.
+        if (g_searchOptions.razoring && depth <= RAZOR_MAX_DEPTH
+            && staticEval + RAZOR_MARGIN <= alpha) {
+            const int qScore = quiescence(board, ply, 0, alpha, beta, shouldStop);
+            if (!searchAborted(shouldStop) && qScore <= alpha) return qScore;
+        }
     }
 
     // --- Null-move pruning ---

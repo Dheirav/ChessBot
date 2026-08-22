@@ -47,6 +47,8 @@ Phase 3 is in progress. What is wired in:
 | `seepruning` | off | **resolved, stays off** — +2.2 [−7.2, +11.6] at equal nodes, +4 [−7, +14] on the clock |
 | `qbound` | **on** | quiescence capped 8 plies past the horizon; −16.8% nodes, no best move changed. Ungated repair |
 | `checkext` | **on** | **accepted**, +23.0 Elo [+13.3, +32.7] — on by default since 2026-08-14 |
+| `razoring` | **on** | **accepted 2026-08-22, +39.1 Elo [+28.4, +49.9]** over 2 400 games. Margin 500cp, sized off the evaluation's measured error rather than textbook 100–150 — 3.1 lost 50 Elo making the same bet inside the evaluation's own noise |
+| `revfutility` | **on** | **accepted 2026-08-22, +18.4 Elo [+7.8, +29.1]** measured *on top of* `razoring`, +12.3 alone. Margin 300cp per ply |
 | `deltapruning` | off | −50.0 at 200cp; **closed 2026-08-21 at +0.9 [−5.8, +7.7]** on the current build (the older +7.1 was a pre-6.2 engine) |
 | `softtime` | **on** | **accepted, +42 Elo [+6, +79]**, 200 games at `--tc 120+1.33`, **zero forfeits** — on by default since 2026-08-20. Shipped once before at +78 from a 30-second control and reverted after a rated-game forfeit; the hard bound is now absolute (`budget + increment`) rather than a ratio. `BUGS.md` 11 |
 | `iid` | off | **gated, stays off** — −0.1 Elo [−4.9, +4.7] over 3 360 games. The tightest null here: iterative deepening already fills the table at the depths IID fires at |

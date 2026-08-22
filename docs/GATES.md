@@ -71,3 +71,6 @@ Re-pool any of these with `./tests/pool-shards.sh <dir>/`.
 | `shard-20260816-150140/` | `kingdanger` at 8× magnitude | **−216.9 [−241.9, −193.8]** |
 | `shard-20260821-112153/` | `deltapruning` re-measured on the current build | **+0.9 [−5.8, +7.7]** — closed, stays off |
 | `shard-20260821-220901/` | king exposure 100% + king danger 300%, two binaries | **−33.1 [−43.2, −23.0]** — rejected |
+| `shard-20260822-025838/` | `revfutility` alone | +12.3 [+1.5, +23.1] |
+| `shard-20260822-033651/` | `razoring` alone | **+39.1 [+28.4, +49.9]** — accepted, on by default |
+| `shard-20260822-113235/` | `revfutility` **on top of** `razoring` | **+18.4 [+7.8, +29.1]** — accepted, on by default |

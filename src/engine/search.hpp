@@ -165,6 +165,47 @@ struct SearchOptions {
     // which bounds how much it could ever have been worth.
     bool timeAlloc = false;
 
+    // --- PLAN 3.4: futility at shallow depths, both halves separately ---
+    //
+    // Both are the same bet delta pruning makes: trust the static evaluation to
+    // say a node cannot matter, and skip work on the strength of it. 3.1 is the
+    // record of what that bet costs when the margin is wrong — delta pruning at
+    // a 200cp margin measured **−50.0 Elo**, and the same rule at 900cp
+    // measured **+7.1**. Fifty-seven Elo of swing from one constant.
+    //
+    // What is different this time is that the evaluation's error is *measured*
+    // rather than assumed. Over 688 ordinary positions (`tests/evalerror`, the
+    // `ctl` set) the static evaluation differs from Stockfish at depth 16 by:
+    //
+    //     median 125cp | 75th 256cp | 90th 407cp | mean 182cp
+    //
+    // Textbook futility margins are 100–150cp per ply. **This evaluation is
+    // wrong by more than that in half of all ordinary positions**, so a
+    // textbook margin here prunes on the evaluation's own noise — which is
+    // exactly the mistake 3.1 made and paid 50 Elo for. The margins in
+    // search.cpp are sized off that distribution instead, and are roughly
+    // 2–3× textbook.
+    //
+    // `razoring` is **ON since 2026-08-22: +39.1 Elo, 95% CI [+28.4, +49.9]**
+    // over 2 400 games at `-N 100000`, `shard-20260822-033651/`. The largest
+    // accepted gain since the `threats` deletion, and positive on both axes —
+    // better per node *and* 21% fewer nodes at bench 6, which a node-budgeted
+    // gate cannot credit it for. No best move changed on any of the nine bench
+    // positions.
+    //
+    // The margin is why it worked. 3.1 lost 50 Elo making this bet at a
+    // textbook-ish 200cp; 500cp here sits outside the evaluation's own measured
+    // error, and that is the whole difference.
+    //
+    // `revFutility` is **ON since 2026-08-22: +18.4 Elo, 95% CI [+7.8, +29.1]**
+    // over 2 400 games, `shard-20260822-113235/` — measured *on top of*
+    // razoring, not against the bare baseline, because both prune the same
+    // shallow nodes and "worth +12 alone" is not "worth +12 on top". It was
+    // +12.3 [+1.5, +23.1] alone (`shard-20260822-025838/`), so the two are not
+    // redundant; if anything each is worth slightly more with the other in.
+    bool revFutility = true;   // node already far above beta: cut without searching
+    bool razoring = true;      // node far below alpha: drop straight to quiescence
+
     // There is no king-safety toggle here, and on 2026-08-16 there briefly were
     // two. Both were gated and neither earned its place; the numbers and the
     // reasoning are in evaluation.cpp beside the term they describe, and in
