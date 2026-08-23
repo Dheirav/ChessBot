@@ -26,6 +26,18 @@ std::atomic<bool> g_stop{false};
 std::thread g_searchThread;
 int g_hashMb = 256;
 
+// Assumed round-trip cost of a move: the time between the search deciding and
+// the server registering it. The clock the engine is handed has already spent
+// it, so planning against the raw figure plans against time that is gone. Four
+// rated games were lost on time to a flaky link (BUGS.md 15); this is the
+// engine-side margin for the ordinary case of that, not the pathological one.
+int g_moveOverheadMs = 100;
+
+// Whether the search now running has no bound of its own ("go infinite").
+// EOF must still abort one of those or a pipe would never return -- but it
+// must NOT abort a bounded one, which is BUGS.md 14. Set by parseGo.
+std::atomic<bool> g_searchUnbounded{false};
+
 
 // Resolve a UCI move string against the legal move list. Matching against
 // generated moves rather than parsing into a Move directly is what makes
@@ -169,6 +181,11 @@ SearchLimits parseGo(std::istringstream& is) {
         bool white = (g_board.activeColor == COLOR_WHITE);
         long remaining = white ? wtime : btime;
         long increment = white ? winc : binc;
+
+        // Spend against the clock that will actually exist when the move
+        // lands, not the one quoted at the start of thinking.
+        remaining -= g_moveOverheadMs;
+        if (remaining < 1) remaining = 1;
         // How many more moves to plan for.
         //
         // A constant divisor treats move 3 and move 53 alike, and since
@@ -242,6 +259,7 @@ SearchLimits parseGo(std::istringstream& is) {
     if (limits.moveTimeMs == 0 && !infinite && depth <= 0 && nodes == 0)
         limits.maxDepth = 8;
 
+    g_searchUnbounded = infinite;
     return limits;
 }
 
@@ -288,6 +306,17 @@ void handleSetOption(std::istringstream& is) {
 
     auto isTrue = [](const std::string& v) { return v == "true" || v == "1"; };
 
+    if (name == "Move Overhead") {
+        int ms = std::atoi(value.c_str());
+        if (ms >= 0 && ms <= 5000) g_moveOverheadMs = ms;
+        return;
+    }
+
+    // Accepted and ignored. Announcing an option and then rejecting it is
+    // worse than not announcing it: the GUI has no way to tell that its
+    // configuration did not take.
+    if (name == "Threads" || name == "Ponder") return;
+
     if (name == "Hash") {
         int mb = std::atoi(value.c_str());
         if (mb >= 1) {
@@ -319,6 +348,7 @@ int uciLoop() {
     std::cout.setf(std::ios::unitbuf);
 
     std::string line;
+    bool quitRequested = false;
     while (std::getline(std::cin, line)) {
         std::istringstream is(line);
         std::string command;
@@ -336,6 +366,14 @@ int uciLoop() {
             // it still said SeeOrdering was off after the engine shipped it on,
             // which tells a GUI the opposite of what the engine does.
             std::cout << "option name Hash type spin default 256 min 1 max 4096\n";
+            // Advertised because a GUI's default configuration sets them and
+            // python-chess raises on any name the engine did not announce --
+            // one unannounced option is a harness that dies on game one
+            // (EXTERNAL_RATING.md). Threads is honest about being single:
+            // min and max are both 1 rather than pretending to accept more.
+            std::cout << "option name Threads type spin default 1 min 1 max 1\n";
+            std::cout << "option name Ponder type check default false\n";
+            std::cout << "option name Move Overhead type spin default 100 min 0 max 5000\n";
             const SearchOptions defaults;
             for (size_t i = 0; i < SEARCH_OPTION_COUNT; ++i) {
                 std::cout << "option name " << SEARCH_OPTIONS[i].uciName
@@ -363,12 +401,29 @@ int uciLoop() {
             stopSearch();
             handleSetOption(is);
         } else if (command == "quit") {
+            quitRequested = true;
             stopSearch();
             break;
         }
         // Unknown commands are ignored, as the protocol requires.
     }
 
-    stopSearch();
+    // Reaching here without "quit" means stdin closed underneath a search
+    // that may still be running -- `printf '...\ngo depth 8\n' | chessbot`.
+    // Aborting it here is what made that pipe answer with a one-ply move
+    // dressed as a depth-8 one: legal, plausible, and wrong, with no error to
+    // say so. A sweep built that way returns a column of identical guesses
+    // that reads as a depth sweep, and one such sweep was published as
+    // evidence before anyone noticed the engine does not open with a2a3
+    // (BUGS.md 14). So let a bounded search finish and report what it actually
+    // found.
+    //
+    // "go infinite" is the exception and must still be cut short, since by
+    // definition nothing else will ever end it.
+    if (quitRequested || g_searchUnbounded) {
+        stopSearch();
+    } else if (g_searchThread.joinable()) {
+        g_searchThread.join();
+    }
     return 0;
 }

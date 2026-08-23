@@ -5,8 +5,9 @@
 Every strength number in this repo is self-referential. SPRT gates measure a change
 against the previous version of itself, which says a heuristic helped but says nothing
 about where the engine actually sits. Lichess fixed half of that: `Crimsy_Bot` holds a
-non-provisional **2190 rapid (rd ±45) over 173 rated games** as of 2026-08-21,
-up from 2162 over 149 games on 2026-08-19.
+non-provisional **2130 rapid (rd ±45) over 218 rated games** as of 2026-08-23.
+`HANDOFF.md` carries the current reading and `MEASUREMENTS.md` every past one —
+do not restate either here, since this document is read months after it is written.
 
 CCRL is the other half, and it is the one that matters for a rating people can compare.
 It is the standard engine-vs-engine list, run on fixed hardware, and being on it puts a
@@ -38,11 +39,14 @@ Start here: https://computerchess.org.uk/ and https://www.chessprogramming.org/C
    divides remaining clock by an assumed 30 moves with no pondering, and that bullet is
    where it flags rather than where it plays badly. Confirm 2+1 does not flag before
    submitting to the blitz list.
-4. **Check the advertised UCI option set.** The engine advertises only `Hash`,
-   `NullMove`, `LMR`, `Aspiration`, `SeeOrdering` and `SeePruning`, and no `Threads`,
-   `Ponder`, `SyzygyPath` or `Move Overhead`. A tester's standard config will assume some
-   of those exist. Either advertise and no-op them, or state the limitation clearly in the
-   release notes so the first game does not crash their harness.
+4. ~~**Check the advertised UCI option set.**~~ **Done 2026-08-23.** `Threads`
+   (spin, min and max both 1 — honest about being single-threaded), `Ponder`
+   (check, false) and `Move Overhead` (spin, default 100 ms) are now advertised.
+   The first two are accepted and ignored, because announcing an option and then
+   rejecting it is worse than never announcing it: the GUI has no way to learn
+   its configuration did not take. **`Move Overhead` is real**, not a no-op — it
+   comes off the clock before the budget is computed. `SyzygyPath` is still
+   absent and should stay absent while there are no tablebases behind it.
 5. **Decide the shipped defaults.** `SeeOrdering` won its gate at +25.6 Elo and defaults
    on; `SeePruning` is still commented out in the Lichess config. Whatever is submitted
    should be the configuration that actually measured strongest, and it should be frozen
@@ -59,5 +63,6 @@ claim.
 - Do not submit while the evaluation rewrite in `ROADMAP.md` is in flight. CCRL ranks the
   best version with 150+ games, so submitting a version you are about to obsolete wastes
   the slot and their testers' time.
-- The Lichess rating moves (2198-provisional, then 2065, 2162, now 2190). Any figure
-  quoted outside the repo should be a floor, not today's reading.
+- The Lichess rating moves (2198-provisional, then 2065, 2162, 2190, now 2130 after
+  the opponent cap went to 2500). Any figure quoted outside the repo should be a floor,
+  not today's reading.
