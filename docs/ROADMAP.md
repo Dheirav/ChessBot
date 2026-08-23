@@ -385,8 +385,9 @@ wrong twice about where the time goes, and both corrections came from measuring.
 
 ## Phase 7 — The road to 3000 *(the strength programme, 2026-08-22)*
 
-`Crimsy_Bot` is **2160 Lichess rapid** over 190 rated games. 3000 is about
-**840 Elo away**, which is not a tuning problem: it is the distance between a
+`Crimsy_Bot` is **2130 Lichess rapid** over 218 rated games (2026-08-23;
+`HANDOFF.md` states the current reading, `MEASUREMENTS.md` the history). 3000 is
+about **870 Elo away**, which is not a tuning problem: it is the distance between a
 competent classical engine and a modern one. Every item below is ordinary
 engine work, none of it is exotic, and together they plausibly cover the gap.
 
@@ -432,8 +433,10 @@ worth more on Lichess than their size suggests.
 **One caveat on the target.** 3000 *Lichess bot rapid* is not 3000 CCRL — the
 bot pool is its own scale, and this account's rating moves with the opponents
 matchmaking finds. `opponent_max_rating` was raised to 2500 on 2026-08-21 and
-the rating fell from 2190 to 2160 within a day, because the bot finally started
-meeting opponents that beat it. That is the rating becoming honest, not the
+the rating fell from 2190 to 2130 over the two days that followed, because the
+bot finally started meeting opponents that beat it — it scores 7% against
+2300+, and nine of the fourteen games it has ever played there were in those
+two days. That is the rating becoming honest, not the
 engine getting worse.
 
 ---

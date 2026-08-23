@@ -1,4 +1,4 @@
-# Handoff — 2026-08-22
+# Handoff — 2026-08-23
 
 Current state, what is in flight, and what to pick up. This is the file to read
 first; it is meant to be rewritten as state changes, unlike `BACKLOG.md`, which
@@ -118,9 +118,10 @@ report, an annotated PGN, or a self-contained HTML page. Stockfish 16 is at
 It carries a known **3% phantom-loss floor** from successive searches
 disagreeing, so a lone inaccuracy under ~5 win% is not evidence of anything.
 
-The bench signature is **1,086,693 nodes** at depth 6, after 6.2 removed the
-hanging-piece penalty on 2026-08-15 (1,599,675 → 1,323,943 → 1,086,693, −32.1%
-across the day). Any change claiming to preserve search behaviour must reproduce
+The bench signature is **793,823 nodes** at depth 6, verified 2026-08-23,
+since `razoring` and `revfutility` shipped on 08-22 (−27.0% from 1,086,693).
+Before those, 6.2's removal of the hanging-piece penalty on 2026-08-15 took it
+1,599,675 → 1,323,943 → 1,086,693, −32.1% across that day. Any change claiming to preserve search behaviour must reproduce
 it exactly. It has moved six times this
 week — 2,056,371 until `seeordering` was turned on (2026-08-13); then 1,465,771,
 1,725,755 and 1,759,990 as the three Phase 4 evaluation fixes landed
@@ -132,9 +133,17 @@ the baseline of their day, not a regression.
 
 ## Measured playing strength — the external baseline
 
-**Current: 2160 Lichess rapid (rd ±45) over 190 rated games**, as of
-2026-08-22. The bot plays rated 900+10 against other bots, seeking opponents up
+**Current: 2130 Lichess rapid (rd ±45) over 218 rated games**, as of
+2026-08-23. The bot plays rated 900+10 against other bots, seeking opponents up
 to 2500 since `opponent_max_rating` was raised on 2026-08-21.
+
+**The rating is falling on purpose: 2190 → 2160 → 2130 across three days.** The
+per-band scores have not moved — the crossover is still 2100-2150 — but nine of
+the fourteen games this account has ever played against 2300+ were played on
+08-21 and 08-22, and it scores 7% there. Widening the pool made the rating
+honest, and honest is lower. `MEASUREMENTS.md` has the fourth reading in full,
+including the reconciliation that puts **13% of every loss on restarts and
+aborts rather than on play** (`BUGS.md` 7 and 12).
 
 **Accuracy by opponent, over 200 reviewed games:** 96.3% under 1500 scoring
 99%, down to 94.3% against 2300+ scoring **zero**. Two percentage points of
@@ -145,15 +154,39 @@ one large fix. `MEASUREMENTS.md` has the table.
 **Every reading, and the three write-ups that established the baseline, are in
 `MEASUREMENTS.md`.** The short version: self-play Elo does not convert to
 Lichess rating, the 6.2 work was externally validated on 2026-08-16, and the
-rating fell from 2190 to 2160 in the day after the opponent cap was raised —
-which is the rating becoming honest rather than the engine getting worse.
+rating fell from 2190 to 2130 in the two days after the opponent cap was
+raised — which is the rating becoming honest rather than the engine getting
+worse.
+
+**That window is now closed, at 34 games — `razoring` and `revfutility` are
+not on trial.** 17-2-15, worth 18.0 points against a field expected to yield
+21.1: **−1.45σ**, down from the −1.96σ that ten games showed. The whole
+remaining deficit is in 2100-2300 (2.0 against 5.1 expected), and **two of
+those eight losses are time forfeits with no chess in them** — credit them at
+band expectation and the aggregate is −0.97σ. Keep counting, but stop treating
+this as a pruning question.
+
+**The forfeits are the finding, and they are not the engine.** All four
+forfeit losses this account has ever taken are the host's network dropping
+mid-game — `BUGS.md` 15, added 2026-08-23. Twelve outages in thirty hours, two
+of them minutes long, and the clock runs on our turn throughout. Three of the
+four were first misread as a restart or as the time manager. **Grep a forfeit's
+log for `ConnectionError` before calling it a chess problem.**
 
 ## In flight
 
-**The Lichess bot is running.** Restarted 2026-08-21 at 08:27 on the post-6.2
-build — `./chessbot` was already current with a clean tree at `00d6af0`, so the
-restart deployed the identical engine. It has been playing rated 900+10 since
-2026-08-16. **2190 rapid (rd ±45) over 173 rated games** as of
+**The Lichess bot is running, on the `razoring` + `revfutility` build.**
+`./chessbot` was relinked 2026-08-22 at 13:14 local (09:14 UTC) from `a8c5a5b`,
+and since lichess-bot spawns a fresh engine per game, every rated game from
+09:20 UTC that day is that binary. The lichess-bot process itself was last
+restarted 2026-08-22 at 22:41 local (18:41 UTC); it confirmed *"when quitting,
+lichess-bot will first wait for all running games to finish"* at startup, so
+**this process's stops are exact** (see below). Current reading is 2130 over
+218 rated games — *Measured playing strength* above, `MEASUREMENTS.md` for the
+history.
+
+**The earlier reading this paragraph used to carry, kept because the next two
+paragraphs argue from it:** 2190 (rd ±45) over 173 rated games as of
 2026-08-21 08:30. The 19 rated games between 2026-08-20 20:00 and then went
 17W 2D 0L for +28 rating: 3/4 against 2100+, clean sweeps below that, no time
 forfeits, and the lowest our clock reached in any game was 41s of 900+10 —
@@ -219,6 +252,20 @@ is the state:
 curl -s -H "Authorization: Bearer $LICHESS_BOT_TOKEN" \
      "https://lichess.org/api/account/playing?nb=5"   # isMyTurn, fen, secondsLeft
 ```
+
+**Shipped 2026-08-23, unbuilt and ungated by design — none of them touch the
+search.** Bench signature unchanged at 793,823, all eleven tests pass:
+
+- **EOF no longer truncates a live search** (`BUGS.md` 14, now fixed). A piped
+  `go depth 8` returned a one-ply move dressed as a depth-8 one; it now returns
+  `b1c3`, matching the held-open control. `go infinite` still aborts on EOF, or
+  a pipe would hang.
+- **`Threads`, `Ponder` and `Move Overhead` are advertised** — a GUI's default
+  config previously set options the engine never announced, which python-chess
+  raises on. `EXTERNAL_RATING.md` blocker 4, closed.
+- **`Move Overhead` is a real term**, default 100 ms, subtracted from the clock
+  before the budget is sized. The engine-side complement to `BUGS.md` 15: it
+  covers ordinary round-trip latency, not the outages.
 
 **Recently closed, each recorded where it cannot drift from the code:**
 
@@ -448,7 +495,7 @@ in the order I would take it:
    largest term has stopped shouting, and now with a reason to believe a gate
    on it will mean something.
 4. **`ROADMAP.md` Phase 7 — the road to 3000.** Written 2026-08-22 after an
-   audit of this list found four dead items in it. The engine is 2160 and
+   audit of this list found four dead items in it. The engine is 2130 and
    single-threaded on a 16-core machine, has no futility pruning, razoring,
    late-move pruning, singular extensions or probcut, no ponder, no book and no
    tablebases. Those absences are measured; the Elo attached to each of them in

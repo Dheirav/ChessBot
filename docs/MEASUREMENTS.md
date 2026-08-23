@@ -195,3 +195,112 @@ figure hides the only structure in the table.
 
 Regenerate with `tools/archive-profile.py`. `REVIEW.md` has the method and the
 caveats; this is the reading.
+
+---
+
+## Fourth measurement — 2026-08-23, and the cost of a wider pool
+
+Live from `/api/user/Crimsy_Bot`, with the archive at 230 records. **All times
+in this section are UTC**, which is what the PGN headers carry.
+
+| | 08-16 10:30 | 08-21 08:30 | 08-22 | now (08-22 20:25 UTC) |
+|---|---|---|---|---|
+| rating | 2200 | 2190 | 2160 | **2130**, rd=**45**, prog **−29** |
+| rated rapid | 94 | 173 | 190 | **218** |
+| account record | 72-8-14 | — | — | **163-17-45** over 225 rated |
+
+**The 60 points since 08-21 are the opponent cap, not the engine.**
+`opponent_max_rating` went to 2500 on 2026-08-21, and matchmaking immediately
+started finding the band that had never been reachable before. Nine of the
+fourteen games this account has ever played against 2300+ were played on 08-21
+and 08-22. The per-band rates did not move; the mix did.
+
+**Strength by opponent, all 219 decided archive games:**
+
+| opponent | games | W-D-L | score |
+|---|---|---|---|
+| under 1500 | 37 | 36-1-0 | 99% |
+| 1500-1900 | 90 | 83-3-4 | 94% |
+| 1900-2100 | 40 | 28-7-5 | 79% |
+| 2100-2300 | 38 | 15-6-17 | 47% |
+| **2300+** | **14** | **1-0-13** | **7%** |
+
+The crossover is **2100-2150**, unchanged since the 08-15 reading put it at
+2050-2100. A rating of 2130 is now simply where that crossover is, which is
+what a settled rating is supposed to be.
+
+**Six of the 45 losses were never played.** Wins and draws reconcile exactly
+between the archive and the account — 163 and 17 in both — so all of the
+difference is in the loss column: 39 losses over the board, 45 on the account.
+The archive holds 11 records with no result (aborts, restarts, one game still
+running); Lichess scored six of them as losses and did not count the other
+five. **Restarts and aborts are 13% of every loss this account has.**
+`BUGS.md` 7 and 12 are the causes, and this is their price in rating.
+
+Time forfeits proper are rare and are not a `softtime` regression: two forfeit
+*losses* in the whole archive at this reading, 08-17 07:29 and 08-21 16:11.
+Since `softtime` shipped the engine has also won three games on the opponent's
+flag.
+
+**Corrected 2026-08-23.** This paragraph originally read the 08-21 forfeit as
+"the signature of a restart, not of the clock", on the grounds that an
+unterminated and an abandoned game bracket it. That was coincidence reasoning.
+Its log carries **84 connection errors**; so does 08-17's, with 93. Both are
+the host's network dropping mid-game, which is `BUGS.md` 15 and accounts for
+every forfeit loss this account has.
+
+### The first field data on razoring and reverse futility — inconclusive, keep counting
+
+`./chessbot` was relinked 2026-08-22 09:14 UTC with `razoring` and
+`revfutility` on (commit `a8c5a5b`, +39.1 and +18.4 in `GATES.md`). lichess-bot
+spawns a fresh engine per game, so every game from 09:20 UTC onward is that
+build. **Ten games: 3-1-6.**
+
+That is not the 35% it looks like — half of those games were against 2100+.
+Priced against the per-band rates above, the field was worth **≈5.9 points** and
+it scored **3.5**, which is about **two standard deviations low on ten games**.
+Borderline, one-sided, and confounded by the same cap change that produced the
+harder field in the first place.
+
+**Do not act on this.** It is recorded because it is the first window in which
+the new pruning has met opponents that are not this engine, and because ten
+games is exactly the size at which a real regression and pure noise look
+identical. The next fifty games settle it; `tools/archive-profile.py --compare
+2026.08.22-09:14:00` is the sharper instrument when there are enough of them,
+since blunder counts do not need the opponent mix to hold still.
+
+---
+
+## Fifth measurement — 2026-08-23 20:06, and the razoring window closes
+
+**2132 rapid (rd ±45, prog −12) over 242 rated games**, account record
+177-18-54 over 249. The fall stopped: 2130 → 2132 across a day, after 2190 →
+2160 → 2130 over the three before it. The rating has found its level.
+
+**`razoring` + `revfutility` in the field, at 34 games — no case to answer.**
+Same binary throughout (`./chessbot` untouched since 08-22 13:14 local).
+
+| | at n=10 | at n=34 |
+|---|---|---|
+| record | 3-1-6 | **17-2-15** |
+| actual vs band-expected | 3.5 vs 5.9 | **18.0 vs 21.1** |
+| deviation | −1.96σ | **−1.45σ** |
+
+An excursion regressing toward zero as the sample grows is what noise looks
+like. The earlier entry was right to record it and right not to act on it.
+
+| band | games | W-D-L | actual | expected |
+|---|---|---|---|---|
+| under 1500 | 3 | 3-0-0 | 3.0 | 3.0 |
+| 1500-1900 | 8 | 8-0-0 | 8.0 | 7.5 |
+| 1900-2100 | 6 | 4-1-1 | 4.5 | 4.9 |
+| **2100-2300** | 10 | 2-0-8 | **2.0** | **5.1** |
+| 2300+ | 7 | 0-1-6 | 0.5 | 0.6 |
+
+**All of the residual is in one band, and a quarter of it is not chess.** Two
+of those eight losses are time forfeits — `7kgNwYF5` (2159) and `GlZN6Jnv`
+(2225) — both caused by the host's network, `BUGS.md` 15. Score them at band
+expectation and the aggregate deviation is **−0.97σ**.
+
+That is the reading to carry: **the pruning is fine, and the machine is what is
+losing games in the band that sets the rating.**
