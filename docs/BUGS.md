@@ -1244,6 +1244,76 @@ does not know how fast the engine was when it played.
 
 ---
 
+## 17. Gates measure the engine with an eighth of the table it plays with — 2026-08-25
+
+`tests/match.cpp:762` is `TranspositionTable ttA(32), ttB(32)` — **32 MB per
+side, hardcoded, with no flag to override it.** `lichess/config.yml` sets
+`Hash: 256`. So every gate this project has run measured the engine at **839k
+slots** while rated games are played at **6 710k**.
+
+Measured on the shipped build, `go depth 10`, five middlegame positions:
+
+| position | 32 MB (gate) | 256 MB (play) | difference |
+|---|---|---|---|
+| 1 | 5 889 704 | 4 650 136 | **−21.0%** |
+| 2 | 3 205 337 | 3 114 473 | −2.8% |
+| 3 | 5 289 041 | 5 151 710 | −2.6% |
+| 4 | 6 790 668 | 6 451 322 | −5.0% |
+| 5 | 2 635 070 | 2 563 271 | −2.7% |
+| **total** | **23 809 820** | **21 930 912** | **−7.9%** |
+
+**This does not invalidate any past gate.** Both sides get 32 MB, so every
+comparison was fair, and a fair comparison is what a gate is for. What it means
+is narrower and still worth knowing: the engine being compared is about 8% less
+node-efficient than the one that plays, and the two are in *qualitatively*
+different regimes rather than merely different sizes.
+
+### The regime difference, which is the real point
+
+- **In a gate**, `-N 100000` means one search is 100k nodes against 839k slots.
+  A single search fits in the table with room to spare; pressure builds only
+  across the moves of a game, which is what `TtAging` handles.
+- **In play**, the median search is **9.9M nodes against 6.7M slots**
+  (`MEASUREMENTS.md`, 2026-08-24). A single search overflows the table one and
+  a half times over.
+
+**Gates never exercise the regime where one search thrashes the table**, and
+that is the regime the bot lives in.
+
+### Where this could bite, stated as a hypothesis and not a result
+
+Anything that reduces the number of distinct positions searched also reduces
+table pressure — which is the entire pruning family, and the family this
+project has been shipping: `seeordering` +25.6, `checkext` +23.0, `razoring`
++39.1, `revfutility` +18.4. Under gate conditions the table is comparatively
+roomy, so relieving pressure is worth *less* there than in play; under play
+conditions it could be worth more. The sign of the error is not obvious and
+**none of it has been measured** — it is a reason to be curious, not a reason
+to doubt those numbers.
+
+The concrete near-miss that found this: shrinking `TTEntry` to 16 bytes is
+worth ~1.4% of nodes at gate size and ~0 at play size. Gated the normal way it
+would likely have measured as a small positive that does not exist in real
+games, and nothing in the methodology would have caught it. See branch
+`tt-16byte`, parked for that reason.
+
+### What to do about it
+
+Not obvious, which is why this is written down rather than fixed.
+
+Raising the gate to 256 MB is the intuitive answer and does not fit: 14 shards
+× 2 sides × 256 MB is **7 GB against WSL's 8 GB** (`.wslconfig` `memory=8GB`).
+It would mean trading shard count for realism — fewer, slower gates — and shard
+count is what makes a gate affordable at all.
+
+The cheap first step is to make the size **explicit and settable** rather than
+buried as a literal: a `--hash` flag on `tests/match`, defaulting to today's 32
+so no past result changes meaning. Then a change suspected of interacting with
+table pressure can be gated at both sizes and the difference looked at, instead
+of the question being invisible.
+
+---
+
 ## Things that look like bugs and are not
 
 - **Two games against `ficheallrs` show `Termination "Abandoned"` after

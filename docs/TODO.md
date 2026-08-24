@@ -97,6 +97,19 @@ advice.
 
 ---
 
+## 1c. Gate realism — 2026-08-25
+
+- **`--hash` flag on `tests/match`** (S, nothing blocks it). The size is a
+  hardcoded `32` at `match.cpp:762` while the bot plays at 256 (`BUGS.md` 17).
+  Default it to 32 so no past result changes meaning; the point is to make the
+  question askable, not to answer it by fiat.
+- **`tt-16byte` branch** — a correct, tested 16-byte `TTEntry`, parked. It
+  gains ~1.4% of nodes at gate size and ~0 at play size, so it is not worth its
+  bench-signature cost on its own. It is Phase 0 of Lazy SMP if that is ever
+  built; ship it there or not at all.
+
+---
+
 ## 2. Engine
 
 | item | size | blocked by | note |
