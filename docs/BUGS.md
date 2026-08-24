@@ -1171,6 +1171,70 @@ and probably some of the six unfinished records that Lichess scored as losses
 
 ---
 
+## 16. The machine starved the engine for twenty-one hours — 2026-08-24
+
+**The engine ran at roughly a third of its speed from 2026-08-22 19:00 to
+2026-08-23 16:00, and nothing in the repo noticed.** Found on 08-24 while
+analysing play, from the bot's own `info` lines in `lichess_bot_auto_logs/` —
+median nps over searches longer than two seconds:
+
+| day | median knps |
+|---|---|
+| 08-16 | 875 |
+| 08-17 | 792 |
+| 08-18 | 878 |
+| 08-20 | 745 |
+| 08-21 | 848 |
+| 08-22 | 692 |
+| **08-23** | **257** |
+| 08-24 | 813 |
+
+Hourly, the floor is 139-182 knps for most of that window against a normal
+band of 700-880. The recovery lands exactly on the `wsl --shutdown` that
+deployed `networkingMode=mirrored` (15), which makes a stale WSL VM the leading
+suspect and *not* a demonstrated cause. **A restart curing it is a workaround,
+not a diagnosis.**
+
+### Why this outranks the search queue
+
+At this project's own doubling-is-70-Elo rule of thumb, a 3x slowdown is on the
+order of **100 Elo**, sustained, for a day. `razoring` — the largest search win
+ever gated here — is +39.1. **A recurrence costs more than anything on the
+queue is worth**, so the cause is worth finding before the next feature.
+
+### What it invalidates
+
+**The `razoring` + `revfutility` field test.** Those 34 games were recorded in
+`MEASUREMENTS.md`'s fifth reading as −1.45σ against band expectation, read as
+an excursion regressing toward noise. They were largely played inside this
+window, at a third speed, alongside the two network forfeits of 15. That is not
+a noisy measurement of the pruning; it is a measurement of a crippled machine.
+The pruning is not implicated and is not exonerated — **there is no valid field
+reading of it yet.**
+
+This is the third time in two days that a machine fault has been read as a
+chess result: twice as a forfeit misattributed to the clock and to a restart
+(15), and now once as a strength deficit. The pattern is worth naming.
+**Environmental faults are silent, and they arrive wearing the costume of the
+thing you were measuring.**
+
+### The check that would have caught it
+
+Nothing in the suite watches nps in live games. `tests/bench` measures speed on
+demand and passes, because it is run on a quiet machine when someone thinks to
+run it. The instrument that found this — median nps per day out of the bot's
+own logs — costs one grep and did not exist:
+
+```bash
+grep -hoE "nps [0-9]+ time [0-9]{4,}" ~/Code/lichess-bot/lichess_bot_auto_logs/lichess-bot.log* \
+  | awk '{print $2}' | sort -n | awk '{a[NR]=$1} END{print "median", a[int(NR/2)]/1000, "knps"}'
+```
+
+**Read it before trusting any reading taken from real games.** A band table
+does not know how fast the engine was when it played.
+
+---
+
 ## Things that look like bugs and are not
 
 - **Two games against `ficheallrs` show `Termination "Abandoned"` after

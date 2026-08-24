@@ -133,8 +133,8 @@ the baseline of their day, not a regression.
 
 ## Measured playing strength — the external baseline
 
-**Current: 2130 Lichess rapid (rd ±45) over 218 rated games**, as of
-2026-08-23. The bot plays rated 900+10 against other bots, seeking opponents up
+**Current: 2147 Lichess rapid (rd ±45) over 269 rated games**, as of
+2026-08-24 20:11. The bot plays rated 900+10 against other bots, seeking opponents up
 to 2500 since `opponent_max_rating` was raised on 2026-08-21.
 
 **The rating is falling on purpose: 2190 → 2160 → 2130 across three days.** The
@@ -158,13 +158,25 @@ rating fell from 2190 to 2130 in the two days after the opponent cap was
 raised — which is the rating becoming honest rather than the engine getting
 worse.
 
-**That window is now closed, at 34 games — `razoring` and `revfutility` are
-not on trial.** 17-2-15, worth 18.0 points against a field expected to yield
+**Settled 2026-08-24: `razoring` and `revfutility` are clear in the field.**
+Thirty games on a healthy machine land at **+0.11σ** against band expectation
+with zero forfeits (34 games and −0.32σ on the looser cut — the verdict does
+not depend on which). The earlier −1.96σ and −1.45σ were `BUGS.md` 16, the
+speed collapse, not the pruning. `MEASUREMENTS.md`'s seventh reading has both
+cuts and why there are two. What the void window said at the time, for the
+record: 17-2-15, worth 18.0 points against a field expected to yield
 21.1: **−1.45σ**, down from the −1.96σ that ten games showed. The whole
 remaining deficit is in 2100-2300 (2.0 against 5.1 expected), and **two of
 those eight losses are time forfeits with no chess in them** — credit them at
 band expectation and the aggregate is −0.97σ. Keep counting, but stop treating
 this as a pruning question.
+
+**Two machine faults, not one, and both wore a chess costume.** The forfeits
+below are `BUGS.md` 15; the speed collapse is 16, found a day later in the same
+logs. Three readings in two days were first attributed to the engine and turned
+out to be the environment — twice a forfeit blamed on the clock and on a
+restart, once a strength deficit blamed on pruning. **Check nps and grep for
+`ConnectionError` before reading any result off real games.**
 
 **The forfeits are the finding, and they are not the engine.** All four
 forfeit losses this account has ever taken are the host's network dropping

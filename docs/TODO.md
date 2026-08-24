@@ -69,6 +69,34 @@ the more valuable one and the easiest to quietly not record.
 
 ---
 
+## 1b. The machine, which currently outranks the engine — 2026-08-24
+
+**Find out why nps collapsed** (`BUGS.md` 16). The engine ran at ~a third
+speed for twenty-one hours across 08-22/08-23 — median 257 knps on 08-23
+against a normal 700-880 — and recovered exactly at a `wsl --shutdown`. That
+restart is a workaround; the cause is unknown. **Size: M. Blocked by nothing.**
+
+Worth doing before any item in §2, on arithmetic rather than taste: at
+doubling-is-70-Elo a 3x slowdown is ~100 Elo sustained, and `razoring`, the
+largest search win ever gated here, is +39.1. A recurrence costs more than the
+whole queue below is worth.
+
+Two things fall out of it and are cheap:
+
+- **Watch nps in live games.** Nothing in the suite does. One grep over the
+  bot's logs found this; `BUGS.md` 16 carries it. Wire it into whatever gets
+  looked at routinely.
+- **Re-run the `razoring` + `revfutility` field test.** The 34-game window in
+  `MEASUREMENTS.md`'s fifth reading is void — it was taken inside the slow
+  window. The sixth reading says so; the measurement is still owed.
+
+Also owed: the **Stockfish move-quality profile** for the current archive. The
+08-24 attempt was launched at `--jobs 8` with no `nice` while the bot was
+playing and had to be killed. §1's invocation, `--jobs 4 --nice 19`, is not
+advice.
+
+---
+
 ## 2. Engine
 
 | item | size | blocked by | note |

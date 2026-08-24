@@ -304,3 +304,127 @@ expectation and the aggregate deviation is **−0.97σ**.
 
 That is the reading to carry: **the pruning is fine, and the machine is what is
 losing games in the band that sets the rating.**
+
+---
+
+## Sixth measurement — 2026-08-24, and the fifth one was taken on a broken machine
+
+**2135 rapid (rd ±45, prog +5) over 252 rated games**, account record
+184-18-57 over 259. Recovering off the 2130 floor rather than still falling.
+
+**Read `BUGS.md` 16 before anything below.** The engine ran at roughly a third
+of its normal speed from 08-22 19:00 to 08-23 16:00 — median 257 knps on 08-23
+against a normal 700-880, recovering exactly at the WSL restart. **The fifth
+reading's razoring window sits inside that.** Its −1.45σ was read as an
+excursion regressing toward noise; it is better read as a measurement of a
+crippled machine, taken alongside two network forfeits. The pruning is neither
+implicated nor exonerated — **there is no valid field reading of `razoring` and
+`revfutility` yet, and the next one has to be taken on a healthy box.**
+
+### Strength by opponent, all 253 decided games
+
+| opponent | games | W-D-L | score |
+|---|---|---|---|
+| under 1500 | 39 | 38-1-0 | 99% |
+| 1500-1900 | 101 | 94-3-4 | 95% |
+| 1900-2100 | 45 | 33-7-5 | 81% |
+| 2100-2300 | 49 | 18-6-25 | **43%** |
+| 2300+ | 19 | 1-1-17 | **8%** |
+
+A cliff at ~2100, which is where the rating sits. Unchanged in shape since the
+08-15 reading; only the sample has grown.
+
+### The clock is healthy, and this is the evidence
+
+Across **181 games with clock traces, our clock never fell below 30 seconds**
+except in the two network forfeits of `BUGS.md` 15 (0.0s and 11.9s). 95 of the
+181 never went below five minutes. `softtime` is doing its job and the time
+manager needs no work — which is worth stating plainly, because a forfeit was
+misattributed to it on 08-23.
+
+### Two structural facts about this archive
+
+**No colour bias.** White 130 games at 76.9%, Black 123 at 75.6%, against
+average opposition of 1864 and 1845. Nothing to fix.
+
+**The sample is smaller than its count** (`BUGS.md` 6). 115 distinct opponents,
+but **16 of them account for 80 of the 253 games — 32%** — and play is
+deterministic: croco_bot 8-0-0, debzero 6-0-0, croco_little_bot 6-0-0. Those
+are largely one game replayed. Every percentage in this file inherits it.
+
+### What the machine fix has and has not shown
+
+Since the restart: 17 games, 12-0-5. But **2100-2300 is 1-0-5 over six games**,
+so the fix has not been shown to move the band that decides the rating. Six
+games cannot show it either way. Count more before concluding anything.
+
+**No Stockfish move-quality profile accompanies this reading.** One was started
+and killed: it was launched at `--jobs 8` with no `nice` while the bot was
+down, and the bot was restarted underneath it, leaving eight un-niced analysis
+jobs competing with live rated games for eleven hours. `TODO.md` §1 specifies
+`--jobs 4 --nice 19` for exactly this. No damage was measurable — 6-0-3 over
+the window, nps 630-1065 throughout — but the run produced nothing and the
+profile is still owed.
+
+---
+
+## Seventh measurement — 2026-08-24 20:11, both machine fixes verified
+
+**2147 rapid (rd ±45, prog +3) over 269 rated games**, account 196-20-60 over
+276. Up 17 from the 2130 floor in a day.
+
+### The two environmental fixes worked, and this is the evidence
+
+**Network** (`BUGS.md` 15) — connection failures per day:
+
+| day | failures |
+|---|---|
+| 08-20 | 59 |
+| 08-21 | 98 |
+| 08-22 | 22 |
+| 08-23 | 61 |
+| **08-24** | **1** |
+
+`networkingMode=mirrored` went in late on 08-23. A full day since has produced
+**one** failure against 61 the day before. **Zero time forfeits since.**
+
+**Speed** (`BUGS.md` 16) — median knps in live games: 257 on 08-23, **795 on
+08-24** over 3 415 samples, hourly range 629-1088 across twenty-one hours. No
+recurrence. **The cause is still unknown** and that has not changed: a restart
+cured it, which is a workaround. If it returns, 16 is the first thing to read.
+
+### `razoring` + `revfutility` are clear — the real field reading
+
+The fifth reading's window was void (`BUGS.md` 16). This is the replacement:
+same build, healthy machine, priced against the same pre-razoring band rates.
+
+| cut | games | W-D-L | actual | expected | deviation | forfeits |
+|---|---|---|---|---|---|---|
+| 08-23 11:30 UTC | 34 | 24-2-8 | 25.0 | 25.7 | **−0.32σ** | 1 |
+| 08-23 14:00 UTC | 30 | 22-2-6 | 23.0 | 22.8 | **+0.11σ** | 0 |
+
+Two cuts because the log timezone changed at the restart (+04 → IST), leaving
+the boundary uncertain by about ninety minutes; the looser cut still contains
+one pre-restart network forfeit. **The verdict does not depend on the choice:
+both land on expectation.** The −1.96σ at ten games and −1.45σ at thirty-four
+were the machine, not the pruning.
+
+Worth keeping: **the same games, on a broken machine, produced a 2σ scare and a
+plausible story about a 500cp margin being too aggressive.** Nothing about that
+story was true, and nothing in the results alone could have shown it. It took
+`nps`.
+
+### What has not moved
+
+| opponent | all-time games | score |
+|---|---|---|
+| under 1500 | 43 | 99% |
+| 1500-1900 | 112 | 95% |
+| 1900-2100 | 52 | 82% |
+| 2100-2300 | 60 | 41% |
+| 2300+ | 20 | 10% |
+
+The cliff at ~2100 is exactly where it was at the 08-15 reading. **Two clean
+machine fixes and a +57 Elo pruning pair have not moved it**, which is the
+argument for `BUGS.md` 13 being the real ceiling: the evaluation cannot see
+compensation, and opponents above 2100 are the ones able to offer it.
