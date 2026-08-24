@@ -7,31 +7,50 @@
  * Transposition Table Entry
  * Stores position evaluation and best move for previously searched positions
  */
+// Sixteen bytes, and every field is sized to keep it there.
+//
+// The size divides into ENTRIES_PER_MB, so it sets the table's length, its
+// index distribution, and therefore every node count the search produces.
+// Changing it changes the bench signature by construction.
+//
+// It was 40 bytes until 2026-08-25 — a 20-byte `Move` plus two ints — which
+// bought 6.7M slots at the default 256MB against a median search of 9.9M
+// nodes. The table was being recycled through inside a single move rather
+// than caching across one. At 16 bytes the same memory holds 16.8M.
+//
+// Sixteen also divides 64, so entries no longer straddle cache lines. At 40
+// bytes three in eight did, and every probe of one of those cost two cache
+// misses instead of one.
 struct TTEntry {
     uint64_t hash = 0;
-    int score = 0;
-    // depth is a search depth, 0..64, so it does not need 32 bits — and the
-    // byte freed pays for `generation` without growing the entry. The size
-    // matters beyond memory: it divides into ENTRIES_PER_MB, so a wider entry
-    // would change the table's length, its index distribution, and therefore
-    // every node count the search produces.
+    // int16 because the widest score the search can produce is INF (32 000),
+    // and scoreToTT adds at most one ply's worth (64) to a mate score, giving
+    // 32 064 against a ceiling of 32 767. Anything wider than this would cost
+    // two bytes the entry does not have.
+    int16_t score = 0;
+    // The best move, packed (see packMove). 0 is "none".
+    uint16_t bestMove = 0;
+    // depth is a search depth, 0..64, so it does not need 32 bits.
     int8_t depth = -1;
     // Which search stored this. See shouldReplace: an entry left over from an
     // earlier search is evictable regardless of how deep it was.
     uint8_t generation = 0;
-    Move bestMove;
 
-    enum NodeType {
+    enum NodeType : uint8_t {
         EXACT,       // Exact score (PV node)
         LOWER_BOUND, // Alpha cutoff (fail-high)
         UPPER_BOUND  // Beta cutoff (fail-low)
-    } nodeType = EXACT;
-    
+    };
+    uint8_t nodeType = EXACT;
+
     // Check if this entry is valid for the given hash
     bool isValid(uint64_t searchHash) const {
         return hash == searchHash && depth >= 0;
     }
 };
+
+static_assert(sizeof(TTEntry) == 16, "TTEntry must stay 16 bytes: it sets "
+                                     "ENTRIES_PER_MB and every node count");
 
 // Scores with absolute value above this are mate scores (MATE_SCORE - ply).
 // Mate scores are stored in the table relative to the entry's node (distance
