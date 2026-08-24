@@ -18,8 +18,8 @@ bool TranspositionTable::probe(uint64_t hash, int depth, int ply, int alpha, int
     // We have a hash match
     hits++;
     // Always return the best move if available
-    if (entry.bestMove.from != -1) {
-        bestMove = entry.bestMove;
+    if (entry.bestMove != 0) {
+        bestMove = unpackMove(entry.bestMove);
     }
     // Check if we can use the score (bound checks run on the root-relative
     // score, so mate scores are converted before comparing to the window)
@@ -50,9 +50,9 @@ void TranspositionTable::store(uint64_t hash, int depth, int ply, int score, Mov
     newEntry.hash = hash;
     newEntry.depth = (int8_t)depth;
     newEntry.generation = generation;
-    newEntry.score = scoreToTT(score, ply);
-    newEntry.bestMove = bestMove;
-    newEntry.nodeType = nodeType;
+    newEntry.score = (int16_t)scoreToTT(score, ply);
+    newEntry.bestMove = packMove(bestMove);
+    newEntry.nodeType = (uint8_t)nodeType;
     
     // Check if we should replace the existing entry
     if (entry.hash != 0 && entry.hash != hash) {

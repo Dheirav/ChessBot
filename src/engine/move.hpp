@@ -1,5 +1,6 @@
 #pragma once
 #include "piece.hpp"
+#include <cstdint>
 #include <vector>
 #include <string>
 
@@ -47,6 +48,59 @@ struct Move {
 };
 
 using MoveList = std::vector<Move>;
+
+// A move squeezed into 16 bits, for the transposition table and nothing else.
+//
+// The table holds millions of these and its entry size divides into
+// ENTRIES_PER_MB, so a 20-byte Move in every slot is the difference between a
+// table that outlives a search and one that is recycled through it. Measured
+// 2026-08-25: the median search was 9.9M nodes against 6.7M slots.
+//
+// Only the fields `operator==` compares survive the round trip — from, to,
+// flag, and the promotion type. That is not a compromise: the sole use of an
+// unpacked move is `std::find` against a freshly generated list, which
+// supplies the moved and captured pieces itself.
+//
+// Layout: from in bits 0-5, to in 6-11, and a 3-bit code in 12-14 that folds
+// the flag and the promotion type together. It fits in three bits only
+// because movegen tags *every* promotion `PROMOTION`, capture or not
+// (`movegen.cpp:150`), so the four promotion pieces can take codes 4-7 without
+// a separate capture bit.
+//
+// 0 means "no move". `from == to == 0` is not a legal move, so the sentinel
+// cannot collide with a real one.
+inline uint16_t packMove(const Move& m) {
+    if (m.from < 0 || m.to < 0) return 0;
+    unsigned code;
+    switch (m.flag) {
+        case CAPTURE:    code = 1; break;
+        case EN_PASSANT: code = 2; break;
+        case CASTLING:   code = 3; break;
+        case PROMOTION:  code = 4u + (unsigned(m.promotionPiece.type()) - unsigned(KNIGHT)); break;
+        default:         code = 0; break;
+    }
+    return uint16_t(unsigned(m.from) | (unsigned(m.to) << 6) | (code << 12));
+}
+
+inline Move unpackMove(uint16_t packed) {
+    if (packed == 0) return Move();
+    Move m;
+    m.from = int(packed & 63u);
+    m.to   = int((packed >> 6) & 63u);
+    const unsigned code = (packed >> 12) & 7u;
+    if (code >= 4u) {
+        m.flag = PROMOTION;
+        // The colour is arbitrary: operator== compares promotionPiece.type()
+        // and nothing else ever reads an unpacked move's pieces.
+        m.promotionPiece = Piece(COLOR_WHITE, PieceType(unsigned(KNIGHT) + code - 4u));
+    } else {
+        m.flag = code == 1u ? CAPTURE
+               : code == 2u ? EN_PASSANT
+               : code == 3u ? CASTLING
+                            : NORMAL;
+    }
+    return m;
+}
 
 // UCI long algebraic: "e2e4", "e7e8q".
 //
