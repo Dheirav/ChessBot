@@ -38,3 +38,9 @@ games/
 tools/*.o
 tools/*.d
 tools/review
+tools/tune
+# Generated Texel corpora. Regenerate with tools/texel-corpus.py --split; they
+# are derived from the game archive, which lives outside this repo, so a
+# committed copy would be a snapshot claiming to be the corpus.
+tests/data/texel.epd
+tests/data/texel.test.epd

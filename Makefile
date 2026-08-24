@@ -225,6 +225,23 @@ tools/review: tools/review.o $(ENGINE_OBJ)
 
 review: tools/review
 
+# Texel tuning (tools/tune.cpp). It needs a *different* evaluation.o -- one
+# built with -DEVAL_TUNING so the EvalWeights constants become mutable globals
+# it can perturb between passes. That object is built into build/tune/ so it can
+# never be picked up by the engine or the tests: a shipped binary with runtime
+# weights would silently lose the constant folding the evaluation depends on.
+TUNE_EVAL_OBJ = build/tune/evaluation.o
+TUNE_ENGINE_OBJ = $(filter-out src/engine/evaluation.o,$(ENGINE_OBJ)) $(TUNE_EVAL_OBJ)
+
+$(TUNE_EVAL_OBJ): src/engine/evaluation.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -DEVAL_TUNING -c $< -o $@
+
+tools/tune: tools/tune.o $(TUNE_ENGINE_OBJ)
+	$(CXX) $^ -o $@ $(LDFLAGS)
+
+tune: tools/tune
+
 # --- Profiling ---
 #
 # gprof rather than perf: perf is unavailable under WSL, which is why gmon.out

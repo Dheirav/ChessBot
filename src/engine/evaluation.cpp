@@ -78,32 +78,44 @@ const int threatBonus[] = { 0, 0, 10, 25, 30, 50, 100 };
 // convenience -- inlining the Piece accessors alone was 1.87x (PLAN 5.6). The
 // tuner gets its own build instead; these stay constants in the engine that
 // ships.
+//
+// `-DEVAL_TUNING` is that other build, used only by `tools/tune`: it drops the
+// constexpr so the weights become ordinary mutable globals the tuner can
+// perturb between passes. Nothing links both. If you find yourself wanting
+// EVAL_TUNING in a shipped binary, the answer is to write the tuned numbers
+// back here as constants and rebuild.
 // ---------------------------------------------------------------------------
+#ifdef EVAL_TUNING
+  #define EVAL_WEIGHT int
+#else
+  #define EVAL_WEIGHT constexpr int
+#endif
+
 namespace EvalWeights {
 
 // Pawn structure
-constexpr int DOUBLED_PAWN    = -10;
-constexpr int ISOLATED_PAWN   = -10;
-constexpr int BACKWARD_PAWN   =  -8;
-constexpr int CONNECTED_PAWN  =   5;
-constexpr int PASSED_PAWN     =  20;
-constexpr int PAWN_CHAIN      =   5;
+EVAL_WEIGHT DOUBLED_PAWN    = -10;
+EVAL_WEIGHT ISOLATED_PAWN   = -10;
+EVAL_WEIGHT BACKWARD_PAWN   =  -8;
+EVAL_WEIGHT CONNECTED_PAWN  =   5;
+EVAL_WEIGHT PASSED_PAWN     =  20;
+EVAL_WEIGHT PAWN_CHAIN      =   5;
 
 // Pieces
-constexpr int BISHOP_PAIR     =  50;
-constexpr int MOBILITY        =   2;
-constexpr int ROOK_OPEN_FILE  =  10;
-constexpr int ROOK_SEMI_OPEN  =   5;
-constexpr int ROOK_ON_7TH     =  10;
-constexpr int OUTPOST         =  10;
-constexpr int TRAPPED_PIECE   =   5;
-constexpr int UNDEFENDED      =   5;
+EVAL_WEIGHT BISHOP_PAIR     =  50;
+EVAL_WEIGHT MOBILITY        =   2;
+EVAL_WEIGHT ROOK_OPEN_FILE  =  10;
+EVAL_WEIGHT ROOK_SEMI_OPEN  =   5;
+EVAL_WEIGHT ROOK_ON_7TH     =  10;
+EVAL_WEIGHT OUTPOST         =  10;
+EVAL_WEIGHT TRAPPED_PIECE   =   5;
+EVAL_WEIGHT UNDEFENDED      =   5;
 
 // King and squares
-constexpr int CENTRE_CONTROL  =   5;
-constexpr int KING_CENTRE_DIST =  4;   // charged per square from the centre
-constexpr int KING_PAWN_SHIELD =  8;   // per shield pawn, back rank only
-constexpr int KING_ACTIVITY    =  5;   // endgame only
+EVAL_WEIGHT CENTRE_CONTROL  =   5;
+EVAL_WEIGHT KING_CENTRE_DIST =  4;   // charged per square from the centre
+EVAL_WEIGHT KING_PAWN_SHIELD =  8;   // per shield pawn, back rank only
+EVAL_WEIGHT KING_ACTIVITY    =  5;   // endgame only
 
 }  // namespace EvalWeights
 
