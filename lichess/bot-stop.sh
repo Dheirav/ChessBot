@@ -42,6 +42,7 @@
 set -uo pipefail
 
 ARCHIVE="${ARCHIVE:-/home/dheirav/Code/lichess-bot/game_records}"
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CLEAR_POLLS=3        # one clear poll is not a gap; games can follow fast
 SURVIVE_SECS=10      # how long to watch the engine after a graceful signal
 MODE="" TARGET="" QUIET=0
@@ -112,6 +113,25 @@ state() {
     fi
     printf '  game now   %s\n' "$(gamelive && echo 'in progress' || echo 'none')"
     printf '  games      %d archived\n' "$n"
+
+    # Search speed, because nothing else watches it and a slow machine is
+    # invisible in the results it produces. Twenty-one hours at a third speed
+    # once got written up as a pruning regression -- BUGS.md 16. This is the
+    # place it gets seen, since --status is what anyone checks before touching
+    # the bot.
+    #
+    # nps-health.py exits non-zero when the latest day is degraded, which is
+    # information and must not be an error here: this function runs inside the
+    # stop's ten-second wait loops, and a stop that fell over because the
+    # machine was slow would fail exactly when it is most needed. Status is
+    # swallowed and the function always returns 0.
+    if [ -x "$REPO/tools/nps-health.py" ]; then
+        speed="$("$REPO/tools/nps-health.py" --quiet 2>/dev/null)" || true
+        if [ -n "${speed:-}" ]; then
+            printf '  speed      %s\n' "$speed"
+        fi
+    fi
+    return 0
 }
 
 menu() {
