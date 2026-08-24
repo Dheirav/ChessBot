@@ -428,3 +428,57 @@ The cliff at ~2100 is exactly where it was at the 08-15 reading. **Two clean
 machine fixes and a +57 Elo pruning pair have not moved it**, which is the
 argument for `BUGS.md` 13 being the real ceiling: the evaluation cannot see
 compensation, and opponents above 2100 are the ones able to offer it.
+
+---
+
+## Move-quality profile — 2026-08-24, 282 games
+
+The reading `TODO.md` §1 has demanded after every ship, run on a healthy
+machine with the bot down. Stockfish 14 at depth 14, split at the machine fix.
+
+**Whole archive to 08-23 14:00 UTC** — 248 games, 11 313 of the bot's moves,
+accuracy **94.8%**, avg cp loss 19.9:
+
+| opponent | games | score | accuracy | avg cp |
+|---|---|---|---|---|
+| under 1500 | 38 | 99% | 96.2% | 14.4 |
+| 1500-1900 | 100 | 90% | 95.4% | 17.3 |
+| 1900-2100 | 43 | 78% | 94.7% | 20.3 |
+| 2100-2300 | 48 | 42% | **94.0%** | 22.8 |
+| 2300+ | 19 | 8% | 94.3% | 25.3 |
+
+**Since the machine fix** — 31 games, 1 865 moves, accuracy 95.1%, cp 18.5. But
+2100-2300 reads **94.2% / 22.6 cp / 39%**, which is the same band on the same
+build before it. **The machine fix restored speed, not quality where it
+matters.** That is the correct expectation — `BUGS.md` 16 cost a day of games,
+not a property of the engine — and it is worth stating because the temptation
+after a fix is to read the next good number as its consequence.
+
+### The shape, which has not changed since 2026-08-15
+
+**2.2 accuracy points separate 99% scoring from 8% scoring.** 96.2 → 94.0. The
+deficit is not catastrophes: 28 blunders in 11 313 moves, 0.25%. It is a small
+uniform quality gap that chess compounds into a total result. Every plan that
+proposes to fix one class of position is arguing against this table.
+
+### Term attribution, and the 6.1 re-run
+
+`ROADMAP.md` 6.3 is closed on this data — blindness 4.3%, `threats` exonerated,
+details there rather than repeated here. The number that matters:
+
+| term | mentioned | median | p90 | **leads** |
+|---|---|---|---|---|
+| material | 382 | 162 | 535 | **351 of 720** |
+| threats | 454 | 59 | 155 | 168 |
+| piece placement | 352 | 40 | 80 | 101 |
+| mobility | 223 | 34 | 74 | 38 |
+
+**`material` leads half of every criticised move at a p90 of 535 centipawns**,
+in every band, in both halves of the split. Depth refutes a bad material grab
+regardless of what the evaluation understands, so this is the argument for
+Phase 7 search work over any further evaluation term.
+
+Caveat carried from `BUGS.md` 6: play is deterministic and 32% of the archive is
+against sixteen repeated opponents, so these samples are worth less than their
+counts. And accuracy is a function of the analysing engine and depth — these
+numbers compare this engine to itself and to nothing else.

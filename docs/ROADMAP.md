@@ -250,12 +250,48 @@ Two habits paid for themselves here and are worth reusing:
   the effect: chasing ±10 on a 178-Elo difference is buying nothing at four
   times the price.
 
-**6.3 Add the terms a blind-spot list demands** — **deferred; there is no such
-list.** 6.1 was supposed to produce it and returned four moves, one of which is
-search noise. Do not add terms speculatively — that is how the current
-evaluation acquired 25 of them, several of which were wrong for months. Re-run
-6.1 after 6.2 lands; a corrected `threats` may expose blind spots it was
-previously masking.
+**6.3 Add the terms a blind-spot list demands** — **CLOSED 2026-08-24,
+negative. There is no such list, and now it has been looked for twice.**
+
+6.1 was supposed to produce it and returned four moves, one of which was search
+noise. The standing instruction here was to re-run 6.1 once 6.2 landed, on the
+theory that a corrected `threats` might expose blind spots it had been masking.
+That has now been done, over 282 games and 13 178 of the bot's own moves —
+five times 6.1's evidence — and **the theory is wrong**:
+
+| band | criticised | no term accounts | `threats` leads | `material` leads |
+|---|---|---|---|---|
+| under 1500 | 77 | 1 | 8 (10%) | 52 (68%) |
+| 1500-1900 | 242 | 7 | 44 (18%) | 155 (64%) |
+| 1900-2100 | 149 | 9 | 28 (19%) | 90 (60%) |
+| 2100-2300 | 147 | 8 | 30 (20%) | 71 (48%) |
+| 2300+ | 36 | 3 | 8 (22%) | 20 (56%) |
+
+**Blindness is 28 of 651 — 4.3%, against 6.1's original 3%.** Five times the
+moves and the number did not move. The evaluation's terms move on ~96% of its
+own errors, so there is nothing here for a new term to be *for*. **Do not add
+terms speculatively**; that is how this evaluation acquired 25 of them, several
+wrong for months, and 6.4 is what happens when one is added on a theory.
+
+**`threats` is also no longer the outlier that motivated the re-run.** It is
+*mentioned* in 63% of criticised moves, which is what first suggested it — but
+mentioning and leading are different, and it leads only 18-20%, flat across
+bands. Its p90 is 138-225 against `material`'s 535. Before 6.2 it swung ±830 at
+p90, **more than material**. 6.2 already fixed it, and the re-run's real service
+is confirming that rather than finding a new fault.
+
+The one unexplained signal is the 2300+ row — `threats` median 100 against ~55
+elsewhere — over 36 criticised moves in 19 games. Too thin to act on; note it
+and let the sample grow.
+
+**What the sweep does say, in the column nobody was watching.** `material`
+leads ~60% of every error at a p90 of 535 centipawns, in every band. Those are
+depth-sensitive errors: a deeper search refutes a bad material grab whether or
+not the evaluation understands compensation. **That is an argument for Phase 7
+search work — Lazy SMP first, on a single-threaded engine holding a 4-CPU
+machine — and not for another evaluation term.** It is the same conclusion 6.1
+reached in 2026-08-15's smaller sweep ("an argument for tuning weights, not for
+hunting blunders"), arrived at from the other direction.
 
 ---
 
@@ -399,7 +435,7 @@ this engine today.
 
 | lever | measured state today | prior | how it gets gated |
 |---|---|---|---|
-| **Lazy SMP** | **single-threaded** (`std::thread` appears once, for the UCI search thread) on a **16-core** machine | **+200–280** | node-limited gates say nothing about threads; needs `--tc`, and the comparison is against itself at one thread |
+| **Lazy SMP** | **single-threaded** (`std::thread` appears once, for the UCI search thread). Host is 8C/16T, but **`.wslconfig` gives WSL 4 CPUs** — verified 2026-08-24, `nproc` = 4 | **+200–280** at ~16 threads; **at 4, expect far less** — raise the cap before pricing this | node-limited gates say nothing about threads; needs `--tc`, and the comparison is against itself at one thread |
 | **NNUE evaluation** | hand-crafted, material-dominated: prices a material edge at −42cp where truth is −586, and ~290cp of that is addressable (`tests/evalerror`) | **+200–400** | self-play gate, plus `tests/evalerror` as the cheap pre-filter |
 | **Search pruning suite** | futility, razoring, late-move pruning, singular extensions and probcut are **all absent** — grep finds none of them | **+150–300** | one `shard-gate.sh` each, exactly as PLAN 3.4 already describes |
 | **Ponder** | absent; `lichess/config.yml` sets `ponder: false` because the engine has no support | +30–50 | rated games, not a gate — it buys the opponent's clock |

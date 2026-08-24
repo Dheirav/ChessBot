@@ -301,7 +301,7 @@ since 2026-08-21 `tests/evalerror`, `tools/eval-corpus.py` and
 [+6, +79] with zero forfeits over 200 games at `--tc 120+1.33`, and is shipped.
 The Lichess bot is playing (see *In flight* above), so anything that wants the
 machine — a `--tc` gate, `tools/review-archive.sh` — either waits for it or
-takes a share of the 16 cores away from rated games.
+takes a share of the **four** CPUs away from rated games — `nproc` is 4, not 16 (`.wslconfig` `processors=4`), so concurrent work starves the bot far faster than the old figure suggested.
 
 Logs from finished gates are kept; re-pool any with
 `./tests/pool-shards.sh <dir>/`.
@@ -508,7 +508,7 @@ in the order I would take it:
    on it will mean something.
 4. **`ROADMAP.md` Phase 7 — the road to 3000.** Written 2026-08-22 after an
    audit of this list found four dead items in it. The engine is 2130 and
-   single-threaded on a 16-core machine, has no futility pruning, razoring,
+   single-threaded on a machine that gives WSL four CPUs, has no futility pruning, razoring,
    late-move pruning, singular extensions or probcut, no ponder, no book and no
    tablebases. Those absences are measured; the Elo attached to each of them in
    Phase 7 is a prior from general practice and has to be earned here. Order is

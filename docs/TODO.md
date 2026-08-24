@@ -83,9 +83,9 @@ whole queue below is worth.
 
 Two things fall out of it and are cheap:
 
-- **Watch nps in live games.** Nothing in the suite does. One grep over the
-  bot's logs found this; `BUGS.md` 16 carries it. Wire it into whatever gets
-  looked at routinely.
+- ~~**Watch nps in live games.**~~ **Done 2026-08-24.** `tools/nps-health.py`,
+  and `lichess/bot-stop.sh --status` prints its one-line form, so it is seen
+  before anyone touches the bot rather than only when someone remembers.
 - **Re-run the `razoring` + `revfutility` field test.** The 34-game window in
   `MEASUREMENTS.md`'s fifth reading is void — it was taken inside the slow
   window. The sixth reading says so; the measurement is still owed.
@@ -106,7 +106,7 @@ advice.
 | **Re-measure the clock on Lichess** | — | **done 2026-08-21** | 19 rated games at 900+10: **zero time forfeits, lowest clock in any game 41 s**, and that only in two 90-plus-move games against 2100+ opposition. Everything else finished with two minutes or more in hand. The 535-seconds-unused pattern is gone at the control that matters. |
 | **King safety** (`ROADMAP.md` 6.4) | — | **closed, negative — reopened once and closed again** | Four gates, 10 080 games: +1.3, +2.2, −11.0, −216.9. The gauntlet this row demanded was built on 2026-08-21 (`tests/gauntlet.sh`) and the term was rebuilt with it: **−33.1 Elo [−43.2, −23.0]** over 3 360 games, `shard-20260821-220901/`. Self-play saw the harm immediately, so the "self-play may be unable to see it" caveat did **not** hold here. `BUGS.md` 13 has the failed hypotheses and the position that defeated both. |
 | **6.2 remainder: the general tune** | L | nothing | Texel-style, over an evaluation whose largest term has stopped shouting. Position set exists: the game archive plus `evalref`'s 23 603 positions. |
-| **Re-run 6.1** | S | 6.2 landing | A corrected `threats` may expose blind spots it was masking. `ROADMAP.md` 6.3. |
+| **Re-run 6.1** | — | **done 2026-08-24, negative** | Blindness **4.3%** over 651 criticised moves (6.1's own figure was 3% over 158). A corrected `threats` exposed nothing; it leads 18-20% of errors, flat across bands, p90 138-225 against `material`'s 535. `ROADMAP.md` 6.3 is closed with it. The finding is in the column nobody was watching: **`material` leads ~60% of errors in every band**, which is depth, not a missing term. |
 | **`deltapruning`** | — | **closed 2026-08-21, stays off** | Re-measured on the current build: **+0.9 Elo [−5.8, +7.7]** over 3 360 games, `shard-20260821-112153/`. The 2026-08-14 +7.1 was a pre-6.2 engine and was deliberately **not** pooled with it. `SEED_BASE` now exists on `shard-gate.sh` for the general case. |
 | **PLAN 3.5 — IID** | — | **gated 2026-08-18, stays off** | **−0.1 Elo [−4.9, +4.7]** over 3 360 games — the tightest null in the file. Iterative deepening already fills the table at the depths IID fires at. Toggle and reasoning on `search.hpp`. |
 | **PLAN 3.4 — futility / razoring** | — | **both accepted 2026-08-22** | `razoring` **+39.1 [+28.4, +49.9]**, then `revfutility` **+18.4 [+7.8, +29.1]** measured *on top of* it. Both on by default; bench 1,086,693 → **793,823** (−27.0%) with no best move changed on any of the nine positions. The margins were sized off the evaluation's measured error (median 125cp, 90th 407cp) rather than textbook 100–150 — 3.1 lost 50 Elo making the same bet inside the evaluation's own noise. |
@@ -122,7 +122,7 @@ practice, not measured here**; the middle column is measured.
 
 | item | measured state today | prior | size |
 |---|---|---|---|
-| **Lazy SMP** | single-threaded, on a 16-core machine | +200–280 | L |
+| **Lazy SMP** | single-threaded; the host is 8 cores / 16 threads but **`.wslconfig` caps WSL at 4** | +200–280 *(assumes ~16; at 4 threads expect a fraction)* | L |
 | **NNUE evaluation** | hand-crafted, material-dominated; ~290cp of addressable static error | +200–400 | XL |
 | **Search pruning suite** — futility, razoring, LMP, singular, probcut | **none of them exist** | +150–300 | M each |
 | **Ponder** | absent; `config.yml` says the engine has no support | +30–50 | M |

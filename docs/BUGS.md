@@ -1218,17 +1218,26 @@ chess result: twice as a forfeit misattributed to the clock and to a restart
 **Environmental faults are silent, and they arrive wearing the costume of the
 thing you were measuring.**
 
-### The check that would have caught it
+### The check that would have caught it — now exists, 2026-08-24
 
-Nothing in the suite watches nps in live games. `tests/bench` measures speed on
-demand and passes, because it is run on a quiet machine when someone thinks to
-run it. The instrument that found this — median nps per day out of the bot's
-own logs — costs one grep and did not exist:
+Nothing in the suite watched nps in live games. `tests/bench` measures speed on
+demand and passed throughout, because it is run on a quiet machine when someone
+thinks to run it.
 
-```bash
-grep -hoE "nps [0-9]+ time [0-9]{4,}" ~/Code/lichess-bot/lichess_bot_auto_logs/lichess-bot.log* \
-  | awk '{print $2}' | sort -n | awk '{a[NR]=$1} END{print "median", a[int(NR/2)]/1000, "knps"}'
+`tools/nps-health.py` is the missing instrument: median nps per day out of the
+bot's own logs, with the baseline computed as the median of the daily medians
+so it adapts to the hardware instead of hard-coding a number that will rot.
+
 ```
+  2026-08-22  n= 2840    691.9
+  2026-08-23  n= 3028    257.5  <-- DEGRADED
+  2026-08-24  n= 3429    796.2
+```
+
+`--quiet` prints one line and exits non-zero when the latest day is below 60%
+of baseline, and **`lichess/bot-stop.sh --status` now prints that line** — the
+one screen anybody looks at before touching the bot. A tool nobody runs would
+have failed exactly the way the missing check did.
 
 **Read it before trusting any reading taken from real games.** A band table
 does not know how fast the engine was when it played.
