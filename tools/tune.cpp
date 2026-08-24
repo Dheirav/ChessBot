@@ -92,8 +92,23 @@ static std::vector<Knob> knobs() {
 
 struct Sample {
     Board board;
-    double result;   // 1.0, 0.5, 0.0 -- White's point of view
+    double result;   // target win probability, White's point of view
 };
+
+// A label is either a game result ("1.0"/"0.5"/"0.0") or a Stockfish score in
+// centipawns ("-83"). The decimal point tells them apart, which is why
+// texel-corpus.py writes results with one and sf-label.py writes integers.
+//
+// Centipawns are mapped to a probability through the *conventional* curve with
+// a fixed scale, not through the fitted K. K is what converts THIS evaluation's
+// centipawns into probabilities; reusing it on the target would let the tuner
+// move the target and the prediction together and call the gap closed.
+static double labelToProbability(const std::string& text) {
+    const bool isResult = text.find('.') != std::string::npos;
+    const double v = std::atof(text.c_str());
+    if (isResult) return v;
+    return 1.0 / (1.0 + std::pow(10.0, -v / 400.0));
+}
 
 static bool loadCorpus(const char* path, std::vector<Sample>& out) {
     std::ifstream in(path);
@@ -103,7 +118,9 @@ static bool loadCorpus(const char* path, std::vector<Sample>& out) {
         const size_t tag = line.find(" c9 \"");
         if (tag == std::string::npos) continue;
         const std::string fen = line.substr(0, tag);
-        const double result = std::atof(line.c_str() + tag + 5);
+        const size_t close = line.find('"', tag + 5);
+        if (close == std::string::npos) continue;
+        const double result = labelToProbability(line.substr(tag + 5, close - tag - 5));
         Sample s;
         // setFromFEN, not parseFEN -- see the header comment.
         if (!s.board.setFromFEN(fen)) continue;
