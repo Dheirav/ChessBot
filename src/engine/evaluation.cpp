@@ -60,6 +60,53 @@ const int pieceValues[] = { 0, 20000, 100, 325, 335, 525, 950 };
 // so any value here would be unreachable.
 const int threatBonus[] = { 0, 0, 10, 25, 30, 50, 100 };
 
+// ---------------------------------------------------------------------------
+// Term weights, named so they can be addressed.
+//
+// Every one of these was an inline literal until 2026-08-25 -- `50` inside an
+// if, `-10 *` in the pawn-structure block, `* 5` at the end of a king-activity
+// expression. A Texel tune has to *name* what it optimises, so this exists to
+// make the weights reachable before anything tries to move them.
+//
+// **No value changed when they were extracted.** The bench signature is the
+// proof and it must read 793,823; if it moves, this refactor is wrong and not
+// the tune. Nothing here has been tuned yet.
+//
+// They are `constexpr` rather than mutable on purpose. Making them runtime
+// variables so a tuner could perturb them in-process would cost the constant
+// folding this evaluation depends on, and speed here is worth more than the
+// convenience -- inlining the Piece accessors alone was 1.87x (PLAN 5.6). The
+// tuner gets its own build instead; these stay constants in the engine that
+// ships.
+// ---------------------------------------------------------------------------
+namespace EvalWeights {
+
+// Pawn structure
+constexpr int DOUBLED_PAWN    = -10;
+constexpr int ISOLATED_PAWN   = -10;
+constexpr int BACKWARD_PAWN   =  -8;
+constexpr int CONNECTED_PAWN  =   5;
+constexpr int PASSED_PAWN     =  20;
+constexpr int PAWN_CHAIN      =   5;
+
+// Pieces
+constexpr int BISHOP_PAIR     =  50;
+constexpr int MOBILITY        =   2;
+constexpr int ROOK_OPEN_FILE  =  10;
+constexpr int ROOK_SEMI_OPEN  =   5;
+constexpr int ROOK_ON_7TH     =  10;
+constexpr int OUTPOST         =  10;
+constexpr int TRAPPED_PIECE   =   5;
+constexpr int UNDEFENDED      =   5;
+
+// King and squares
+constexpr int CENTRE_CONTROL  =   5;
+constexpr int KING_CENTRE_DIST =  4;   // charged per square from the centre
+constexpr int KING_PAWN_SHIELD =  8;   // per shield pawn, back rank only
+constexpr int KING_ACTIVITY    =  5;   // endgame only
+
+}  // namespace EvalWeights
+
 // There is no penalty here for a piece the opponent can win material on, and
 // the absence is measured rather than an oversight.
 //
@@ -563,20 +610,20 @@ EvalDetails evaluate_details(const Board& board) {
     // Bishop pair
     if (whiteBishopCount >= 2) {
         whiteBishopPair = 1;
-        bishopPairBonus += 50;
+        bishopPairBonus += EvalWeights::BISHOP_PAIR;
     }
     if (blackBishopCount >= 2) {
         blackBishopPair = 1;
-        bishopPairBonus -= 50;
+        bishopPairBonus -= EvalWeights::BISHOP_PAIR;
     }
 
     // Pawn structure: doubled, isolated, backward, connected, passed pawns and pawn chains
-    doubledPawnPenalty = -10 * (whiteDoubledPawns - blackDoubledPawns);
-    isolatedPawnPenalty = -10 * (whiteIsolatedPawns - blackIsolatedPawns);
-    backwardPawnPenalty = -8 * (whiteBackwardPawns - blackBackwardPawns);
-    connectedPawnBonus = 5 * (whiteConnectedPawns - blackConnectedPawns);
-    passedPawnBonus = 20 * (whitePassedPawns - blackPassedPawns);
-    pawnChainBonus = 5 * (whitePawnChains - blackPawnChains);
+    doubledPawnPenalty = EvalWeights::DOUBLED_PAWN * (whiteDoubledPawns - blackDoubledPawns);
+    isolatedPawnPenalty = EvalWeights::ISOLATED_PAWN * (whiteIsolatedPawns - blackIsolatedPawns);
+    backwardPawnPenalty = EvalWeights::BACKWARD_PAWN * (whiteBackwardPawns - blackBackwardPawns);
+    connectedPawnBonus = EvalWeights::CONNECTED_PAWN * (whiteConnectedPawns - blackConnectedPawns);
+    passedPawnBonus = EvalWeights::PASSED_PAWN * (whitePassedPawns - blackPassedPawns);
+    pawnChainBonus = EvalWeights::PAWN_CHAIN * (whitePawnChains - blackPawnChains);
 
     // Mobility
     // King squares were located during the piece scan above (index = rank*8 + file).
@@ -584,7 +631,7 @@ EvalDetails evaluate_details(const Board& board) {
     int blackKingSq = (blackKingFile >= 0) ? blackKingRank * 8 + blackKingFile : -1;
     whiteMobility = countMobility(board, COLOR_WHITE, whiteKingSq);
     blackMobility = countMobility(board, COLOR_BLACK, blackKingSq);
-    mobilityScore = 2 * (whiteMobility - blackMobility);
+    mobilityScore = EvalWeights::MOBILITY * (whiteMobility - blackMobility);
 
     // King safety.
     //
@@ -597,26 +644,26 @@ EvalDetails evaluate_details(const Board& board) {
     // ROADMAP.md 6.4 and the note at the top of this file.
     if (whiteKingFile != -1 && whiteKingRank != -1) {
         int distFromCenter = centreDistance(whiteKingFile, whiteKingRank);
-        whiteKingSafety = -distFromCenter * 4; // Reduced from 5 to 4
+        whiteKingSafety = -distFromCenter * EvalWeights::KING_CENTRE_DIST;
         if (whiteKingRank == 7) {
             for (int df = -1; df <= 1; ++df) {
                 int f = whiteKingFile + df;
                 if (f >= 0 && f < 8) {
                     int idx = 6 * 8 + f;
-                    if (board.squares[idx].type() == PAWN && board.squares[idx].color() == COLOR_WHITE) whiteKingSafety += 8; // Reduced from 10 to 8
+                    if (board.squares[idx].type() == PAWN && board.squares[idx].color() == COLOR_WHITE) whiteKingSafety += EvalWeights::KING_PAWN_SHIELD;
                 }
             }
         }
     }
     if (blackKingFile != -1 && blackKingRank != -1) {
         int distFromCenter = centreDistance(blackKingFile, blackKingRank);
-        blackKingSafety = -distFromCenter * 4; // Reduced from 5 to 4
+        blackKingSafety = -distFromCenter * EvalWeights::KING_CENTRE_DIST;
         if (blackKingRank == 0) {
             for (int df = -1; df <= 1; ++df) {
                 int f = blackKingFile + df;
                 if (f >= 0 && f < 8) {
                     int idx = 1 * 8 + f;
-                    if (board.squares[idx].type() == PAWN && board.squares[idx].color() == COLOR_BLACK) blackKingSafety += 8; // Reduced from 10 to 8
+                    if (board.squares[idx].type() == PAWN && board.squares[idx].color() == COLOR_BLACK) blackKingSafety += EvalWeights::KING_PAWN_SHIELD;
                 }
             }
         }
@@ -628,8 +675,8 @@ EvalDetails evaluate_details(const Board& board) {
     for (int i = 0; i < 4; ++i) {
         const Piece& p = board.squares[centerSquares[i]];
         if (p.type() != NONE) {
-            if (p.color() == COLOR_WHITE) centerControlScore += 5;
-            else centerControlScore -= 5;
+            if (p.color() == COLOR_WHITE) centerControlScore += EvalWeights::CENTRE_CONTROL;
+            else centerControlScore -= EvalWeights::CENTRE_CONTROL;
         }
     }
 
@@ -637,9 +684,9 @@ EvalDetails evaluate_details(const Board& board) {
     // computed in the piece scan. (The previous version used a single net
     // pawn count per file, which scored a file with one pawn of each color
     // as fully open.)
-    rooksOpenFileBonus = 10 * (whiteRooksOpenFile - blackRooksOpenFile);
-    rooksSemiOpenFileBonus = 5 * (whiteRooksSemiOpenFile - blackRooksSemiOpenFile);
-    rooks7thRankBonus = 10 * (whiteRooks7th - blackRooks7th);
+    rooksOpenFileBonus = EvalWeights::ROOK_OPEN_FILE * (whiteRooksOpenFile - blackRooksOpenFile);
+    rooksSemiOpenFileBonus = EvalWeights::ROOK_SEMI_OPEN * (whiteRooksSemiOpenFile - blackRooksSemiOpenFile);
+    rooks7thRankBonus = EvalWeights::ROOK_ON_7TH * (whiteRooks7th - blackRooks7th);
 
     // Outposts
     for (int i = 0; i < 64; ++i) {
@@ -649,12 +696,12 @@ EvalDetails evaluate_details(const Board& board) {
             if (p.color() == COLOR_WHITE && rank <= 3) {
                 if ((file > 0 && board.squares[i+7].type() == PAWN && board.squares[i+7].color() == COLOR_WHITE) ||
                     (file < 7 && board.squares[i+9].type() == PAWN && board.squares[i+9].color() == COLOR_WHITE))
-                    outpostBonus += 10;
+                    outpostBonus += EvalWeights::OUTPOST;
             }
             if (p.color() == COLOR_BLACK && rank >= 4) {
                 if ((file > 0 && board.squares[i-9].type() == PAWN && board.squares[i-9].color() == COLOR_BLACK) ||
                     (file < 7 && board.squares[i-7].type() == PAWN && board.squares[i-7].color() == COLOR_BLACK))
-                    outpostBonus -= 10;
+                    outpostBonus -= EvalWeights::OUTPOST;
             }
         }
     }
@@ -663,16 +710,16 @@ EvalDetails evaluate_details(const Board& board) {
     for (int i = 0; i < 64; ++i) {
         const Piece& p = board.squares[i];
         if ((p.type() == ROOK || p.type() == BISHOP) && (i % 8 == 0 || i % 8 == 7 || i / 8 == 0 || i / 8 == 7)) {
-            if (p.color() == COLOR_WHITE) trappedPiecePenalty -= 5;
-            else trappedPiecePenalty += 5;
+            if (p.color() == COLOR_WHITE) trappedPiecePenalty -= EvalWeights::TRAPPED_PIECE;
+            else trappedPiecePenalty += EvalWeights::TRAPPED_PIECE;
         }
     }
 
     // King activity
     int totalMaterial = whiteMaterial + blackMaterial - pieceValues[KING]*2;
     if (totalMaterial < 2000) {
-        if (whiteKingFile != -1 && whiteKingRank != -1) kingActivityBonus += (4 - std::abs(whiteKingFile - 3.5) - std::abs(whiteKingRank - 3.5)) * 5;
-        if (blackKingFile != -1 && blackKingRank != -1) kingActivityBonus -= (4 - std::abs(blackKingFile - 3.5) - std::abs(blackKingRank - 3.5)) * 5;
+        if (whiteKingFile != -1 && whiteKingRank != -1) kingActivityBonus += (4 - std::abs(whiteKingFile - 3.5) - std::abs(whiteKingRank - 3.5)) * EvalWeights::KING_ACTIVITY;
+        if (blackKingFile != -1 && blackKingRank != -1) kingActivityBonus -= (4 - std::abs(blackKingFile - 3.5) - std::abs(blackKingRank - 3.5)) * EvalWeights::KING_ACTIVITY;
     }
 
     // Game phase scaling
@@ -769,7 +816,7 @@ EvalDetails evaluate_details(const Board& board) {
         if (p.color() == COLOR_WHITE) whiteUndefended++;
         else blackUndefended++;
     }
-    undefendedPenalty = -5 * whiteUndefended + 5 * blackUndefended;
+    undefendedPenalty = -EvalWeights::UNDEFENDED * whiteUndefended + EvalWeights::UNDEFENDED * blackUndefended;
 
     // Space advantage
     for (int i = 0; i < 64; ++i) {
