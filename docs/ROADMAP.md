@@ -181,8 +181,53 @@ band-by-band cut divides that out.
 `HANDOFF.md`'s third measurement has the full tables and the caveats — chiefly
 that no 2300+ opponent has been met since, so the ceiling is untested.
 
-*Still open in 6.2:* the general Texel-style tune, now over an evaluation whose
-largest term has stopped shouting.
+*Still open in 6.2:* the general Texel-style tune — **attempted 2026-08-25 and
+blocked on data, not on effort.** The harness exists and works; the archive
+cannot feed it.
+
+`tools/texel-corpus.py` turns the game archive into 14 924 quiet positions
+labelled with their game's result, and `tools/tune` fits the eighteen
+`EvalWeights` scalars to them by coordinate descent on the standard objective.
+Run on everything it looks like a success — E falls 3.4% and every weight
+moves. Run against a quarter of the games held out, **split by game and never
+by position**:
+
+| | |
+|---|---|
+| training error | **−4.41%** |
+| unseen games | **+2.11%** |
+
+Worse than not tuning at all on games it had not seen. The weights confess it
+without needing the statistic: isolated pawns became a bonus, rooks on
+semi-open files a penalty, outposts a penalty, and the king wanted the centre
+in the middlegame.
+
+**The cause is arithmetic.** A game's result is *one* observation however many
+positions carry it, so this corpus holds roughly 200 independent labels for
+eighteen parameters. Published tunes use hundreds of thousands of games. This
+bot has played 283 and produces about thirty a day, so waiting is not a plan.
+
+**The held-out split is the lasting part.** Coordinate descent lowers training
+error by construction — it keeps a change only when it falls — so training
+error can never say whether a tune worked. Without the split this would have
+shipped, and the eighteen numbers above would now be in `evaluation.cpp`.
+
+Two ways past it, both about labels and neither about the tuner:
+
+- **A Stockfish score per position** rather than per game, which turns 14 924
+  correlated samples into 14 924 independent ones. Built and smoke-tested
+  (`tools/sf-label.py`); not yet run, since it is a ~100-minute sweep. It
+  trades the objective away: "predict the result" becomes "agree with
+  Stockfish", whose evaluation encodes structure these terms cannot represent,
+  so part of the target is unreachable by construction.
+- **An external game corpus.** Public quiet-labelled Texel sets run to
+  hundreds of thousands of positions carrying real outcomes, which fixes the
+  sample size *and* keeps the original objective. It means tuning on games this
+  engine did not play, which is ordinary practice and still worth stating.
+
+`tests/evalerror` is the independent check either way: it is scored against
+Stockfish over positions from real games and is not the tuning objective, so a
+tune that improves E and worsens it has fitted a corpus rather than chess.
 
 ### The original target, for the record
 

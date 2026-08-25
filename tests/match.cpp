@@ -36,6 +36,14 @@
 //   -d <depth>      fixed depth for both sides (default 4)
 //   -t <ms>         per-move time budget for both sides; 0 = depth only
 //   -N <nodes>      per-move node budget for both sides; 0 = no node budget
+//   --hash <mb>     transposition table per side, megabytes (default 32).
+//                     The bot plays at 256 (lichess/config.yml), and at 32 the
+//                     engine needs about 8% more nodes to reach a given depth,
+//                     so a gate is measuring a different regime from the one
+//                     that plays -- BUGS.md 17. The default stays 32 so past
+//                     results keep their meaning; this exists so a change
+//                     suspected of interacting with table pressure can be run
+//                     at both sizes instead of the question being invisible.
 //   --tc <b>[+<i>]  a real game clock in seconds, e.g. --tc 60+1. Each side
 //                     gets a clock that runs down and is handed it over UCI, so
 //                     the *engine* decides what to spend; overstepping loses on
@@ -412,6 +420,8 @@ int main(int argc, char** argv) {
     initMoveLookupTables();
 
     int pairs = 25, depth = 4;
+    // 32 MB per side, which is what this harness has always used. See --hash.
+    int hashMb = 32;
     long timeMs = 0;
     TimeControl tc;
     uint64_t nodes = 0, nodesA = 0, nodesB = 0;
@@ -502,6 +512,7 @@ int main(int argc, char** argv) {
                 }
             }
             else if (a == "-N")      nodes = std::strtoull(next(), nullptr, 10);
+            else if (a == "--hash")  hashMb = std::atoi(next());
             else if (a == "--na")    nodesA = std::strtoull(next(), nullptr, 10);
             else if (a == "--nb")    nodesB = std::strtoull(next(), nullptr, 10);
             else if (a == "--da")    depthA = std::atoi(next());
@@ -759,7 +770,8 @@ int main(int argc, char** argv) {
     }
     std::printf("Each opening is played twice with colours swapped.\n\n");
 
-    TranspositionTable ttA(32), ttB(32);
+    if (hashMb < 1) { std::printf("--hash wants at least 1 MB\n"); return 1; }
+    TranspositionTable ttA(hashMb), ttB(hashMb);
     std::mt19937 rng(seed);
     g_searchInfo = captureScore;
 
