@@ -94,28 +94,28 @@ const int threatBonus[] = { 0, 0, 10, 25, 30, 50, 100 };
 namespace EvalWeights {
 
 // Pawn structure
-EVAL_WEIGHT DOUBLED_PAWN    = -10;
-EVAL_WEIGHT ISOLATED_PAWN   = -10;
-EVAL_WEIGHT BACKWARD_PAWN   =  -8;
-EVAL_WEIGHT CONNECTED_PAWN  =   5;
-EVAL_WEIGHT PASSED_PAWN     =  20;
-EVAL_WEIGHT PAWN_CHAIN      =   5;
+EVAL_WEIGHT DOUBLED_PAWN    = -14;
+EVAL_WEIGHT ISOLATED_PAWN   = -2;
+EVAL_WEIGHT BACKWARD_PAWN   =  -11;
+EVAL_WEIGHT CONNECTED_PAWN  =   3;
+EVAL_WEIGHT PASSED_PAWN     =  33;
+EVAL_WEIGHT PAWN_CHAIN      =   6;
 
 // Pieces
-EVAL_WEIGHT BISHOP_PAIR     =  50;
-EVAL_WEIGHT MOBILITY        =   2;
-EVAL_WEIGHT ROOK_OPEN_FILE  =  10;
-EVAL_WEIGHT ROOK_SEMI_OPEN  =   5;
-EVAL_WEIGHT ROOK_ON_7TH     =  10;
-EVAL_WEIGHT OUTPOST         =  10;
-EVAL_WEIGHT TRAPPED_PIECE   =   5;
-EVAL_WEIGHT UNDEFENDED      =   5;
+EVAL_WEIGHT BISHOP_PAIR     =  38;
+EVAL_WEIGHT MOBILITY        =   4;
+EVAL_WEIGHT ROOK_OPEN_FILE  =  19;
+EVAL_WEIGHT ROOK_SEMI_OPEN  =   9;
+EVAL_WEIGHT ROOK_ON_7TH     =  1;
+EVAL_WEIGHT OUTPOST         =  11;
+EVAL_WEIGHT TRAPPED_PIECE   =   3;
+EVAL_WEIGHT UNDEFENDED      =   8;
 
 // King and squares
-EVAL_WEIGHT CENTRE_CONTROL  =   5;
-EVAL_WEIGHT KING_CENTRE_DIST =  4;   // charged per square from the centre
-EVAL_WEIGHT KING_PAWN_SHIELD =  8;   // per shield pawn, back rank only
-EVAL_WEIGHT KING_ACTIVITY    =  5;   // endgame only
+EVAL_WEIGHT CENTRE_CONTROL  =   -11;
+EVAL_WEIGHT KING_CENTRE_DIST =  7;   // charged per square from the centre
+EVAL_WEIGHT KING_PAWN_SHIELD =  5;   // per shield pawn, back rank only
+EVAL_WEIGHT KING_ACTIVITY    =  -5;   // endgame only
 
 }  // namespace EvalWeights
 
