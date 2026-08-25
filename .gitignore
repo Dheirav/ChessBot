@@ -46,3 +46,9 @@ tests/data/texel.epd
 tests/data/texel.test.epd
 tests/data/texel.sf.epd
 tests/data/texel.test.sf.epd
+
+# Public Texel corpus (zurichess, BSD-3-Clause) and its splits. Fetched, not
+# ours, and 40MB: regenerate the splits with awk, refetch the corpus itself.
+tests/data/quiet-labeled.epd
+tests/data/ql.*.epd
+tests/data/own-archive.epd
