@@ -76,7 +76,7 @@ Re-pool any of these with `./tests/pool-shards.sh <dir>/`.
 | `shard-20260822-113235/` | `revfutility` **on top of** `razoring` | **+18.4 [+7.8, +29.1]** — accepted, on by default |
 | `shard-20260825-123915/` | Texel-tuned eval weights, two binaries, seed 20260825 | +22.8 [+9.6, +36.0] |
 | `shard-20260825-161318/` | the same, seed 20260826 | +27.6 [+13.9, +41.3] |
-| `shard-pooled-texel/` | **both of the above pooled, 3 360 games** | **+25.2 [+15.7, +34.7]** — accepted |
+| `shard-pooled-texel/` | **both of the above pooled, 3 360 games** | **+25.2 [+15.7, +34.7]** — accepted per node, **shipped and reverted the same day** (`BUGS.md` 18) |
 
 ### The Texel tune, 2026-08-25 — and why the two halves are poolable
 
@@ -97,9 +97,19 @@ overlapping across almost their whole width. Two independent samples landing on
 each other is what makes this believable; the pooled interval merely makes it
 precise.
 
-**What this number is not.** It is quality *per node*. The gate pays both sides
-100 000 nodes a move and therefore divides out the tuned evaluation's **+15.1%
-node cost** (bench 793 823 → 913 669). At this project's doubling-is-70-Elo rule
-of thumb that is worth roughly −14 Elo on a clock, which would put the net near
-+11 — **inference, not measurement**. Phase 4's evaluation fixes carry exactly
-the same caveat at +20.1% nodes. Only a `--tc` gate can close it.
+**What this number is not, and it cost a revert.** It is quality *per node*. The
+gate pays both sides 100 000 nodes a move and therefore divides out the node
+price entirely.
+
+That price was read off bench at depth 6 (+15.1%) and reasoned about as roughly
+−14 Elo. Measured at the depth the bot actually plays it is **+59% at depth
+10**, worth perhaps −47 — which could make the change a net loss on a clock.
+`BUGS.md` 18 has the full curve. The weights were merged, deployed, and reverted
+the same day; they live on branch `eval-texel-tune`.
+
+**So this row is a true statement about quality per node and not a claim that
+the engine got stronger.** Phase 4's evaluation fixes carry the same caveat at
++20.1% nodes at depth 6, and nobody has measured *their* cost at depth 10
+either. Only a `--tc` gate closes it, and it is now worth its cost: the question
+is a possible forty-Elo swing rather than the eleven that ±36 could not
+resolve.

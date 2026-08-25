@@ -1314,6 +1314,61 @@ of the question being invisible.
 
 ---
 
+## 18. The bench signature measures depth 6; the engine plays at depth 10 — 2026-08-25
+
+**A change's node cost at depth 6 does not predict its node cost where the bot
+lives, and can understate it eightfold.** Found by measuring the Texel-tuned
+evaluation (accepted at **+25.2 Elo [+15.7, +34.7]** on equal nodes, `GATES.md`)
+against the shipped one at each depth, same position, node counts from the
+engine's own `info` lines:
+
+| depth | shipped | tuned | extra | by doubling-is-70-Elo |
+|---|---|---|---|---|
+| **6** — what bench measures | 170 939 | 182 987 | **+7.0%** | ~7 Elo |
+| 7 | 313 828 | 357 908 | +14.0% | ~13 |
+| 8 | 709 301 | 852 225 | +20.1% | ~19 |
+| 9 | 1 383 284 | 1 835 667 | +32.7% | ~29 |
+| **10** — where the bot plays | 3 114 473 | 4 962 280 | **+59.3%** | **~47 Elo** |
+| 11 | 7 693 747 | 10 122 730 | +31.6% | ~28 |
+
+Confirmed across three middlegame positions at depth 10: **+59.3%, +45.9%,
++53.8%**. And `nps` is unchanged between the two builds (680k vs 661k), which is
+what a constants-only change should do — the cost is entirely in nodes-to-depth,
+not in the price of a node.
+
+### Why this cost a revert
+
+The tune was gated, merged and deployed on the strength of +25.2 per node and a
+bench figure of +15.1% read at depth 6, which was reasoned about as "roughly
+−14 Elo on the clock". At depth 10 the same change is plausibly **−28 to −47**,
+which could make it a net loss in real games. It was live on the Lichess bot for
+about two hours before this was measured.
+
+**Nothing about the gate was wrong.** +25.2 is a true statement about quality per
+node. What was wrong was inferring the price from a depth the engine never
+plays at.
+
+### What to do about it
+
+- **Never price a node cost from bench alone.** Bench's depth 6 is a *signature*
+  — its job is to prove the tree did not change, and it is excellent at that.
+  It is not a cost model.
+- **Measure at play depth.** Run both binaries at `go depth 10` on a few
+  middlegame positions and compare node counts. It takes under a minute and it
+  is the number that matters.
+- The general form is 17's, and this file has now made it twice in a week: the
+  instrument and the thing being measured were in different regimes. There the
+  table was 32 MB in gates and 256 MB in play; here the depth is 6 in bench and
+  10-12 in games. **Check what regime your instrument is in before believing
+  what it says about the engine that plays.**
+
+The tuned weights are kept on branch `eval-texel-tune` and are not lost. What
+they need is a `--tc` gate, which is now worth its cost: the question is no
+longer an 11-Elo difference that ±36 could not resolve, but a possible swing of
+forty or more, which it can.
+
+---
+
 ## Things that look like bugs and are not
 
 - **Two games against `ficheallrs` show `Termination "Abandoned"` after

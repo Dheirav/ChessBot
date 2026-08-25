@@ -181,11 +181,19 @@ band-by-band cut divides that out.
 `HANDOFF.md`'s third measurement has the full tables and the caveats — chiefly
 that no 2300+ opponent has been met since, so the ceiling is untested.
 
-*6.2 is closed.* The general Texel-style tune **shipped 2026-08-25 at +25.2 Elo
-[+15.7, +34.7]** over 3 360 games — `GATES.md` has the numbers and why the two
-halves are poolable. Fitted on 725 000 external positions after this repo's own
-archive proved too small; `evalerror` improved on both halves independently.
-The account below is kept because the failed first attempt is the useful part.
+*6.2 is gated but not shipped.* The general Texel-style tune measured **+25.2
+Elo [+15.7, +34.7]** over 3 360 games at equal nodes — `GATES.md` has the
+numbers — and was **merged and reverted the same day**, because the node price
+the gate divides out is +7% at bench's depth 6 and **+59% at depth 10**, where
+the bot plays (`BUGS.md` 18). It is quality per node, on a change whose cost per
+node is real.
+
+**What it needs is a `--tc` gate**, which is now worth its seventeen hours: the
+question is a possible forty-Elo swing rather than an eleven-Elo one. The
+weights are on branch `eval-texel-tune`. Fitted on 725 000 external positions
+after this repo's own archive proved too small; `evalerror` improved on both
+halves independently. The account below is kept because the failed first attempt
+is the useful part.
 
 *The first attempt was* **blocked on data, not on effort.** The harness worked;
 the archive could not feed it.

@@ -190,8 +190,8 @@ tablebase or cloud-eval integration, an opening book for the `Book` label.
 
 - **`CLAUDE.md` is gitignored** (`.gitignore:4`), so its bench signature lives
   only on this machine. A fresh clone gets whatever was last committed. Current
-  signature: **913,669** nodes at depth 6, verified 2026-08-25 (793,823 until
-  the Texel tune landed that day). It carried the
+  signature: **793,823** nodes at depth 6 (the Texel tune's 913,669 was
+  reverted the same day, `BUGS.md` 18). It carried the
   pre-razoring 1,086,693 for a day after that shipped — a stale signature here
   reads to the next session as a broken search, which is the expensive direction
   for this particular number to drift in.
