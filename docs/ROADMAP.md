@@ -181,9 +181,14 @@ band-by-band cut divides that out.
 `HANDOFF.md`'s third measurement has the full tables and the caveats — chiefly
 that no 2300+ opponent has been met since, so the ceiling is untested.
 
-*Still open in 6.2:* the general Texel-style tune — **attempted 2026-08-25 and
-blocked on data, not on effort.** The harness exists and works; the archive
-cannot feed it.
+*6.2 is closed.* The general Texel-style tune **shipped 2026-08-25 at +25.2 Elo
+[+15.7, +34.7]** over 3 360 games — `GATES.md` has the numbers and why the two
+halves are poolable. Fitted on 725 000 external positions after this repo's own
+archive proved too small; `evalerror` improved on both halves independently.
+The account below is kept because the failed first attempt is the useful part.
+
+*The first attempt was* **blocked on data, not on effort.** The harness worked;
+the archive could not feed it.
 
 `tools/texel-corpus.py` turns the game archive into 14 924 quiet positions
 labelled with their game's result, and `tools/tune` fits the eighteen
@@ -212,7 +217,8 @@ error by construction — it keeps a change only when it falls — so training
 error can never say whether a tune worked. Without the split this would have
 shipped, and the eighteen numbers above would now be in `evaluation.cpp`.
 
-Two ways past it, both about labels and neither about the tuner:
+Two ways past it were identified, both about labels and neither about the
+tuner. **The second is what worked:**
 
 - **A Stockfish score per position** rather than per game, which turns 14 924
   correlated samples into 14 924 independent ones. Built and smoke-tested
@@ -220,10 +226,23 @@ Two ways past it, both about labels and neither about the tuner:
   trades the objective away: "predict the result" becomes "agree with
   Stockfish", whose evaluation encodes structure these terms cannot represent,
   so part of the target is unreachable by construction.
-- **An external game corpus.** Public quiet-labelled Texel sets run to
-  hundreds of thousands of positions carrying real outcomes, which fixes the
-  sample size *and* keeps the original objective. It means tuning on games this
-  engine did not play, which is ordinary practice and still worth stating.
+- **An external game corpus — taken, and it worked.** `quiet-labeled.epd`,
+  725 000 positions from the zurichess tuner (BSD-3-Clause). Held out 72 500 of
+  them and **91% of the training gain transferred** (training −1.68%, unseen
+  +1.53%), against the archive attempt's −4.41%/+2.11%. The weights came out
+  chess-sensible where the archive's had not: passed pawns 20 → 33, rooks on
+  open files 10 → 19, bishop pair toward the conventional range.
+
+  The two that looked wrong were the most informative. `CENTRE_CONTROL` 5 → −11
+  and `KING_ACTIVITY` 5 → −5 both went negative because **`PST_KNIGHT` already
+  pays +20 for a central square and `PST_KING_EG` already pays +40 for a
+  centralised endgame king** — these terms were adding a second centre bonus on
+  top of the tables, and the tuner found a double count nobody had noticed.
+
+  One caveat on the labels, since it changes what the objective was: each quiet
+  position was *played out by Stockfish* and that playout's result is the
+  label. It is still an outcome and not a centipawn score, which is what keeps
+  `evalerror` independent, but it is not "what happened in real games".
 
 `tests/evalerror` is the independent check either way: it is scored against
 Stockfish over positions from real games and is not the tuning objective, so a

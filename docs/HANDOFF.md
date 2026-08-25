@@ -118,10 +118,13 @@ report, an annotated PGN, or a self-contained HTML page. Stockfish 16 is at
 It carries a known **3% phantom-loss floor** from successive searches
 disagreeing, so a lone inaccuracy under ~5 win% is not evidence of anything.
 
-The bench signature is **793,823 nodes** at depth 6, verified 2026-08-23,
-since `razoring` and `revfutility` shipped on 08-22 (−27.0% from 1,086,693).
-Before those, 6.2's removal of the hanging-piece penalty on 2026-08-15 took it
-1,599,675 → 1,323,943 → 1,086,693, −32.1% across that day. Any change claiming to preserve search behaviour must reproduce
+The bench signature is **913,669 nodes** at depth 6, verified 2026-08-25 when
+the Texel-tuned weights shipped. That is **+15.1% over the 793,823** before
+them — the node price the equal-nodes gate divided out by construction, and the
+open question a `--tc` gate would settle. 793,823 had held since `razoring` and
+`revfutility` on 08-22 (−27.0% from 1,086,693), and before those 6.2's removal
+of the hanging-piece penalty on 2026-08-15 took it 1,599,675 → 1,323,943 →
+1,086,693, −32.1% across that day. Any change claiming to preserve search behaviour must reproduce
 it exactly. It has moved six times this
 week — 2,056,371 until `seeordering` was turned on (2026-08-13); then 1,465,771,
 1,725,755 and 1,759,990 as the three Phase 4 evaluation fixes landed
