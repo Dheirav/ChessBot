@@ -95,19 +95,29 @@ struct Sample {
     double result;   // target win probability, White's point of view
 };
 
-// A label is either a game result ("1.0"/"0.5"/"0.0") or a Stockfish score in
-// centipawns ("-83"). The decimal point tells them apart, which is why
-// texel-corpus.py writes results with one and sf-label.py writes integers.
+// Three label spellings reach this, and getting the discrimination wrong is
+// silent: every one of them parses as *some* number under atof.
 //
-// Centipawns are mapped to a probability through the *conventional* curve with
-// a fixed scale, not through the fitted K. K is what converts THIS evaluation's
-// centipawns into probabilities; reusing it on the target would let the tuner
-// move the target and the prediction together and call the gap closed.
+//   "1-0" / "0-1" / "1/2-1/2"   PGN results, which is what quiet-labeled.epd
+//                               uses. Note atof("1-0") is 1 and
+//                               atof("1/2-1/2") is 1 -- treat these as scores
+//                               and half the corpus becomes "White is winning
+//                               by one centipawn".
+//   "1.0" / "0.5" / "0.0"       decimal results, written by texel-corpus.py
+//   "-83"                       a Stockfish score in centipawns, from
+//                               sf-label.py
+//
+// Centipawns map to a probability through the *conventional* curve at a fixed
+// scale, not through the fitted K. K converts THIS evaluation's centipawns
+// into probabilities; reusing it on the target would let the tuner move the
+// target and the prediction together and call the gap closed.
 static double labelToProbability(const std::string& text) {
-    const bool isResult = text.find('.') != std::string::npos;
-    const double v = std::atof(text.c_str());
-    if (isResult) return v;
-    return 1.0 / (1.0 + std::pow(10.0, -v / 400.0));
+    if (text == "1-0")     return 1.0;
+    if (text == "0-1")     return 0.0;
+    if (text == "1/2-1/2") return 0.5;
+    if (text.find('.') != std::string::npos) return std::atof(text.c_str());
+    const double cp = std::atof(text.c_str());
+    return 1.0 / (1.0 + std::pow(10.0, -cp / 400.0));
 }
 
 static bool loadCorpus(const char* path, std::vector<Sample>& out) {
@@ -117,7 +127,17 @@ static bool loadCorpus(const char* path, std::vector<Sample>& out) {
     while (std::getline(in, line)) {
         const size_t tag = line.find(" c9 \"");
         if (tag == std::string::npos) continue;
-        const std::string fen = line.substr(0, tag);
+        std::string fen = line.substr(0, tag);
+        // EPD carries four FEN fields; the two move counters are optional and
+        // quiet-labeled.epd omits them. setFromFEN wants all six, and its
+        // failure here is silent -- the position is skipped, and a corpus of
+        // 725 000 of them loads as zero.
+        {
+            int fields = 0;
+            for (size_t i = 0, n = fen.size(); i <= n; ++i)
+                if (i == n || fen[i] == ' ') { if (i && fen[i-1] != ' ') ++fields; }
+            if (fields == 4) fen += " 0 1";
+        }
         const size_t close = line.find('"', tag + 5);
         if (close == std::string::npos) continue;
         const double result = labelToProbability(line.substr(tag + 5, close - tag - 5));
