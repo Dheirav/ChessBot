@@ -29,6 +29,12 @@ static constexpr int SEE_LOSING_CAPTURE_BAND = 100000;
 // forcing sequence of checks had no limit at all.
 static constexpr int QS_MAX_DEPTH = 8;
 
+// Late move pruning fires only at shallow remaining depth. Deep nodes are
+// where a late quiet move can still change the result, and they are also the
+// nodes worth spending on -- pruning there trades the search's judgement for
+// its speed at exactly the wrong end.
+static constexpr int LMP_MAX_DEPTH = 3;
+
 // Delta pruning margin: how much a capture is allowed to be behind alpha before
 // it is dismissed as unable to catch up. A capture that cannot reach alpha even
 // after winning its victim plus this much positional compensation is not going
@@ -111,6 +117,7 @@ const SearchOptionEntry SEARCH_OPTIONS[] = {
     {"timealloc",   "timealloc","TimeAlloc",   &SearchOptions::timeAlloc},
     {"revfutility", "revfut",   "RevFutility", &SearchOptions::revFutility},
     {"razoring",    "razor",    "Razoring",    &SearchOptions::razoring},
+    {"lmp",         "lmp",      "Lmp",         &SearchOptions::lateMovePruning},
 };
 const size_t SEARCH_OPTION_COUNT = sizeof(SEARCH_OPTIONS) / sizeof(SEARCH_OPTIONS[0]);
 
@@ -616,6 +623,57 @@ static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
             break;
         }
         ++moveIndex;
+
+        // --- Late move pruning ---
+        // The list is ordered, so a quiet move this far down is very unlikely
+        // to be best. Where LMR searches such a move shallower, this skips it
+        // without searching it at all -- which is why the guards matter more
+        // here than anywhere else in this file. A reduction that guesses wrong
+        // costs a re-search; a prune that guesses wrong loses the move for
+        // good, and the score returned is a bound built on a move list the
+        // search never finished.
+        //
+        // Exempt, each for its own reason:
+        //   PV nodes      -- the principal variation is the line being claimed
+        //                    as best; pruning inside it prunes the answer.
+        //   in check      -- the move list is evasions, and there is no such
+        //                    thing as a late evasion worth skipping.
+        //   captures and promotions -- exactly the moves that overturn a
+        //                    position, and the reason LMR exempts them too.
+        //   the first moves -- bestEval is still -INF until one move has been
+        //                    searched, and a node that prunes every move
+        //                    returns a score for nothing. The mate test below
+        //                    covers this for free: -INF is -32000, which is
+        //                    already below the -29000 bound.
+        //   being mated    -- when every line loses, the escape may well be the
+        //                    twentieth quiet move, and pruning it turns a long
+        //                    mate into a short one.
+        //   pawn endings   -- the same zugzwang guard null-move pruning uses at
+        //                    line 557. Kept for the reason it is kept there:
+        //                    with only pawns left, the move that holds the
+        //                    position is routinely a quiet one far down an
+        //                    ordered list, which is exactly what this prunes.
+        //
+        //                    It does **not** rescue the `zugzwang` bench
+        //                    position, and the comment says so rather than
+        //                    implying otherwise: White has a rook there, so the
+        //                    guard never fires, and that position still answers
+        //                    e1e5 without LMP and e1f1 with it. Eight of the
+        //                    nine bench positions are unchanged. That one is a
+        //                    known cost to weigh against whatever the gate
+        //                    returns, not a bug to be tuned away in advance.
+        //
+        // The threshold grows with depth because the deeper the remaining
+        // search, the more a late move can still turn out to matter. 3 + d*d
+        // is the conventional shape: 4 moves at depth 1, 7 at 2, 12 at 3.
+        const bool isPv = (beta - alpha > 1);
+        if (g_searchOptions.lateMovePruning && !isPv && !inCheck &&
+            depth <= LMP_MAX_DEPTH && move.flag == NORMAL &&
+            bestEval > -MATE_SCORE + 1000 &&
+            hasNonPawnMaterial(board, side) &&
+            moveIndex > 3 + depth * depth) {
+            continue;
+        }
 
         UndoInfo undo = board.makeMove(move);
 
