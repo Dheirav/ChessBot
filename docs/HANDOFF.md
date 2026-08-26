@@ -47,6 +47,7 @@ Phase 3 is in progress. What is wired in:
 | `seepruning` | off | **resolved, stays off** — +2.2 [−7.2, +11.6] at equal nodes, +4 [−7, +14] on the clock |
 | `qbound` | **on** | quiescence capped 8 plies past the horizon; −16.8% nodes, no best move changed. Ungated repair |
 | `checkext` | **on** | **accepted**, +23.0 Elo [+13.3, +32.7] — on by default since 2026-08-14 |
+| `lmp` | **on** | **accepted 2026-08-26, +13.1 Elo [+3.5, +22.8]** over 3 360 games. Cuts 45.0% of nodes at bench 6. Endgames were checked rather than assumed: no move changed over twelve endgame positions at depth 12, and pure pawn endings are bit-identical because the `hasNonPawnMaterial` guard exempts them |
 | `razoring` | **on** | **accepted 2026-08-22, +39.1 Elo [+28.4, +49.9]** over 2 400 games. Margin 500cp, sized off the evaluation's measured error rather than textbook 100–150 — 3.1 lost 50 Elo making the same bet inside the evaluation's own noise |
 | `revfutility` | **on** | **accepted 2026-08-22, +18.4 Elo [+7.8, +29.1]** measured *on top of* `razoring`, +12.3 alone. Margin 300cp per ply |
 | `deltapruning` | off | −50.0 at 200cp; **closed 2026-08-21 at +0.9 [−5.8, +7.7]** on the current build (the older +7.1 was a pre-6.2 engine) |
@@ -118,10 +119,12 @@ report, an annotated PGN, or a self-contained HTML page. Stockfish 16 is at
 It carries a known **3% phantom-loss floor** from successive searches
 disagreeing, so a lone inaccuracy under ~5 win% is not evidence of anything.
 
-The bench signature is **793,823 nodes** at depth 6. The Texel-tuned weights
-took it to 913,669 on 2026-08-25 and were reverted the same day when the node
-price turned out to be **+7% at depth 6 and +59% at depth 10**, which is where
-the bot plays — `BUGS.md` 18. 793,823 has held since `razoring` and
+The bench signature is **436,293 nodes** at depth 6, since late move pruning
+shipped 2026-08-26 (**+13.1 Elo [+3.5, +22.8]**, −45.0% nodes). Before it,
+793,823. The Texel-tuned weights took it to 913,669 on 2026-08-25 and were
+reverted the same day when the node price turned out to be **+7% at depth 6 and
++59% at depth 10**, which is where the bot plays — `BUGS.md` 18. 793,823 held
+since `razoring` and
 `revfutility` on 08-22 (−27.0% from 1,086,693), and before those 6.2's removal
 of the hanging-piece penalty on 2026-08-15 took it 1,599,675 → 1,323,943 →
 1,086,693, −32.1% across that day. Any change claiming to preserve search behaviour must reproduce

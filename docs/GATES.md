@@ -77,6 +77,7 @@ Re-pool any of these with `./tests/pool-shards.sh <dir>/`.
 | `shard-20260825-123915/` | Texel-tuned eval weights, two binaries, seed 20260825 | +22.8 [+9.6, +36.0] |
 | `shard-20260825-161318/` | the same, seed 20260826 | +27.6 [+13.9, +41.3] |
 | `shard-pooled-texel/` | **both of the above pooled, 3 360 games** | **+25.2 [+15.7, +34.7]** — accepted per node, **shipped and reverted the same day** (`BUGS.md` 18) |
+| `shard-20260826-181028/` | **late move pruning** (`lmp`) | **+13.1 [+3.5, +22.8]** — accepted, on by default |
 
 ### The Texel tune, 2026-08-25 — and why the two halves are poolable
 

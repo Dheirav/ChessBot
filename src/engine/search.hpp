@@ -211,12 +211,25 @@ struct SearchOptions {
     // count is high enough and the depth is low enough that a full search
     // cannot pay for itself.
     //
-    // Off until gated. It is the most dangerous kind of pruning in this engine
-    // because it never looks at the move: a reduction that guesses wrong costs
-    // a re-search, while a prune that guesses wrong loses the move. The guards
-    // are what make it safe -- PV nodes, checks, captures, promotions and the
-    // first move at any node are all exempt.
-    bool lateMovePruning = false;
+    // **ON since 2026-08-26: +13.1 Elo, 95% CI [+3.5, +22.8]** over 3 360 games
+    // at equal nodes, `shard-20260826-181028/`. Cuts 45.5% of nodes at bench
+    // depth 6 and 41.4% at depth 8.
+    //
+    // It is the most dangerous kind of pruning in this engine because it never
+    // looks at the move: a reduction that guesses wrong costs a re-search,
+    // while a prune that guesses wrong loses the move. The guards are what make
+    // it safe -- PV nodes, checks, captures, promotions and the first move at
+    // any node are all exempt.
+    //
+    // The endgame worry was checked rather than assumed, because the `zugzwang`
+    // bench position changes its depth-6 answer with this on. Over twelve
+    // endgame positions at depth 12: **no move changed anywhere**, pure pawn
+    // endings came out bit-identical in node count (the hasNonPawnMaterial
+    // guard doing its job), and the zugzwang study resolves to the same move
+    // as the shipped build once the search is deep enough -- e1f1 from both.
+    // The depth-6 disagreement was LMP arriving at the deeper answer sooner,
+    // not disagreeing with it.
+    bool lateMovePruning = true;
 
     // There is no king-safety toggle here, and on 2026-08-16 there briefly were
     // two. Both were gated and neither earned its place; the numbers and the
