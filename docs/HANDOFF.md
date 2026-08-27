@@ -200,7 +200,7 @@ log for `ConnectionError` before calling it a chess problem.**
 | | |
 |---|---|
 | **bot** | **DOWN.** Restart it — nothing blocks that |
-| **`./chessbot`** | late-move-pruning build, bench **436,293** |
+| **`./chessbot`** | LMP at depth 2 (`lmpshallow`), bench **445,492** |
 | **rating** | **2152**, rd ±45, prog 0, over 294 rated games |
 | **git** | `main` clean and pushed; `eval-texel-tune` and `tt-16byte` parked |
 | **CPUs** | **8** — raised from 4 and applied 2026-08-27, `nproc` verified. Gates roughly halve: ~110 min → ~60 |
@@ -414,9 +414,11 @@ reasoning that produced it, kept because the arguments still hold.**
    processors** idle, 3.2 with a game running. Expect ~1.5-1.7x on gates rather
    than a clean 2x: it is a laptop and the thermal budget is shared.
 
-3. **Gate `LMP_MAX_DEPTH = 2`** (`search.cpp`, currently 3). Evidence-backed by
-   the 13-20 adjudication above: pruning less should hand back judgement while
-   keeping most of the node saving. One gate.
+3. ~~**Gate `LMP_MAX_DEPTH = 2`.**~~ **Done 2026-08-27: +15.0 Elo
+   [+5.6, +24.4]**, shipped as `lmpshallow`. The 13-20 adjudication predicted
+   it and was worth more than the feature it was checking — LMP shipped at
+   +13.1 and looked finished; the diagnostic turned it into a testable question
+   worth another +15 for 2.1% more nodes.
 
 4. **Singular extensions**, then **probcut**. +20-40 each on the Phase 7 prior.
    Same recipe every time: implement behind its own toggle, verify bench is

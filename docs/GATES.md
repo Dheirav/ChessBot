@@ -78,6 +78,7 @@ Re-pool any of these with `./tests/pool-shards.sh <dir>/`.
 | `shard-20260825-161318/` | the same, seed 20260826 | +27.6 [+13.9, +41.3] |
 | `shard-pooled-texel/` | **both of the above pooled, 3 360 games** | **+25.2 [+15.7, +34.7]** — accepted per node, **shipped and reverted the same day** (`BUGS.md` 18) |
 | `shard-20260826-181028/` | **late move pruning** (`lmp`) | **+13.1 [+3.5, +22.8]** — accepted, on by default |
+| `shard-20260827-150404/` | **`lmpshallow`** — LMP at depth 2 instead of 3 | **+15.0 [+5.6, +24.4]** — accepted, on by default |
 
 ### The Texel tune, 2026-08-25 — and why the two halves are poolable
 
