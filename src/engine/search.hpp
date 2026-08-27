@@ -231,6 +231,19 @@ struct SearchOptions {
     // not disagreeing with it.
     bool lateMovePruning = true;
 
+    // Fires LMP only to remaining depth 2 instead of 3. A toggle rather than an
+    // int option because the harness takes booleans, and because the question
+    // is binary: the shipped 3 against the one value worth trying.
+    //
+    // The reason it is worth trying is measured. Over 120 positions sampled
+    // from the game archive, LMP changes the chosen move in 49 of them, and a
+    // depth-11 search adjudicating those disagreements endorses LMP's move 13
+    // times against the shipped move 20. So LMP gives up judgement on roughly
+    // one position in six to buy its 45% of nodes. Pruning one ply shallower
+    // should hand some of that back while keeping most of the saving --
+    // which is a hypothesis, and the gate is what settles it.
+    bool lmpShallow = false;
+
     // There is no king-safety toggle here, and on 2026-08-16 there briefly were
     // two. Both were gated and neither earned its place; the numbers and the
     // reasoning are in evaluation.cpp beside the term they describe, and in

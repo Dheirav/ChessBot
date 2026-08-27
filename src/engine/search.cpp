@@ -35,6 +35,11 @@ static constexpr int QS_MAX_DEPTH = 8;
 // its speed at exactly the wrong end.
 static constexpr int LMP_MAX_DEPTH = 3;
 
+// The alternative `lmpShallow` selects. One ply shallower prunes less and keeps
+// more of the search's judgement; whether that is worth the nodes it gives back
+// is a gate's question, not a comment's.
+static constexpr int LMP_MAX_DEPTH_SHALLOW = 2;
+
 // Delta pruning margin: how much a capture is allowed to be behind alpha before
 // it is dismissed as unable to catch up. A capture that cannot reach alpha even
 // after winning its victim plus this much positional compensation is not going
@@ -118,6 +123,7 @@ const SearchOptionEntry SEARCH_OPTIONS[] = {
     {"revfutility", "revfut",   "RevFutility", &SearchOptions::revFutility},
     {"razoring",    "razor",    "Razoring",    &SearchOptions::razoring},
     {"lmp",         "lmp",      "Lmp",         &SearchOptions::lateMovePruning},
+    {"lmpshallow",  "lmpsh",    "LmpShallow",  &SearchOptions::lmpShallow},
 };
 const size_t SEARCH_OPTION_COUNT = sizeof(SEARCH_OPTIONS) / sizeof(SEARCH_OPTIONS[0]);
 
@@ -668,7 +674,9 @@ static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
         // is the conventional shape: 4 moves at depth 1, 7 at 2, 12 at 3.
         const bool isPv = (beta - alpha > 1);
         if (g_searchOptions.lateMovePruning && !isPv && !inCheck &&
-            depth <= LMP_MAX_DEPTH && move.flag == NORMAL &&
+            depth <= (g_searchOptions.lmpShallow ? LMP_MAX_DEPTH_SHALLOW
+                                                 : LMP_MAX_DEPTH) &&
+            move.flag == NORMAL &&
             bestEval > -MATE_SCORE + 1000 &&
             hasNonPawnMaterial(board, side) &&
             moveIndex > 3 + depth * depth) {
