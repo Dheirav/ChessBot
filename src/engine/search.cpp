@@ -40,6 +40,25 @@ static constexpr int LMP_MAX_DEPTH = 3;
 // is a gate's question, not a comment's.
 static constexpr int LMP_MAX_DEPTH_SHALLOW = 2;
 
+// Singular extensions. The probe is a search in its own right, so it only runs
+// where a spare ply is worth paying for: deep enough that one more matters, and
+// against a table entry deep enough to be worth testing.
+// 10 rather than the more usual 8, chosen by measuring the probe's price at a
+// realistic depth rather than by convention. On one middlegame position at
+// `go depth 11`, against the same search without it:
+//     MIN_DEPTH  8   +49.8% nodes
+//     MIN_DEPTH 10   +11.1%
+//     MIN_DEPTH 12    +0.0%  (never fires at depth 11)
+// The probe is itself a search, so its cost is paid at every qualifying node
+// whether or not the extension is granted; 8 pays it far too often.
+//
+// Note that **bench cannot see this feature at all** -- its deepest interior
+// node at `bench 8` is depth 7, so the signature is identical on and off. The
+// tree check for this one has to be a real search at depth 11 or more.
+static constexpr int SINGULAR_MIN_DEPTH = 10;  // no probe shallower than this
+static constexpr int SINGULAR_TT_SLACK   = 3;  // entry may be this much shallower
+static constexpr int SINGULAR_MARGIN     = 2;  // beta drop, per ply of depth
+
 // Delta pruning margin: how much a capture is allowed to be behind alpha before
 // it is dismissed as unable to catch up. A capture that cannot reach alpha even
 // after winning its victim plus this much positional compensation is not going
@@ -125,6 +144,7 @@ const SearchOptionEntry SEARCH_OPTIONS[] = {
     {"lmp",         "lmp",      "Lmp",         &SearchOptions::lateMovePruning},
     {"lmpshallow",  "lmpsh",    "LmpShallow",  &SearchOptions::lmpShallow},
     {"lmpdepth1",   "lmpd1",    "LmpDepth1",   &SearchOptions::lmpDepth1},
+    {"singularext", "singext",  "SingularExt", &SearchOptions::singularExt},
 };
 const size_t SEARCH_OPTION_COUNT = sizeof(SEARCH_OPTIONS) / sizeof(SEARCH_OPTIONS[0]);
 
@@ -415,9 +435,15 @@ void recordGamePosition(std::vector<uint64_t>& history, uint64_t hashBefore,
 // Minimax with transposition table support. `pathHashes` holds the zobrist
 // keys of the positions on the current search path (root to parent) and is
 // used to score in-search repetitions as draws.
+// `excluded` is the singular-extension probe's one intrusion into the search:
+// the move it must pretend does not exist. A node searched with an excluded
+// move is answering "how good is this position *without* that move", which is a
+// different question from the one the table stores -- so such a node neither
+// reads nor writes the table, and never extends again.
 static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
                         const std::atomic<bool>& shouldStop, TranspositionTable& tt,
-                        std::vector<uint64_t>& pathHashes) {
+                        std::vector<uint64_t>& pathHashes,
+                        const Move* excluded = nullptr) {
     ++g_searchNodes;
     // Check if we should stop searching
     if (searchAborted(shouldStop)) {
@@ -484,8 +510,15 @@ static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
 
     // Probed after the extension so the entry asked for matches the depth about
     // to be searched; tt.store() below uses the same extended value.
-    if (tt.probe(hash, depth, ply, alpha, beta, ttScore, ttMove)) {
+    // An excluded search must not be answered from the table: the entry
+    // describes a search that was allowed to play the very move now banned.
+    if (!excluded && tt.probe(hash, depth, ply, alpha, beta, ttScore, ttMove)) {
         return ttScore;
+    }
+    if (excluded) {
+        // Still worth the move for ordering, just not the score.
+        int ignored = 0;
+        tt.probe(hash, -1, ply, -INF, INF, ignored, ttMove);
     }
 
     if (depth == 0) {
@@ -618,6 +651,43 @@ static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
         }
     }
 
+    // --- Singular extension probe ---
+    // Ask whether the table's move is the *only* move holding this position:
+    // search everything else at reduced depth against a window just under the
+    // score the table already claims. If nothing else reaches that window, the
+    // position hangs on one move, and one more ply there is worth more than a
+    // ply anywhere else in the tree.
+    //
+    // Conditions, each of which is about not paying for the probe unless it can
+    // pay back: deep enough that an extra ply matters, a table entry deep
+    // enough to be worth testing, and a *lower bound* -- an entry that failed
+    // high is a claim that the move is at least this good, which is what makes
+    // the comparison meaningful. Mate scores are excluded because the margin
+    // arithmetic is meaningless against them.
+    //
+    // Never inside an excluded search: that would recurse, and the inner node
+    // is already answering a different question.
+    int singularExtension = 0;
+    if (g_searchOptions.singularExt && !excluded && !inCheck &&
+        depth >= SINGULAR_MIN_DEPTH && ttMove.from != -1) {
+        TTEntry entry;
+        if (tt.peek(hash, entry) &&
+            entry.depth >= depth - SINGULAR_TT_SLACK &&
+            entry.nodeType == TTEntry::LOWER_BOUND &&
+            std::abs(scoreFromTT(entry.score, ply)) < TT_MATE_THRESHOLD) {
+            const int ttValue = scoreFromTT(entry.score, ply);
+            const int singularBeta = ttValue - SINGULAR_MARGIN * depth;
+            const int probeDepth = depth / 2 - 1;
+            if (probeDepth > 0) {
+                const int without = minimaxWithTT(board, probeDepth, ply,
+                                                  singularBeta - 1, singularBeta,
+                                                  shouldStop, tt, pathHashes, &ttMove);
+                if (!searchAborted(shouldStop) && without < singularBeta)
+                    singularExtension = 1;
+            }
+        }
+    }
+
     int bestEval = -INF;
     Move bestMove;
 
@@ -629,6 +699,8 @@ static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
         if (searchAborted(shouldStop)) {
             break;
         }
+        // The one move a singular probe is pretending does not exist.
+        if (excluded && move == *excluded) continue;
         ++moveIndex;
 
         // --- Late move pruning ---
@@ -699,6 +771,12 @@ static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
         // reduced: they are exactly the moves that turn out to matter.
         bool reduce = g_searchOptions.lmr && depth >= 3 && moveIndex > 3 &&
                       !inCheck && move.flag == NORMAL;
+        // The extra ply goes to the move the probe found singular, and to no
+        // other. It is never combined with a reduction: a move cannot be both
+        // the only one holding the position and unpromising enough to search
+        // shallow.
+        const int ext = (singularExtension && move == ttMove) ? 1 : 0;
+
         int eval;
         if (reduce) {
             const int R = 1;
@@ -709,7 +787,7 @@ static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
                                       shouldStop, tt, pathHashes);
             }
         } else {
-            eval = -minimaxWithTT(board, depth - 1, ply + 1, -beta, -alpha,
+            eval = -minimaxWithTT(board, depth - 1 + ext, ply + 1, -beta, -alpha,
                                   shouldStop, tt, pathHashes);
         }
         board.unmakeMove(undo);
@@ -751,7 +829,10 @@ static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
         nodeType = TTEntry::EXACT;
     }
 
-    tt.store(hash, depth, ply, bestEval, bestMove, nodeType);
+    // An excluded search answers "how good without that move", which is not
+    // what this hash means to anyone else. Storing it would poison the entry
+    // for every later probe.
+    if (!excluded) tt.store(hash, depth, ply, bestEval, bestMove, nodeType);
 
     return bestEval;
 }

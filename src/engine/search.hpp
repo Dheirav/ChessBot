@@ -266,6 +266,20 @@ struct SearchOptions {
     // whether the trend continues rather than predicting that it will.
     bool lmpDepth1 = false;
 
+    // Singular extensions. If the transposition table's move looks much better
+    // than every alternative, search it one ply deeper.
+    //
+    // The test is a search with that move *excluded*, at a window just below
+    // the score the table already claims for it. If everything else fails to
+    // reach that window, the move is "singular" -- the position hangs on it --
+    // and the extra ply is spent where it decides the game.
+    //
+    // Off until gated. It is the most intricate thing in this file: it runs a
+    // nested search inside move ordering, and that search must not read or
+    // write the transposition table for this node, because it is answering a
+    // different question about the same position.
+    bool singularExt = false;
+
     // There is no king-safety toggle here, and on 2026-08-16 there briefly were
     // two. Both were gated and neither earned its place; the numbers and the
     // reasoning are in evaluation.cpp beside the term they describe, and in

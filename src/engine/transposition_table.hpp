@@ -84,6 +84,20 @@ public:
     void store(uint64_t hash, int depth, int ply, int score, Move bestMove,
                TTEntry::NodeType nodeType);
     
+    // Raw entry access, for singular extensions.
+    //
+    // `probe` deliberately hides the stored depth and bound type behind its own
+    // decision about whether the score is usable *here*. A singular search
+    // needs those directly: it only fires on a lower-bound entry searched deep
+    // enough to be worth trusting, and that judgement belongs to the caller.
+    // Returns false when the slot holds another position.
+    bool peek(uint64_t hash, TTEntry& out) const {
+        const TTEntry& e = table[hash % tableSize];
+        if (!e.isValid(hash)) return false;
+        out = e;
+        return true;
+    }
+
     // Begin a new search. Entries stored before this call become evictable by
     // any entry from the new search, however deep they were.
     //
