@@ -507,7 +507,7 @@ this engine today.
 
 | lever | measured state today | prior | how it gets gated |
 |---|---|---|---|
-| **Lazy SMP** | **single-threaded** (`std::thread` appears once, for the UCI search thread). Host is 8C/16T, but **`.wslconfig` gives WSL 4 CPUs** — verified 2026-08-24, `nproc` = 4 | **+200–280** at ~16 threads; **at 4, expect far less** — raise the cap before pricing this | node-limited gates say nothing about threads; needs `--tc`, and the comparison is against itself at one thread |
+| **Lazy SMP** | **single-threaded** (`std::thread` appears once, for the UCI search thread). Host is 8C/16T; `.wslconfig` gave WSL 4 CPUs until **2026-08-27, when it was raised to 8** — `nproc` = 8, verified | **+200–280** at ~16 threads; **at 8, expect roughly half**, and less again on a laptop that thermally throttles | node-limited gates say nothing about threads; needs `--tc`, and the comparison is against itself at one thread |
 | **NNUE evaluation** | hand-crafted, material-dominated: prices a material edge at −42cp where truth is −586, and ~290cp of that is addressable (`tests/evalerror`) | **+200–400** | self-play gate, plus `tests/evalerror` as the cheap pre-filter |
 | **Search pruning suite** | futility, razoring, late-move pruning, singular extensions and probcut are **all absent** — grep finds none of them | **+150–300** | one `shard-gate.sh` each, exactly as PLAN 3.4 already describes |
 | **Ponder** | absent; `lichess/config.yml` sets `ponder: false` because the engine has no support | +30–50 | rated games, not a gate — it buys the opponent's clock |

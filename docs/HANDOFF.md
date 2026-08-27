@@ -203,7 +203,7 @@ log for `ConnectionError` before calling it a chess problem.**
 | **`./chessbot`** | late-move-pruning build, bench **436,293** |
 | **rating** | **2152**, rd ±45, prog 0, over 294 rated games |
 | **git** | `main` clean and pushed; `eval-texel-tune` and `tt-16byte` parked |
-| **`.wslconfig`** | edited to `processors=8`, **not yet applied** — needs `wsl --shutdown` |
+| **CPUs** | **8** — raised from 4 and applied 2026-08-27, `nproc` verified. Gates roughly halve: ~110 min → ~60 |
 
 ### What shipped 2026-08-26
 
@@ -343,7 +343,7 @@ since 2026-08-21 `tests/evalerror`, `tools/eval-corpus.py` and
 [+6, +79] with zero forfeits over 200 games at `--tc 120+1.33`, and is shipped.
 The Lichess bot is playing (see *In flight* above), so anything that wants the
 machine — a `--tc` gate, `tools/review-archive.sh` — either waits for it or
-takes a share of the **four** CPUs away from rated games — `nproc` is 4, not 16 (`.wslconfig` `processors=4`), so concurrent work starves the bot far faster than the old figure suggested.
+takes a share of the **eight** CPUs away from rated games — `nproc` is 8, not 16 (`.wslconfig` `processors=8`, raised from 4 on 2026-08-27), so concurrent work still starves the bot faster than a 16-core figure would suggest.
 
 Logs from finished gates are kept; re-pool any with
 `./tests/pool-shards.sh <dir>/`.
@@ -406,11 +406,13 @@ reasoning that produced it, kept because the arguments still hold.**
    node and the 2100-2300 band — the one that decides the rating — is still the
    thinnest evidence in the project.
 
-2. **Apply `processors=8`.** `.wslconfig` is already edited; it needs
-   `wsl --shutdown` from PowerShell. Measured justification: the host is 8
+2. ~~**Apply `processors=8`.**~~ **Done 2026-08-27**, `nproc` = 8. The
+   justification, kept because it explains what the numbers mean: the host is 8
    cores / 16 logical, WSL had 4, so a saturated WSL could never exceed 25% of
-   the machine while native Windows used **0.6 of 16 logical processors**. Gates
-   are the bottleneck on every remaining item and they halve, ~110 min to ~60.
+   the machine — which is exactly the ~24% Task Manager showed while a sweep
+   reported 381% inside Linux. Native Windows meanwhile used **0.6 of 16 logical
+   processors** idle, 3.2 with a game running. Expect ~1.5-1.7x on gates rather
+   than a clean 2x: it is a laptop and the thermal budget is shared.
 
 3. **Gate `LMP_MAX_DEPTH = 2`** (`search.cpp`, currently 3). Evidence-backed by
    the 13-20 adjudication above: pruning less should hand back judgement while
@@ -443,7 +445,7 @@ is nothing for a new term to be for), and the Texel weights above.
 
 ### Two things about this machine that cost hours if forgotten
 
-**It is shared.** `res_ai` and `BrassBot` run on the same four CPUs, sometimes
+**It is shared.** `res_ai` and `BrassBot` run on the same eight CPUs, sometimes
 driven by other Claude sessions, and they start without warning. A gate that
 should take 110 minutes took 4 hours once and was abandoned twice. **Check
 before starting anything long** — and check for *all* of them, not just the bot:

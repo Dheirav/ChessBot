@@ -135,7 +135,7 @@ practice, not measured here**; the middle column is measured.
 
 | item | measured state today | prior | size |
 |---|---|---|---|
-| **Lazy SMP** | single-threaded; the host is 8 cores / 16 threads but **`.wslconfig` caps WSL at 4** | +200–280 *(assumes ~16; at 4 threads expect a fraction)* | L |
+| **Lazy SMP** | single-threaded; host is 8 cores / 16 threads, **WSL raised 4 → 8 on 2026-08-27** | +200–280 *(assumes ~16; at 8 threads expect roughly half)* | L |
 | **NNUE evaluation** | hand-crafted, material-dominated; ~290cp of addressable static error | +200–400 | XL |
 | **Search pruning suite** — futility, razoring, LMP, singular, probcut | **none of them exist** | +150–300 | M each |
 | **Ponder** | absent; `config.yml` says the engine has no support | +30–50 | M |
