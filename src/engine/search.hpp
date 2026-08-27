@@ -280,6 +280,16 @@ struct SearchOptions {
     // different question about the same position.
     bool singularExt = false;
 
+    // Razoring at a 350cp margin instead of the shipped 500.
+    //
+    // `TODO.md` has wanted this measured since razoring landed: 500 was a first
+    // guess off the evaluation's measured error, and 3.1's finding is that this
+    // bet swings **57 Elo on the constant alone**, which is more than most
+    // features are worth. Tighter prunes more and risks more -- 3.1 lost 50 Elo
+    // making the same bet at 200cp, inside the evaluation's own noise, and 500
+    // was chosen to sit outside it. 350 is the midpoint worth asking about.
+    bool razorTight = false;
+
     // There is no king-safety toggle here, and on 2026-08-16 there briefly were
     // two. Both were gated and neither earned its place; the numbers and the
     // reasoning are in evaluation.cpp beside the term they describe, and in

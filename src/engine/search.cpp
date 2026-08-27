@@ -145,6 +145,7 @@ const SearchOptionEntry SEARCH_OPTIONS[] = {
     {"lmpshallow",  "lmpsh",    "LmpShallow",  &SearchOptions::lmpShallow},
     {"lmpdepth1",   "lmpd1",    "LmpDepth1",   &SearchOptions::lmpDepth1},
     {"singularext", "singext",  "SingularExt", &SearchOptions::singularExt},
+    {"razortight",  "razortt",  "RazorTight",  &SearchOptions::razorTight},
 };
 const size_t SEARCH_OPTION_COUNT = sizeof(SEARCH_OPTIONS) / sizeof(SEARCH_OPTIONS[0]);
 
@@ -553,7 +554,9 @@ static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
     // one the evaluation is confident about by its own error bars.
     static const int REV_FUTILITY_MARGIN = 300;   // per ply, ~90th percentile
     static const int REV_FUTILITY_MAX_DEPTH = 3;
-    static const int RAZOR_MARGIN = 500;          // ~95th percentile
+    // 500 is the shipped value, ~95th percentile of the evaluation's measured
+    // error. `razorTight` asks whether 350 does better -- see the toggle.
+    const int RAZOR_MARGIN = g_searchOptions.razorTight ? 350 : 500;
     static const int RAZOR_MAX_DEPTH = 2;
 
     // A null-window search (beta - alpha == 1) is a scout, not a principal
