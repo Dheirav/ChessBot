@@ -124,6 +124,7 @@ const SearchOptionEntry SEARCH_OPTIONS[] = {
     {"razoring",    "razor",    "Razoring",    &SearchOptions::razoring},
     {"lmp",         "lmp",      "Lmp",         &SearchOptions::lateMovePruning},
     {"lmpshallow",  "lmpsh",    "LmpShallow",  &SearchOptions::lmpShallow},
+    {"lmpdepth1",   "lmpd1",    "LmpDepth1",   &SearchOptions::lmpDepth1},
 };
 const size_t SEARCH_OPTION_COUNT = sizeof(SEARCH_OPTIONS) / sizeof(SEARCH_OPTIONS[0]);
 
@@ -674,7 +675,12 @@ static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
         // is the conventional shape: 4 moves at depth 1, 7 at 2, 12 at 3.
         const bool isPv = (beta - alpha > 1);
         if (g_searchOptions.lateMovePruning && !isPv && !inCheck &&
-            depth <= (g_searchOptions.lmpShallow ? LMP_MAX_DEPTH_SHALLOW
+            // A ladder, shallowest first: lmpDepth1 wins over lmpShallow,
+            // which wins over the original 3. Ordered this way so a gate can
+            // turn on the rung it is testing and leave the shipped setting
+            // alone on both sides.
+            depth <= (g_searchOptions.lmpDepth1  ? 1
+                    : g_searchOptions.lmpShallow ? LMP_MAX_DEPTH_SHALLOW
                                                  : LMP_MAX_DEPTH) &&
             move.flag == NORMAL &&
             bestEval > -MATE_SCORE + 1000 &&

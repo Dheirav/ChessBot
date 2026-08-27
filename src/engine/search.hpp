@@ -253,6 +253,19 @@ struct SearchOptions {
     // another +15.
     bool lmpShallow = true;
 
+    // One rung shallower again: LMP fires only at remaining depth 1. Off until
+    // gated, and stacked on `lmpShallow` rather than replacing it, so an A/B
+    // differs in exactly one thing with the shipped setting on both sides.
+    //
+    // Deliberately proposed with **no theory attached**. Depth 3 -> 2 was worth
+    // +15.0 and the explanation offered for it — that pruning less hands back
+    // judgement — did not survive measurement: over the same 120 positions the
+    // referee still sided against LMP 18 times against 20 before, so the
+    // disagreement *rate* barely moved while the Elo did. The honest position
+    // is that the mechanism is not understood, only the trend, and this asks
+    // whether the trend continues rather than predicting that it will.
+    bool lmpDepth1 = false;
+
     // There is no king-safety toggle here, and on 2026-08-16 there briefly were
     // two. Both were gated and neither earned its place; the numbers and the
     // reasoning are in evaluation.cpp beside the term they describe, and in
