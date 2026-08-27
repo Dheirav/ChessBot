@@ -80,6 +80,32 @@ Re-pool any of these with `./tests/pool-shards.sh <dir>/`.
 | `shard-20260826-181028/` | **late move pruning** (`lmp`) | **+13.1 [+3.5, +22.8]** — accepted, on by default |
 | `shard-20260827-150404/` | **`lmpshallow`** — LMP at depth 2 instead of 3 | **+15.0 [+5.6, +24.4]** — accepted, on by default |
 | `shard-20260827-210628/` | `lmpdepth1` — LMP at depth 1 instead of 2 | **−31.3 [−40.5, −22.1]** — rejected, stays off |
+| `shard-20260827-224417/` | `singularext` — **VOID, measured nothing** | −0.6 [−3.4, +2.1] — see below |
+
+### A gate that ran a feature that never fired — 2026-08-27
+
+`-N 100000` reaches **depth 5-7**. `SINGULAR_MIN_DEPTH` is **10**. The singular
+probe did not fire once in 3 360 games, so this is not a verdict on singular
+extensions; it is an accidental null control between two identical engines.
+
+**The pentanomial said so before the Elo did.** `5-74-1529-66-6` — 1 529 of
+1 680 pairs scored dead level, 91% of them. Compare `lmpshallow`'s
+`157-332-601-389-201`, or the deliberate null control at
+`shard-20260816-114039/`, which collapsed the same way. A distribution piled
+onto the centre means the two sides played the same games.
+
+**Read the pentanomial before the Elo.** A ±2.8 interval on 3 360 games is not
+precision, it is two engines agreeing with each other.
+
+This is `BUGS.md` 17 and 18 for the third time: the instrument and the thing
+measured were in different regimes. There a gate held 32 MB while the bot plays
+256 MB, and bench read depth 6 while games run at 10-12. Here the gate searched
+depth 7 against a feature that needs depth 10. The commit that added the feature
+even said *"bench cannot see this — the tree check has to be a real search at
+depth 11 or more"*, and the gate was then run at a budget reaching depth 7
+anyway. Writing the constraint down is not the same as applying it.
+
+Re-gated at `-N 1000000`, which reaches depth 9-10.
 
 ### The LMP depth curve has a peak, and it is 2
 
