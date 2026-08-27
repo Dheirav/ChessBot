@@ -33,6 +33,30 @@ int g_hashMb = 256;
 // engine-side margin for the ordinary case of that, not the pathological one.
 int g_moveOverheadMs = 100;
 
+// --- Pondering ---
+//
+// UCI's contract: after `go ponder` the engine searches the position it expects
+// to face, and **must not print bestmove** until `ponderhit` or `stop` arrives.
+// `ponderhit` means the opponent played the move we guessed, so the search
+// becomes an ordinary timed one; `stop` means they did not, and we answer with
+// whatever we have.
+//
+// This implementation converts by **restarting** rather than by installing a
+// deadline into a live search. That is the deliberate choice: the running
+// search's time state is exactly where `BUGS.md` 11 lived, and a ponder search
+// that fails to notice a newly-arrived deadline loses on time. Restarting keeps
+// every time decision inside the one code path that has already been gated.
+//
+// The cost is smaller than it looks, because the transposition table survives
+// the restart. The re-search starts with the whole ponder search already in the
+// table and reaches comparable depth in a fraction of the time. If a gate later
+// says that fraction matters, installing a deadline is the optimisation -- but
+// it should be measured, not assumed.
+std::atomic<bool> g_ponderConverted{false};
+SearchLimits g_ponderLimits;
+Board g_ponderBoard;
+std::vector<uint64_t> g_ponderHistory;
+
 // Whether the search now running has no bound of its own ("go infinite").
 // EOF must still abort one of those or a pipe would never return -- but it
 // must NOT abort a bounded one, which is BUGS.md 14. Set by parseGo.
@@ -142,12 +166,13 @@ void onSearchInfo(int depth, int score, uint64_t nodes, long elapsedMs,
 // Turn "go" arguments into a budget. A clock (wtime/btime) is divided rather
 // than spent: with no movestogo, assume the game has a reasonable number of
 // moves left, and keep a small reserve so a slow iteration cannot forfeit.
-SearchLimits parseGo(std::istringstream& is) {
+SearchLimits parseGo(std::istringstream& is, bool& isPonder) {
     SearchLimits limits;
     long wtime = 0, btime = 0, winc = 0, binc = 0, movetime = 0;
     int movestogo = 0, depth = 0;
     uint64_t nodes = 0;
     bool infinite = false;
+    bool ponder = false;
 
     std::string token;
     while (is >> token) {
@@ -160,6 +185,7 @@ SearchLimits parseGo(std::istringstream& is) {
         else if (token == "depth")     is >> depth;
         else if (token == "nodes")     is >> nodes;
         else if (token == "infinite")  infinite = true;
+        else if (token == "ponder")    ponder = true;
     }
 
     if (depth > 0) limits.maxDepth = depth;
@@ -259,7 +285,19 @@ SearchLimits parseGo(std::istringstream& is) {
     if (limits.moveTimeMs == 0 && !infinite && depth <= 0 && nodes == 0)
         limits.maxDepth = 8;
 
-    g_searchUnbounded = infinite;
+    // A ponder search runs unbounded: it must not stop on the clock, because
+    // the clock does not start until the opponent actually plays. The limits it
+    // *would* have had are kept for `ponderhit` to use.
+    if (ponder) {
+        g_ponderLimits = limits;
+        limits.moveTimeMs = 0;
+        limits.hardTimeMs = 0;
+        limits.maxNodes = 0;
+        limits.maxDepth = 64;
+    }
+    isPonder = ponder;
+
+    g_searchUnbounded = infinite || ponder;
     return limits;
 }
 
@@ -268,10 +306,53 @@ void stopSearch() {
     if (g_searchThread.joinable()) g_searchThread.join();
 }
 
+// The move to suggest the GUI ponder on: what we think the opponent replies
+// with. The search reports only its own best move, so this asks the
+// transposition table what it found for the position *after* that move, and
+// verifies the answer is legal there rather than trusting a hash match.
+std::string ponderMoveFor(const Board& board, const Move& best) {
+    if (best.from < 0 || !g_tt) return "";
+    Board next = board.copyForSearch();
+    next.makeMove(best);
+    int ignored = 0;
+    Move reply;
+    g_tt->probe(next.getHash(), 0, 0, -32000, 32000, ignored, reply);
+    if (reply.from < 0) return "";
+    for (const Move& m : generateLegalMoves(next, next.activeColor))
+        if (m == reply) return toUciMove(reply);
+    return "";
+}
+
+// Print the one line UCI waits for, with a ponder suggestion when we have one.
+void emitBestMove(const Board& board, const Move& best) {
+    const std::string p = ponderMoveFor(board, best);
+    std::cout << "bestmove " << toUciMove(best);
+    if (!p.empty()) std::cout << " ponder " << p;
+    std::cout << std::endl;
+}
+
+void startSearch(SearchLimits limits, Board searchBoard,
+                 std::vector<uint64_t> history, bool pondering) {
+    g_stop = false;
+    g_ponderConverted = false;
+    g_searchThread = std::thread([limits, searchBoard, history, pondering]() mutable {
+        g_searchOptions.quiet = true;   // the search's own logging is not UCI
+        g_searchInfo = onSearchInfo;
+        Move best = findBestMoveIterativeDeepening(searchBoard, limits, g_stop, *g_tt, history);
+        g_searchInfo = nullptr;
+        // A ponder search that `ponderhit` converted must stay silent: the
+        // timed search replacing it owns the bestmove. Every other path --
+        // including `stop` during a ponder -- answers here.
+        if (!(pondering && g_ponderConverted.load()))
+            emitBestMove(searchBoard, best);
+    });
+}
+
 void handleGo(std::istringstream& is) {
     stopSearch();  // a previous search must be finished before starting another
 
-    SearchLimits limits = parseGo(is);
+    bool pondering = false;
+    SearchLimits limits = parseGo(is, pondering);
     g_stop = false;
 
     // Copy the position here, on the command thread, rather than inside the
@@ -284,13 +365,23 @@ void handleGo(std::istringstream& is) {
     // "position" command rebuilds it, and it must not do so under a live search.
     std::vector<uint64_t> history = g_gameHistory;
 
-    g_searchThread = std::thread([limits, searchBoard, history]() mutable {
-        g_searchOptions.quiet = true;   // the search's own logging is not UCI
-        g_searchInfo = onSearchInfo;
-        Move best = findBestMoveIterativeDeepening(searchBoard, limits, g_stop, *g_tt, history);
-        g_searchInfo = nullptr;
-        std::cout << "bestmove " << toUciMove(best) << std::endl;
-    });
+    if (pondering) {
+        // Kept so `ponderhit` can restart the same position with a real clock.
+        g_ponderBoard = searchBoard;
+        g_ponderHistory = history;
+    }
+    startSearch(limits, searchBoard, history, pondering);
+}
+
+// The opponent played the move we were pondering on. The ponder search is
+// stopped without answering, and a normal timed search takes over from the same
+// position -- against a transposition table the ponder search has already
+// filled, which is where the saved time comes from.
+void handlePonderHit() {
+    if (!g_searchThread.joinable()) return;
+    g_ponderConverted = true;
+    stopSearch();
+    startSearch(g_ponderLimits, g_ponderBoard, g_ponderHistory, false);
 }
 
 void handleSetOption(std::istringstream& is) {
@@ -312,9 +403,11 @@ void handleSetOption(std::istringstream& is) {
         return;
     }
 
-    // Accepted and ignored. Announcing an option and then rejecting it is
-    // worse than not announcing it: the GUI has no way to tell that its
-    // configuration did not take.
+    // Accepted and ignored, correctly in both cases. `Threads` is genuinely
+    // unimplemented. `Ponder` is a *declaration* in UCI, not a switch: it tells
+    // the engine the GUI may ponder, and the actual work arrives as
+    // `go ponder`, which this engine now implements. Nothing here needs to
+    // change when the GUI sets it either way.
     if (name == "Threads" || name == "Ponder") return;
 
     if (name == "Hash") {
@@ -395,6 +488,8 @@ int uciLoop() {
             handlePosition(is);
         } else if (command == "go") {
             handleGo(is);
+        } else if (command == "ponderhit") {
+            handlePonderHit();
         } else if (command == "stop") {
             stopSearch();
         } else if (command == "setoption") {
