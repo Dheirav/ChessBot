@@ -1,4 +1,4 @@
-# Handoff — 2026-08-23
+# Handoff — 2026-08-27
 
 Current state, what is in flight, and what to pick up. This is the file to read
 first; it is meant to be rewritten as state changes, unlike `BACKLOG.md`, which
@@ -139,8 +139,8 @@ the baseline of their day, not a regression.
 
 ## Measured playing strength — the external baseline
 
-**Current: 2147 Lichess rapid (rd ±45) over 269 rated games**, as of
-2026-08-24 20:11. The bot plays rated 900+10 against other bots, seeking opponents up
+**Current: 2152 Lichess rapid (rd ±45) over 294 rated games**, as of
+2026-08-27. The bot plays rated 900+10 against other bots, seeking opponents up
 to 2500 since `opponent_max_rating` was raised on 2026-08-21.
 
 **The rating is falling on purpose: 2190 → 2160 → 2130 across three days.** The
@@ -191,17 +191,53 @@ of them minutes long, and the clock runs on our turn throughout. Three of the
 four were first misread as a restart or as the time manager. **Grep a forfeit's
 log for `ConnectionError` before calling it a chess problem.**
 
-## In flight
+## In flight — 2026-08-27
 
-**The Lichess bot is running, on the `razoring` + `revfutility` build.**
-`./chessbot` was relinked 2026-08-22 at 13:14 local (09:14 UTC) from `a8c5a5b`,
-and since lichess-bot spawns a fresh engine per game, every rated game from
-09:20 UTC that day is that binary. The lichess-bot process itself was last
-restarted 2026-08-22 at 22:41 local (18:41 UTC); it confirmed *"when quitting,
-lichess-bot will first wait for all running games to finish"* at startup, so
-**this process's stops are exact** (see below). Current reading is 2130 over
-218 rated games — *Measured playing strength* above, `MEASUREMENTS.md` for the
-history.
+**Read this section first; the rest of the file is older than it.**
+
+### State right now
+
+| | |
+|---|---|
+| **bot** | **DOWN.** Restart it — nothing blocks that |
+| **`./chessbot`** | late-move-pruning build, bench **436,293** |
+| **rating** | **2152**, rd ±45, prog 0, over 294 rated games |
+| **git** | `main` clean and pushed; `eval-texel-tune` and `tt-16byte` parked |
+| **`.wslconfig`** | edited to `processors=8`, **not yet applied** — needs `wsl --shutdown` |
+
+### What shipped 2026-08-26
+
+**Late move pruning, +13.1 Elo [+3.5, +22.8]** over 3 360 games,
+`shard-20260826-181028/`. Cuts 45% of nodes at bench 6. On by default.
+
+Its cost is known and measured, which is why the next item exists: over 120
+positions sampled from the game archive, LMP changes the chosen move in **49**
+of them, and when a depth-11 search adjudicates those disagreements it endorses
+**LMP's move 13 times and the shipped move 20**. So LMP gives up judgement on
+roughly one position in six and buys enough depth to more than pay for it. The
+gate already priced that; the point is that a less aggressive setting might pay
+more.
+
+### What is parked, and why — do not re-derive this
+
+**`eval-texel-tune`** holds Texel-tuned evaluation weights measuring **+25.2
+Elo [+15.7, +34.7]** per node over 3 360 games. They were merged and reverted
+the same day. **The reason is `BUGS.md` 18 and it is the most useful thing in
+this session:** the node price is +7% at bench's depth 6 and **+59% at depth
+10**, which is where the bot plays, so at the clock it is plausibly a net loss.
+The tune is not wrong and the gate is not wrong; the inference from a depth-6
+bench figure was.
+
+Diagnosed further and still parked: the whole cost is aspiration-window
+re-searches (with `Aspiration` off the two builds search within 1% of each
+other), because the tuned weights move the score more between iterations — 22%
+of iterations exceed the ±50 window against 14% for shipped. Four window
+policies were swept across 8 positions and **the current one is the best of
+them**, so there is no cheap fix. Do not spend another evening on it.
+
+**`tt-16byte`** holds a correct, tested 16-byte `TTEntry`. It gains ~1.4% of
+nodes at gate size and ~0 at play size, so it is not worth its bench-signature
+cost alone. It is Phase 0 of Lazy SMP if that is ever built.
 
 **The earlier reading this paragraph used to carry, kept because the next two
 paragraphs argue from it:** 2190 (rd ±45) over 173 rated games as of
@@ -361,7 +397,69 @@ returned ±36 Elo, so matching today's ±6.7 would cost weeks to answer a
 
 ---
 
-## Next, in order
+## Next, in order — 2026-08-27
+
+**This list is current. The `ROADMAP.md` discussion below it is the older
+reasoning that produced it, kept because the arguments still hold.**
+
+1. **Restart the bot.** Nothing blocks it. It is on a build 13 Elo stronger per
+   node and the 2100-2300 band — the one that decides the rating — is still the
+   thinnest evidence in the project.
+
+2. **Apply `processors=8`.** `.wslconfig` is already edited; it needs
+   `wsl --shutdown` from PowerShell. Measured justification: the host is 8
+   cores / 16 logical, WSL had 4, so a saturated WSL could never exceed 25% of
+   the machine while native Windows used **0.6 of 16 logical processors**. Gates
+   are the bottleneck on every remaining item and they halve, ~110 min to ~60.
+
+3. **Gate `LMP_MAX_DEPTH = 2`** (`search.cpp`, currently 3). Evidence-backed by
+   the 13-20 adjudication above: pruning less should hand back judgement while
+   keeping most of the node saving. One gate.
+
+4. **Singular extensions**, then **probcut**. +20-40 each on the Phase 7 prior.
+   Same recipe every time: implement behind its own toggle, verify bench is
+   *bit-identical* with the toggle off, `./tests/bench 6 --opt <f>=on` to see
+   the tree, then `shard-gate.sh` at equal nodes.
+
+5. **Ponder** (+30-50). Real engine work — `go ponder`, `ponderhit`,
+   `bestmove X ponder Y`. It is currently advertised as a no-op. Threading plus
+   the time manager is the combination behind `BUGS.md` 11, so gate it on
+   `--tc` before it ever plays a rated game.
+
+6. **Lazy SMP.** Only worth its +200-280 prior *after* step 2; at 4 threads it
+   was a fraction of that. Needs `tt-16byte` merged first.
+
+7. **Opening book, last, deliberately.** `lichess-bot` already has polyglot
+   support in `config.yml` (lines 16-30), so it is config-only and five
+   minutes. It is last because it is **the only item that costs measurement
+   quality**: `MEASUREMENTS.md` records that every move is the engine's own, and
+   a book makes the rating measure "engine + book" and breaks comparability with
+   every past reading. Do the measured work first. When it does go in, use
+   `max_depth: 8` and record the date as a break in the series.
+
+**Closed, do not reopen without new information:** evaluation *terms*
+(`ROADMAP.md` 6.3, blindness measured at 4.3% over 651 criticised moves — there
+is nothing for a new term to be for), and the Texel weights above.
+
+### Two things about this machine that cost hours if forgotten
+
+**It is shared.** `res_ai` and `BrassBot` run on the same four CPUs, sometimes
+driven by other Claude sessions, and they start without warning. A gate that
+should take 110 minutes took 4 hours once and was abandoned twice. **Check
+before starting anything long** — and check for *all* of them, not just the bot:
+
+```bash
+ps -eo pid,pcpu,comm,args --sort=-pcpu | head
+```
+
+**Match on `comm`, never `pgrep -f`.** `BUGS.md` 9 says this and it still
+caught this session out four times in one day — twice reporting the exact
+opposite of the truth, because the shell running the check matches its own
+pattern. A node-limited gate stays *correct* under contention, so a slow gate is
+only slow; but a wrong answer about whether the bot is running is how
+`./chessbot` gets relinked mid-game.
+
+---
 
 **`ROADMAP.md` is the answer to this question.** In one line: **the evaluation
 is the ceiling and no phase of `PLAN.md` addresses it**, so `ROADMAP.md`
@@ -513,10 +611,12 @@ in the order I would take it:
    largest term has stopped shouting, and now with a reason to believe a gate
    on it will mean something.
 4. **`ROADMAP.md` Phase 7 — the road to 3000.** Written 2026-08-22 after an
-   audit of this list found four dead items in it. The engine is 2130 and
-   single-threaded on a machine that gives WSL four CPUs, has no futility pruning, razoring,
-   late-move pruning, singular extensions or probcut, no ponder, no book and no
-   tablebases. Those absences are measured; the Elo attached to each of them in
+   audit of this list found four dead items in it. **Three of those absences
+   have since been filled** — `razoring` and `revfutility` on 08-22, late move
+   pruning on 08-26 — so as of 2026-08-27 the engine is **2152**, still
+   single-threaded, and still has no singular extensions, no probcut, no ponder,
+   no book and no tablebases. WSL is set to eight CPUs pending a shutdown.
+   Those absences are measured; the Elo attached to each of them in
    Phase 7 is a prior from general practice and has to be earned here. Order is
    pruning suite → Lazy SMP → NNUE, by Elo per unit of effort.
 
