@@ -30,6 +30,9 @@ evaluation_log_*.txt
 # Match gate logs (tee output, often still being written)
 gate-*.log
 gates-all.log
+# Gauntlet logs from tests/gauntlet.sh, same reasoning -- missed when that
+# script landed on 2026-08-21, which is why two of them sat untracked for days.
+gauntlet-*.log
 # Per-shard logs from tests/shard-gate.sh
 shard-*/
 
