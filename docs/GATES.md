@@ -79,6 +79,32 @@ Re-pool any of these with `./tests/pool-shards.sh <dir>/`.
 | `shard-pooled-texel/` | **both of the above pooled, 3 360 games** | **+25.2 [+15.7, +34.7]** — accepted per node, **shipped and reverted the same day** (`BUGS.md` 18) |
 | `shard-20260826-181028/` | **late move pruning** (`lmp`) | **+13.1 [+3.5, +22.8]** — accepted, on by default |
 | `shard-20260827-150404/` | **`lmpshallow`** — LMP at depth 2 instead of 3 | **+15.0 [+5.6, +24.4]** — accepted, on by default |
+| `shard-20260827-210628/` | `lmpdepth1` — LMP at depth 1 instead of 2 | **−31.3 [−40.5, −22.1]** — rejected, stays off |
+
+### The LMP depth curve has a peak, and it is 2
+
+| setting | result |
+|---|---|
+| depth 3 (as first shipped) | baseline |
+| **depth 2** | **+15.0 [+5.6, +24.4]** |
+| depth 1 | **−31.3 [−40.5, −22.1]** |
+
+Two is an optimum rather than a point on a trend, so the question closes here —
+including in the other direction, since a curve with a peak at 2 gives no reason
+to try 4.
+
+**The tree check predicted the sign, for a fraction of the cost.** `lmpdepth1`
+raised bench 6 from 445 492 to 735 879, **+65%**, which is most of what late
+move pruning buys handed straight back; the gate then priced that at −31. Where
+`lmpshallow` cost only +2.1% and won, this cost 65% and lost by roughly twice
+as much. `CLAUDE.md` already says to check the tree before gating; this is the
+first time in this file that the check would have called the result on its own.
+
+Worth keeping for a second reason. It was proposed **with no theory attached**,
+deliberately: the explanation offered for `lmpshallow`'s +15 — that pruning less
+hands back judgement — had not survived measurement, since the disagreement rate
+against a depth-11 referee barely moved (18 against 20). Running the next rung
+was the honest way to find out whether the trend was real. It was not.
 
 ### The Texel tune, 2026-08-25 — and why the two halves are poolable
 

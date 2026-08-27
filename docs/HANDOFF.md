@@ -420,7 +420,10 @@ reasoning that produced it, kept because the arguments still hold.**
    +13.1 and looked finished; the diagnostic turned it into a testable question
    worth another +15 for 2.1% more nodes.
 
-4. **Singular extensions**, then **probcut**. +20-40 each on the Phase 7 prior.
+4. **Gate singular extensions** — implemented 2026-08-27, off by default.
+   Node cost is +11% at depth 11, which is the normal range. Note bench cannot
+   see this feature: its deepest interior node at `bench 8` is depth 7, so the
+   tree check has to be a real search at depth 11+. Then **probcut**. +20-40 each on the Phase 7 prior.
    Same recipe every time: implement behind its own toggle, verify bench is
    *bit-identical* with the toggle off, `./tests/bench 6 --opt <f>=on` to see
    the tree, then `shard-gate.sh` at equal nodes.
