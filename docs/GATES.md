@@ -81,6 +81,8 @@ Re-pool any of these with `./tests/pool-shards.sh <dir>/`.
 | `shard-20260827-150404/` | **`lmpshallow`** — LMP at depth 2 instead of 3 | **+15.0 [+5.6, +24.4]** — accepted, on by default |
 | `shard-20260827-210628/` | `lmpdepth1` — LMP at depth 1 instead of 2 | **−31.3 [−40.5, −22.1]** — rejected, stays off |
 | `shard-20260827-224417/` | `singularext` — **VOID, measured nothing** | −0.6 [−3.4, +2.1] — see below |
+| `shard-20260828-002812/` | `razortight` — razoring margin 350cp vs the shipped 500 | **−1.0 [−10.0, +7.9]** — null, 500 stays |
+| `shard-20260828-020116/` | `singularext` at `-N 3000000` | **−7.1 [−32.1, +17.8]** — **undecided, not rejected** |
 
 ### A gate that ran a feature that never fired — 2026-08-27
 
@@ -105,7 +107,41 @@ even said *"bench cannot see this — the tree check has to be a real search at
 depth 11 or more"*, and the gate was then run at a budget reaching depth 7
 anyway. Writing the constraint down is not the same as applying it.
 
-Re-gated at `-N 1000000`, which reaches depth 9-10.
+Re-gated at `-N 3000000`, which reaches depth 10.
+
+### The razoring margin, closed — 2026-08-28
+
+**500 stays.** 350 against it is **−1.0 [−10.0, +7.9]** over 3 360 games, and
+the pentanomial `168-323-700-329-160` is properly spread, so this is a real
+measurement rather than another accidental null control.
+
+`TODO.md` has carried this since razoring shipped, on the strength of 3.1's
+finding that the bet swings **57 Elo on the constant alone**. It does not
+reproduce here. 3.1 lost 50 Elo at **200cp**, inside the evaluation's own
+measured error; 350 is apparently still outside it, and the curve between 350
+and 500 is flat. The first guess was a good one.
+
+### Singular extensions are undecided, and that is a statement about the harness
+
+**−7.1 [−32.1, +17.8]** over 392 games at `-N 3000000`. The pentanomial
+`17-44-77-46-12` is spread, so the feature *did* fire this time — but ±25 Elo
+cannot separate +18 from −32, and five hours bought that.
+
+**Do not read this as a rejection.** The reason it is undecided is structural
+rather than about the feature:
+
+| | depth |
+|---|---|
+| gate at the usual `-N 100000` | **5-7** |
+| this bot in real games | **10-12** |
+| `SINGULAR_MIN_DEPTH` | **10** |
+
+A node budget deep enough to fire the probe costs **30x** per game, so the games
+affordable in a night fall from 3 360 to 392 and the interval widens past
+usefulness. The alternatives are a `--tc` gate, which cannot be sharded and took
+17 hours for 200 games and ±36 last time, or lowering the threshold until the
+gate can see it — which measures a different feature than the one that would
+play. `BUGS.md` 19.
 
 ### The LMP depth curve has a peak, and it is 2
 

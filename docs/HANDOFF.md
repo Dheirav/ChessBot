@@ -218,6 +218,17 @@ roughly one position in six and buys enough depth to more than pay for it. The
 gate already priced that; the point is that a less aggressive setting might pay
 more.
 
+### Closed 2026-08-28
+
+**The razoring margin.** 350cp against the shipped 500 measured **−1.0
+[−10.0, +7.9]** over 3 360 games, properly spread. `TODO.md` had carried this
+since razoring shipped, on 3.1's finding that the constant swings 57 Elo. It
+does not, between these two values — 3.1's 50-Elo loss was at 200cp, inside the
+evaluation's own error. **500 stays and the question is answered.**
+
+**LMP depth.** 2 is a peak: 3→2 was +15.0, 2→1 was −31.3. Closed in both
+directions.
+
 ### What is parked, and why — do not re-derive this
 
 **`eval-texel-tune`** holds Texel-tuned evaluation weights measuring **+25.2
@@ -420,10 +431,17 @@ reasoning that produced it, kept because the arguments still hold.**
    +13.1 and looked finished; the diagnostic turned it into a testable question
    worth another +15 for 2.1% more nodes.
 
-4. **Gate singular extensions** — implemented 2026-08-27, off by default.
-   Node cost is +11% at depth 11, which is the normal range. Note bench cannot
-   see this feature: its deepest interior node at `bench 8` is depth 7, so the
-   tree check has to be a real search at depth 11+. Then **probcut**. +20-40 each on the Phase 7 prior.
+4. **Singular extensions are implemented and UNDECIDED**, off by default.
+   Two gates: the first was void (the probe never fired at gate depth), the
+   second real but ±25 Elo wide. **`BUGS.md` 19 is the reason and it is
+   structural** — gates search depth 5-7, this feature needs 10, and closing
+   that costs 30x per game. Decide *how* to measure it before spending more
+   nights: a `--tc` gate is the honest instrument and costs ~17 hours.
+
+   **Read `BUGS.md` 19 before building probcut**, which is keyed to deep nodes
+   the same way and will hit the same wall. Features that fire at remaining
+   depth 1-3 — razoring, reverse futility, LMP — gate cheaply and cleanly;
+   anything deep does not. +20-40 each on the Phase 7 prior.
    Same recipe every time: implement behind its own toggle, verify bench is
    *bit-identical* with the toggle off, `./tests/bench 6 --opt <f>=on` to see
    the tree, then `shard-gate.sh` at equal nodes.

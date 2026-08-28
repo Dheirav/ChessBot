@@ -1369,6 +1369,61 @@ forty or more, which it can.
 
 ---
 
+## 19. Gates search at depth 5-7; the bot plays at 10-12 — 2026-08-28
+
+**This project cannot cheaply measure any feature that only activates deep**,
+and singular extensions is the first to run into the wall rather than merely be
+misread by it.
+
+| | depth |
+|---|---|
+| gate at `-N 100000`, the standard budget | **5-7** |
+| `./tests/bench 8`, deepest interior node | **7** |
+| the Lichess bot at 900+10 | **10-12** |
+
+`SINGULAR_MIN_DEPTH` is 10, so the probe fires in games and never in a gate.
+The first attempt returned **−0.6 [−3.4, +2.1]** over 3 360 games and looked
+like a precise null; it was two identical engines, and the pentanomial said so —
+`5-74-1529-66-6`, 91% of pairs dead level. The second, at `-N 3000000` where
+the probe does fire, returned **−7.1 [−32.1, +17.8]** over 392 games: real, and
+too wide to decide anything.
+
+### Why it cannot be fixed by turning a dial
+
+Reaching depth 10 costs **30x** the nodes per move. A night that buys 3 360
+games at the usual budget buys 392 at that one, and the interval widens from
+±9 to ±25. The three ways out each cost something:
+
+- **`--tc`, a real clock.** The bot's own regime, and the only instrument that
+  sees depth honestly. It cannot be sharded, so eight cores do not help: 200
+  games took 17 hours and returned ±36 (`timealloc`, `TODO.md`).
+- **A bigger node budget.** Linear in cost, and the games fall as fast as the
+  depth rises.
+- **Lower the feature's threshold until the gate can see it.** Measures a
+  different feature than the one that would play, which is the whole mistake
+  this entry is about.
+
+### What to do about it
+
+**Before building a feature, ask what depth it activates at.** If the answer is
+above about 8, it is not gateable here at reasonable cost, and that belongs in
+the decision to build it rather than being discovered afterwards. Razoring,
+reverse futility and late move pruning all fire at remaining depth 1-3, which is
+why they gated cleanly and cheaply; singular extensions, probcut and anything
+else keyed to deep nodes will not.
+
+**And read the pentanomial before the Elo.** A distribution piled onto the
+centre — `5-74-1529-66-6` against a healthy `168-323-700-329-160` — means the
+two sides played the same games, and no interval computed from it means
+anything.
+
+This is 17 and 18's lesson a third time, and the sharpest form of it: there the
+instrument was answering a question about a different engine and could be
+corrected; here it cannot answer at all. **Check what regime your instrument is
+in before believing what it says about the engine that plays.**
+
+---
+
 ## Things that look like bugs and are not
 
 - **Two games against `ficheallrs` show `Termination "Abandoned"` after
