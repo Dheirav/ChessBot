@@ -11,7 +11,28 @@ engine:                            # Engine settings.
   working_dir: ""                  # Directory where the chess engine will read and write files. If blank or missing, the current directory is used.
                                    # NOTE: If working_dir is set, the engine will look for files and directories relative to this directory, not where lichess-bot was launched. Absolute paths are unaffected.
   protocol: "uci"                  # "uci", "xboard" or "homemade"
-  ponder: false                    # ChessBot has no ponder support; asking for it would stall.
+  ponder: true                     # Real since 2026-08-28: the engine implements
+                                   # `go ponder`, `ponderhit` and `bestmove ...
+                                   # ponder ...`. It searches the reply it
+                                   # expects while the opponent is on their own
+                                   # clock, which is free depth at 900+10.
+                                   #
+                                   # NOT gated. tests/match has no ponder
+                                   # support, so a match with this on would be
+                                   # two identical engines returning ~0 --
+                                   # worse than no measurement, because it
+                                   # would look like one. The honest check is
+                                   # real games, watched.
+                                   #
+                                   # What to watch for: the engine failing to
+                                   # answer a `ponderhit` promptly loses on
+                                   # time, which is BUGS.md 11's failure mode.
+                                   # ponderhit converts by restarting the
+                                   # search rather than injecting a deadline,
+                                   # specifically to keep every timing decision
+                                   # inside the one path that has been gated.
+                                   # If forfeits appear, this line is the first
+                                   # thing to set back to false.
 
   polyglot:
     enabled: false                 # Activate polyglot book.
