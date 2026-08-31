@@ -218,6 +218,20 @@ roughly one position in six and buys enough depth to more than pay for it. The
 gate already priced that; the point is that a less aggressive setting might pay
 more.
 
+### Closed 2026-09-01 — hand-crafted evaluation work
+
+**`BUGS.md` 20.** Three attempts, one wall. The 18 Texel-tuned scalars gated at
+**+25.2 Elo** and cost **+59%** nodes. The 5 tuned piece values transferred
+**100%** to held-out data and cost **+32.5%**. An adaptive aspiration window,
+built specifically at the mechanism, closes that only to **+22.7%** — worth
+about −21 Elo against a +25 gain, which no gate here can resolve.
+
+**Do not sweep the 432 PST entries.** `tools/tune` reaches them and it is hours
+of coordinate descent to land where the other two already did.
+
+`aspAdaptive` is kept as a toggle, off. `rootRandom` likewise (`BUGS.md` 6,
+fixed, ungated). Both are off by default and bench is bit-identical at 445,492.
+
 ### Closed 2026-08-28
 
 **The razoring margin.** 350cp against the shipped 500 measured **−1.0

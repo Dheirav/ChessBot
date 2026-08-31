@@ -307,6 +307,24 @@ struct SearchOptions {
     // worth more than repeatability.
     bool rootRandom = false;
 
+    // Size the aspiration window from the engine's own recent volatility
+    // instead of a fixed +/-50.
+    //
+    // The fixed window is what has blocked every evaluation improvement this
+    // project has measured. A more accurate evaluation moves its score more
+    // between iterations -- 22% of iterations exceeded +/-50 for the tuned
+    // weights against 14% for the shipped ones -- so the window misses more,
+    // and each miss costs a re-search. The 18 tuned scalars gated at +25.2 Elo
+    // and were reverted for +59% nodes; the tuned piece values generalised at
+    // 100% and cost +32.5%. Both are shelved for this reason and this reason
+    // only.
+    //
+    // Four *fixed* configurations were swept (initial 50/100/200/400, growth x4
+    // and +50%) and the shipped one was best of them, which is what makes an
+    // adaptive window the remaining idea rather than another guess at a
+    // constant.
+    bool aspAdaptive = false;
+
     // There is no king-safety toggle here, and on 2026-08-16 there briefly were
     // two. Both were gated and neither earned its place; the numbers and the
     // reasoning are in evaluation.cpp beside the term they describe, and in

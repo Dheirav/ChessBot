@@ -75,6 +75,12 @@ static constexpr int ROOT_RANDOM_MARGIN = 10;
 // the engine finds nearly equal anyway, is cheap.
 static constexpr int ROOT_RANDOM_MAX_MOVE = 12;
 
+// Aspiration window sizing. 50 is the shipped fixed width and stays the floor,
+// so an adaptive window can only ever be wider -- narrower would trade misses
+// for cutoffs in the direction that already works.
+static constexpr int ASP_BASE_DELTA = 50;
+static constexpr int ASP_MAX_DELTA  = 400;   // past this it is barely a window
+
 uint64_t g_rootSeed = 0;
 
 // xorshift64*, seeded per search from g_rootSeed and the root position. Not a
@@ -173,6 +179,7 @@ const SearchOptionEntry SEARCH_OPTIONS[] = {
     {"singularext", "singext",  "SingularExt", &SearchOptions::singularExt},
     {"razortight",  "razortt",  "RazorTight",  &SearchOptions::razorTight},
     {"rootrandom",  "rootrnd",  "RootRandom",  &SearchOptions::rootRandom},
+    {"aspadaptive", "aspadapt", "AspAdaptive", &SearchOptions::aspAdaptive},
 };
 const size_t SEARCH_OPTION_COUNT = sizeof(SEARCH_OPTIONS) / sizeof(SEARCH_OPTIONS[0]);
 
@@ -882,6 +889,14 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
     const bool randomisingHere = g_searchOptions.rootRandom
                               && board.fullmoveNumber <= ROOT_RANDOM_MAX_MOVE;
 
+    // How far the root score has been moving between iterations, as a decaying
+    // sum and a sample count. Decaying rather than a flat mean because the
+    // early iterations of a search swing wildly and say little about what the
+    // deep ones will do; halving on each new sample keeps roughly the last few
+    // iterations in view.
+    long scoreSwing = 0;
+    int scoreSwingSamples = 0;
+
     // Copied, not referenced: the caller owns its history and may edit it the
     // moment this returns, and a search reading a half-updated list would score
     // draws that are not there. It is at most fifty-odd entries by
@@ -980,7 +995,20 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
         const int INF_HI = INF;
         bool useAspiration = g_searchOptions.aspiration && currentDepth >= 3 &&
                              haveScore && std::abs(bestScore) < 29000;
-        int delta = 50;
+        // The window's starting width.
+        //
+        // Fixed at 50 by default. `aspAdaptive` instead sizes it from how far
+        // the score has actually been moving between iterations, tracked in
+        // `scoreSwing` below as a decaying mean of |score(d) - score(d-1)|.
+        // A window twice the recent swing, floored at the old 50 and capped so
+        // it cannot degenerate into no window at all, should miss about as
+        // often whatever the evaluation's scale -- which is the property the
+        // fixed one lacks.
+        int delta = ASP_BASE_DELTA;
+        if (g_searchOptions.aspAdaptive && scoreSwingSamples > 0) {
+            const int swing = (int)(scoreSwing / scoreSwingSamples);
+            delta = std::max(ASP_BASE_DELTA, std::min(ASP_MAX_DELTA, 2 * swing));
+        }
         int windowLo = useAspiration ? bestScore - delta : INF_LO;
         int windowHi = useAspiration ? bestScore + delta : INF_HI;
 
@@ -1111,6 +1139,14 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
                 if (st == 0) st = 0x9E3779B97F4A7C15ULL;
                 currentBestMove = tied[rootRand(st) % tied.size()];
             }
+        }
+
+        // Feed the volatility tracker before bestScore is overwritten, so the
+        // measurement is genuinely |this depth - previous depth|.
+        if (completedDepth && !searchAborted(shouldStop) && haveScore
+            && std::abs(currentBestScore) < 29000 && std::abs(bestScore) < 29000) {
+            scoreSwing = scoreSwing / 2 + std::abs(currentBestScore - bestScore);
+            scoreSwingSamples = scoreSwingSamples / 2 + 1;
         }
 
         // Only update best move if we completed the full depth

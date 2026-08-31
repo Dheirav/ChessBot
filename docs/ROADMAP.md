@@ -181,6 +181,18 @@ band-by-band cut divides that out.
 `HANDOFF.md`'s third measurement has the full tables and the caveats — chiefly
 that no 2300+ opponent has been met since, so the ceiling is untested.
 
+*6.2 is closed, and so is hand-crafted evaluation work generally —
+`BUGS.md` 20, 2026-09-01.* Three attempts measured the same wall: the 18 scalars
+(+25.2 Elo, +59% nodes), the 5 piece values (100% held-out transfer, +32.5%
+nodes), and an adaptive aspiration window aimed at the mechanism (closes it only
+to +22.7%). **The evaluation is still the ceiling, and it is not reachable by
+making this evaluation better** — the search cannot afford the result. A change
+has to be cheaper per node, not merely more correct, which is the measured
+argument for NNUE.
+
+*The account below is kept because the work it describes is sound and the fits
+were real.*
+
 *6.2 is gated but not shipped.* The general Texel-style tune measured **+25.2
 Elo [+15.7, +34.7]** over 3 360 games at equal nodes — `GATES.md` has the
 numbers — and was **merged and reverted the same day**, because the node price

@@ -1424,6 +1424,61 @@ in before believing what it says about the engine that plays.**
 
 ---
 
+## 20. This evaluation cannot afford to be more accurate — 2026-09-01
+
+**Three independent attempts to improve the evaluation all measured a node cost
+that cancels the gain.** Not one tune going wrong; a property of the engine.
+
+| attempt | quality | node price |
+|---|---|---|
+| 18 scalar weights, Texel-tuned | **+25.2 Elo [+15.7, +34.7]**, gated over 3 360 games | **+59%** at depth 10 |
+| 5 piece values, Texel-tuned | **100%** of training gain transferred to held-out | **+32.5%** over 8 positions at depth 10 |
+| adaptive aspiration window, aimed at the mechanism | — | closes the gap to **+22.7%**, and costs **+13.4%** on the shipped evaluation for nothing |
+
+Different parameters, different corpus slices, and finally a change aimed at the
+cause rather than the symptom. All three land in the same place.
+
+### The mechanism, and why the obvious fix only half works
+
+A more accurate evaluation produces scores that move more between iterations.
+Measured: the tuned build exceeded the fixed ±50 aspiration window on **22% of
+iterations against 14%** for the shipped one, over 128 iteration-pairs. Each
+miss costs a re-search.
+
+That diagnosis is right — `aspAdaptive`, which sizes the window from a decaying
+mean of |score(d) − score(d−1)|, does close about a third of the penalty. It is
+kept as a toggle, off, because a third is not enough: at **+22.7%** nodes the
+tuned evaluation still pays roughly **−21 Elo** by the doubling-is-70 rule
+against a **+25.2** gain. Net about **+4**, which a gate with ±9 precision
+cannot resolve.
+
+Four *fixed* window configurations were swept first (initial 50/100/200/400,
+growth ×4 and +50%) and the shipped one was best of them, which is what made an
+adaptive window the remaining idea rather than another guess at a constant.
+
+### What this closes, and what it opens
+
+**Closed: hand-crafted evaluation tuning.** The harness works, the corpus is
+sound, the fits generalise — and shipping any of them costs more depth than the
+accuracy buys. `tools/tune` reaches all 476 parameters and the remaining 432
+PST entries are *not* worth sweeping: two data points already show where it
+lands, and hours of coordinate descent would buy a third.
+
+**Open: NNUE**, and this entry is the argument for it rather than a preference.
+NNUE's accuracy costs a *fixed, small* amount per node with no magnitude churn
+to destabilise the search — which is exactly the trade that failed three times
+here. It is also gateable at equal nodes, being an evaluation change, unlike
+Lazy SMP.
+
+### The shape to remember
+
+`ROADMAP.md` has said since Phase 6 that **the evaluation is the ceiling**. That
+is still true. What is new is that the ceiling is not reachable by making this
+evaluation better — the search cannot afford the result. A change has to be
+cheaper per node, not merely more correct.
+
+---
+
 ## Things that look like bugs and are not
 
 - **Two games against `ficheallrs` show `Termination "Abandoned"` after
