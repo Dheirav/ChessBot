@@ -397,6 +397,15 @@ void handleSetOption(std::istringstream& is) {
 
     auto isTrue = [](const std::string& v) { return v == "true" || v == "1"; };
 
+    if (name == "RootSeed") {
+        const long v = std::atol(value.c_str());
+        if (v > 0) {
+            g_rootSeed = (uint64_t)v;
+            std::cout << "info string root seed " << g_rootSeed << " (set)" << std::endl;
+        }
+        return;
+    }
+
     if (name == "Move Overhead") {
         int ms = std::atoi(value.c_str());
         if (ms >= 0 && ms <= 5000) g_moveOverheadMs = ms;
@@ -433,6 +442,14 @@ void handleSetOption(std::istringstream& is) {
 
 int uciLoop() {
     initMoveLookupTables();
+
+    // A fresh seed per process, announced immediately. Without the announcement
+    // this would be irreproducible play, which BUGS.md 6 rules out; with it, a
+    // game can be replayed exactly by setting RootSeed to the logged value.
+    // Inert unless RootRandom is on.
+    g_rootSeed = (uint64_t)std::chrono::steady_clock::now().time_since_epoch().count()
+               ^ 0x9E3779B97F4A7C15ULL;
+    std::cout << "info string root seed " << g_rootSeed << std::endl;
     g_tt = std::make_unique<TranspositionTable>((size_t)g_hashMb);
     g_board.setFromFEN(Board::INITIAL_FEN);
 
@@ -467,6 +484,10 @@ int uciLoop() {
             std::cout << "option name Threads type spin default 1 min 1 max 1\n";
             std::cout << "option name Ponder type check default false\n";
             std::cout << "option name Move Overhead type spin default 100 min 0 max 5000\n";
+            // Seeded and logged, which is the condition BUGS.md 6 attaches to
+            // randomised play: set this to a value printed in an earlier game's
+            // log and that game replays move for move.
+            std::cout << "option name RootSeed type spin default 0 min 0 max 2147483647\n";
             const SearchOptions defaults;
             for (size_t i = 0; i < SEARCH_OPTION_COUNT; ++i) {
                 std::cout << "option name " << SEARCH_OPTIONS[i].uciName

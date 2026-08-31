@@ -59,6 +59,32 @@ static constexpr int SINGULAR_MIN_DEPTH = 10;  // no probe shallower than this
 static constexpr int SINGULAR_TT_SLACK   = 3;  // entry may be this much shallower
 static constexpr int SINGULAR_MARGIN     = 2;  // beta drop, per ply of depth
 
+// How far below the best a root move may score and still be considered for the
+// random tiebreak. Ten centipawns is deliberately small: the aim is opening
+// variety against the same opponent, not to play a worse move on purpose.
+static constexpr int ROOT_RANDOM_MARGIN = 10;
+
+// Randomise only in the opening, by fullmove number.
+//
+// This is where the defect lives -- `BUGS.md` 6 is about *repeated openings*
+// against the same opponent, and two games that diverge by move 12 are already
+// decorrelated. It is also where the cost is affordable. The tiebreak needs a
+// true score for every root move, which means no alpha cutoffs at the root,
+// which costs +234% nodes at bench 6. Paying that for the whole game would lose
+// far more than the variety is worth; paying it for twelve moves, in positions
+// the engine finds nearly equal anyway, is cheap.
+static constexpr int ROOT_RANDOM_MAX_MOVE = 12;
+
+uint64_t g_rootSeed = 0;
+
+// xorshift64*, seeded per search from g_rootSeed and the root position. Not a
+// good general-purpose generator and does not need to be: it chooses among a
+// handful of moves, and being cheap and dependency-free matters more.
+static uint64_t rootRand(uint64_t& state) {
+    state ^= state >> 12; state ^= state << 25; state ^= state >> 27;
+    return state * 0x2545F4914F6CDD1DULL;
+}
+
 // Delta pruning margin: how much a capture is allowed to be behind alpha before
 // it is dismissed as unable to catch up. A capture that cannot reach alpha even
 // after winning its victim plus this much positional compensation is not going
@@ -146,6 +172,7 @@ const SearchOptionEntry SEARCH_OPTIONS[] = {
     {"lmpdepth1",   "lmpd1",    "LmpDepth1",   &SearchOptions::lmpDepth1},
     {"singularext", "singext",  "SingularExt", &SearchOptions::singularExt},
     {"razortight",  "razortt",  "RazorTight",  &SearchOptions::razorTight},
+    {"rootrandom",  "rootrnd",  "RootRandom",  &SearchOptions::rootRandom},
 };
 const size_t SEARCH_OPTION_COUNT = sizeof(SEARCH_OPTIONS) / sizeof(SEARCH_OPTIONS[0]);
 
@@ -850,6 +877,11 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
                                    const std::vector<uint64_t>& gameHistory) {
     const int maxDepth = limits.maxDepth;
 
+    // Whether this search randomises among near-equal root moves: the toggle,
+    // and only while still in the opening. Computed once so every use agrees.
+    const bool randomisingHere = g_searchOptions.rootRandom
+                              && board.fullmoveNumber <= ROOT_RANDOM_MAX_MOVE;
+
     // Copied, not referenced: the caller owns its history and may edit it the
     // moment this returns, and a search reading a half-updated list would score
     // draws that are not there. It is at most fifty-odd entries by
@@ -954,9 +986,20 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
 
         std::vector<uint64_t> pathHashes;
 
+        // Root moves with an *exact* score this iteration, for the tiebreak.
+        //
+        // Only moves that raise alpha get re-searched with a full window and
+        // therefore an exact score; the rest return an upper bound and we know
+        // only that they are no better. So this list under-samples the truly
+        // near-equal moves rather than guessing at them -- which is the safe
+        // direction, since a move is only ever chosen when it is *known* to be
+        // within the margin.
+        std::vector<std::pair<Move, int>> exactRootScores;
+
         while (true) {
             currentBestScore = INF_LO;
             currentBestMove = moves[0];
+            exactRootScores.clear();
             completedDepth = true;
             pathHashes.clear();
             pathHashes.push_back(hash);
@@ -968,6 +1011,8 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
             // widened retry starts from the fresh window.
             int alpha = windowLo;
             int beta = windowHi;
+            // Held for the rootRandom path, which must not see alpha rise.
+            const int windowLoFixed = windowLo;
 
             for (size_t i = 0; i < moves.size(); ++i) {
                 const Move& move = moves[i];
@@ -983,6 +1028,26 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
                 if (i == 0) {
                     eval = -minimaxWithTT(board, currentDepth - 1, 1, -beta, -alpha,
                                           shouldStop, tt, pathHashes);
+                } else if (randomisingHere) {
+                    // Every root move searched against the *original* window,
+                    // never a raised alpha. This is the only way to get a true
+                    // score for each of them, and the tiebreak is meaningless
+                    // without one.
+                    //
+                    // Two earlier versions of this were wrong, both silently.
+                    // Using PVS scores never fired at all, because with good
+                    // ordering only the first move raises alpha and there is
+                    // nothing to choose between. Using a full window but a
+                    // rising alpha fired constantly and chose junk -- a move
+                    // below alpha still returns a *bound*, so f2f3 at a true
+                    // -71 was accepted against a best of +51, well outside the
+                    // ten-centipawn margin it was supposed to respect.
+                    //
+                    // The price is no alpha cutoffs at the root. It is confined
+                    // to the root ply and this path is off for gates and bench,
+                    // so nothing measured pays for it.
+                    eval = -minimaxWithTT(board, currentDepth - 1, 1, -beta, -windowLoFixed,
+                                          shouldStop, tt, pathHashes);
                 } else {
                     // Principal variation search: later root moves get a cheap
                     // null-window probe first, and only a move that beats alpha
@@ -997,6 +1062,10 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
                 board.unmakeMove(undo);
 
                 if (!searchAborted(shouldStop)) {
+                    // Exact iff this move raised alpha (or is the first, which
+                    // is searched on the full window). Anything else is a bound.
+                    if (i == 0 || randomisingHere || eval > alpha)
+                        exactRootScores.emplace_back(move, eval);
                     if (eval > currentBestScore) {
                         currentBestScore = eval;
                         currentBestMove = move;
@@ -1024,6 +1093,25 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
             break;
         }
 
+
+        // --- Random tiebreak among near-equal root moves (BUGS.md 6) ---
+        // Applied per iteration so the reported best move and the played move
+        // never disagree. Skipped entirely when off, which is why bench is
+        // unchanged and gates stay reproducible.
+        if (randomisingHere && completedDepth && !searchAborted(shouldStop)
+            && exactRootScores.size() > 1 && std::abs(currentBestScore) < 29000) {
+            std::vector<Move> tied;
+            for (const auto& ms : exactRootScores)
+                if (ms.second >= currentBestScore - ROOT_RANDOM_MARGIN) tied.push_back(ms.first);
+            if (tied.size() > 1) {
+                // Seeded from the run seed and the position, so a whole game
+                // replays identically given the same seed, while different
+                // games diverge.
+                uint64_t st = g_rootSeed ^ (hash + 0x9E3779B97F4A7C15ULL * (uint64_t)currentDepth);
+                if (st == 0) st = 0x9E3779B97F4A7C15ULL;
+                currentBestMove = tied[rootRand(st) % tied.size()];
+            }
+        }
 
         // Only update best move if we completed the full depth
         if (completedDepth && !searchAborted(shouldStop)) {

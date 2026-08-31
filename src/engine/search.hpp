@@ -290,6 +290,23 @@ struct SearchOptions {
     // was chosen to sit outside it. 350 is the midpoint worth asking about.
     bool razorTight = false;
 
+    // Pick randomly among root moves within ROOT_RANDOM_MARGIN of the best,
+    // instead of always taking the first one found. `BUGS.md` 6.
+    //
+    // The defect is not that the engine plays badly, it is that it plays the
+    // *same* game: it met `sargon-3ply` twice and the two games were identical
+    // for 36 plies. Two costs follow. An opponent that finds one refutation
+    // reuses it forever, and results against a repeated opponent stop being
+    // independent samples -- 32% of the archive is against sixteen opponents
+    // met four or more times, so every percentage in `MEASUREMENTS.md` is worth
+    // less than its game count.
+    //
+    // **Off by default, and it must stay off for gates.** Randomised play would
+    // make a node-limited A/B irreproducible, which is the one property the
+    // whole gate methodology rests on. It is for rated games, where variety is
+    // worth more than repeatability.
+    bool rootRandom = false;
+
     // There is no king-safety toggle here, and on 2026-08-16 there briefly were
     // two. Both were gated and neither earned its place; the numbers and the
     // reasoning are in evaluation.cpp beside the term they describe, and in
@@ -322,6 +339,12 @@ struct SearchOptionEntry {
     const char* uciName;    // as advertised over UCI: "SeePruning"
     bool SearchOptions::*field;
 };
+// Seed for the root tiebreak. Set from the clock at engine start and printed
+// as `info string root seed <n>`, so a game can be replayed exactly by handing
+// the same seed back through the `RootSeed` UCI option. `BUGS.md` 6 asks for
+// precisely that: randomness is acceptable only if it is seeded and logged.
+extern uint64_t g_rootSeed;
+
 extern const SearchOptionEntry SEARCH_OPTIONS[];
 extern const size_t SEARCH_OPTION_COUNT;
 
