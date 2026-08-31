@@ -57,35 +57,79 @@ extern int BISHOP_PAIR, MOBILITY, ROOK_OPEN_FILE, ROOK_SEMI_OPEN, ROOK_ON_7TH;
 extern int OUTPOST, TRAPPED_PIECE, UNDEFENDED;
 extern int CENTRE_CONTROL, KING_CENTRE_DIST, KING_PAWN_SHIELD, KING_ACTIVITY;
 }
+// pieceValues comes from evaluation.hpp, which declares it mutable because this
+// file is compiled with -DEVAL_TUNING. The tables are file-scope in
+// evaluation.cpp and have no header, so they are named here.
+extern int PST_PAWN[64], PST_KNIGHT[64], PST_BISHOP[64], PST_ROOK[64];
+extern int PST_QUEEN[64], PST_KING_MG[64], PST_KING_EG[64];
 
+// Groups, so a run can be cheap. 476 parameters is hours of coordinate
+// descent; five piece values is minutes, and the first question worth asking
+// is whether a tuned evaluation destabilises the search the way the eighteen
+// scalars did -- which the cheapest group answers as well as the dearest.
 struct Knob {
+    const char* group;
     const char* name;
     int* value;
     int original;
 };
 
-static std::vector<Knob> knobs() {
+static const char* PIECE_NAME[7] = {"none","king","pawn","knight","bishop","rook","queen"};
+
+static std::vector<Knob> knobs(const std::string& only) {
     using namespace EvalWeights;
     std::vector<Knob> k = {
-        {"DOUBLED_PAWN", &DOUBLED_PAWN, 0},
-        {"ISOLATED_PAWN", &ISOLATED_PAWN, 0},
-        {"BACKWARD_PAWN", &BACKWARD_PAWN, 0},
-        {"CONNECTED_PAWN", &CONNECTED_PAWN, 0},
-        {"PASSED_PAWN", &PASSED_PAWN, 0},
-        {"PAWN_CHAIN", &PAWN_CHAIN, 0},
-        {"BISHOP_PAIR", &BISHOP_PAIR, 0},
-        {"MOBILITY", &MOBILITY, 0},
-        {"ROOK_OPEN_FILE", &ROOK_OPEN_FILE, 0},
-        {"ROOK_SEMI_OPEN", &ROOK_SEMI_OPEN, 0},
-        {"ROOK_ON_7TH", &ROOK_ON_7TH, 0},
-        {"OUTPOST", &OUTPOST, 0},
-        {"TRAPPED_PIECE", &TRAPPED_PIECE, 0},
-        {"UNDEFENDED", &UNDEFENDED, 0},
-        {"CENTRE_CONTROL", &CENTRE_CONTROL, 0},
-        {"KING_CENTRE_DIST", &KING_CENTRE_DIST, 0},
-        {"KING_PAWN_SHIELD", &KING_PAWN_SHIELD, 0},
-        {"KING_ACTIVITY", &KING_ACTIVITY, 0},
+        {"scalars", "DOUBLED_PAWN", &DOUBLED_PAWN, 0},
+        {"scalars", "ISOLATED_PAWN", &ISOLATED_PAWN, 0},
+        {"scalars", "BACKWARD_PAWN", &BACKWARD_PAWN, 0},
+        {"scalars", "CONNECTED_PAWN", &CONNECTED_PAWN, 0},
+        {"scalars", "PASSED_PAWN", &PASSED_PAWN, 0},
+        {"scalars", "PAWN_CHAIN", &PAWN_CHAIN, 0},
+        {"scalars", "BISHOP_PAIR", &BISHOP_PAIR, 0},
+        {"scalars", "MOBILITY", &MOBILITY, 0},
+        {"scalars", "ROOK_OPEN_FILE", &ROOK_OPEN_FILE, 0},
+        {"scalars", "ROOK_SEMI_OPEN", &ROOK_SEMI_OPEN, 0},
+        {"scalars", "ROOK_ON_7TH", &ROOK_ON_7TH, 0},
+        {"scalars", "OUTPOST", &OUTPOST, 0},
+        {"scalars", "TRAPPED_PIECE", &TRAPPED_PIECE, 0},
+        {"scalars", "UNDEFENDED", &UNDEFENDED, 0},
+        {"scalars", "CENTRE_CONTROL", &CENTRE_CONTROL, 0},
+        {"scalars", "KING_CENTRE_DIST", &KING_CENTRE_DIST, 0},
+        {"scalars", "KING_PAWN_SHIELD", &KING_PAWN_SHIELD, 0},
+        {"scalars", "KING_ACTIVITY", &KING_ACTIVITY, 0},
     };
+
+    // Material. The king's slot is not a value -- it exists so the array can be
+    // indexed by PieceType -- and tuning it would be meaningless.
+    for (int pt = 2; pt <= 6; ++pt)
+        k.push_back({"material", PIECE_NAME[pt], &pieceValues[pt], 0});
+
+    // Piece-square tables. Ranks 1 and 8 are skipped for pawns: no pawn ever
+    // stands there, so those sixteen entries are unreachable and tuning them
+    // would spend a fifth of the pawn table's budget on numbers the evaluation
+    // can never read.
+    struct { const char* name; int* t; bool pawn; } tables[] = {
+        {"pst_pawn", PST_PAWN, true}, {"pst_knight", PST_KNIGHT, false},
+        {"pst_bishop", PST_BISHOP, false}, {"pst_rook", PST_ROOK, false},
+        {"pst_queen", PST_QUEEN, false}, {"pst_king_mg", PST_KING_MG, false},
+        {"pst_king_eg", PST_KING_EG, false},
+    };
+    static std::vector<std::string> pstNames;   // stable storage for the labels
+    pstNames.reserve(7 * 64);
+    for (auto& t : tables)
+        for (int sq = 0; sq < 64; ++sq) {
+            if (t.pawn && (sq < 8 || sq >= 56)) continue;
+            pstNames.push_back(std::string(t.name) + "[" + std::to_string(sq) + "]");
+            k.push_back({"pst", pstNames.back().c_str(), &t.t[sq], 0});
+        }
+
+    if (!only.empty()) {
+        std::vector<Knob> filtered;
+        for (const Knob& x : k)
+            if (only == x.group || (only == "pst" && std::string(x.group) == "pst"))
+                filtered.push_back(x);
+        k.swap(filtered);
+    }
     for (Knob& x : k) x.original = *x.value;
     return k;
 }
@@ -103,11 +147,24 @@ struct Sample {
 // a fixed scale, not through the fitted K. K is what converts THIS evaluation's
 // centipawns into probabilities; reusing it on the target would let the tuner
 // move the target and the prediction together and call the gap closed.
+// Three label spellings reach this, and getting the discrimination wrong is
+// silent: every one of them parses as *some* number under atof.
+//
+//   "1-0" / "0-1" / "1/2-1/2"   PGN results, which is what quiet-labeled.epd
+//                               uses. atof("1-0") is 1 and atof("1/2-1/2") is
+//                               also 1, so treating these as scores turns half
+//                               the corpus into "White is ahead by one
+//                               centipawn".
+//   "1.0" / "0.5" / "0.0"       decimal results, from texel-corpus.py
+//   "-83"                       a Stockfish score in centipawns, from
+//                               sf-label.py
 static double labelToProbability(const std::string& text) {
-    const bool isResult = text.find('.') != std::string::npos;
-    const double v = std::atof(text.c_str());
-    if (isResult) return v;
-    return 1.0 / (1.0 + std::pow(10.0, -v / 400.0));
+    if (text == "1-0")     return 1.0;
+    if (text == "0-1")     return 0.0;
+    if (text == "1/2-1/2") return 0.5;
+    if (text.find('.') != std::string::npos) return std::atof(text.c_str());
+    const double cp = std::atof(text.c_str());
+    return 1.0 / (1.0 + std::pow(10.0, -cp / 400.0));
 }
 
 static bool loadCorpus(const char* path, std::vector<Sample>& out) {
@@ -117,7 +174,18 @@ static bool loadCorpus(const char* path, std::vector<Sample>& out) {
     while (std::getline(in, line)) {
         const size_t tag = line.find(" c9 \"");
         if (tag == std::string::npos) continue;
-        const std::string fen = line.substr(0, tag);
+        std::string fen = line.substr(0, tag);
+        // EPD carries four FEN fields; the halfmove and fullmove counters are
+        // optional and quiet-labeled.epd omits them. setFromFEN wants all six
+        // and its failure here is silent -- the position is skipped -- so a
+        // corpus of 725 000 of them loads as zero and the tuner reports
+        // "held no usable positions" rather than anything about the format.
+        {
+            int fields = 0;
+            for (size_t i = 0, n = fen.size(); i <= n; ++i)
+                if (i == n || fen[i] == ' ') { if (i && fen[i-1] != ' ') ++fields; }
+            if (fields == 4) fen += " 0 1";
+        }
         const size_t close = line.find('"', tag + 5);
         if (close == std::string::npos) continue;
         const double result = labelToProbability(line.substr(tag + 5, close - tag - 5));
@@ -167,7 +235,13 @@ int main(int argc, char** argv) {
     // change is kept only when it falls. The question is whether the fit
     // transfers to games the tuner never saw, and with 267 games carrying one
     // label each it is entirely possible that it does not.
-    const char* testPath = (argc > 2) ? argv[2] : nullptr;
+    const char* testPath = (argc > 2 && argv[2][0] != '-') ? argv[2] : nullptr;
+
+    // --only <group>: scalars | material | pst. Omitted means everything.
+    std::string only;
+    for (int i = 1; i < argc - 1; ++i)
+        if (std::string(argv[i]) == "--only") only = argv[i + 1];
+
     initMoveLookupTables();
 
     std::vector<Sample> data;
@@ -181,7 +255,10 @@ int main(int argc, char** argv) {
         std::printf("held out: %zu positions from %s\n", held.size(), testPath);
     }
 
-    std::vector<Knob> k = knobs();
+    std::vector<Knob> k = knobs(only);
+    if (k.empty()) { std::fprintf(stderr, "no knobs match --only %s\n", only.c_str()); return 1; }
+    std::printf("tuning %zu parameters%s%s\n", k.size(),
+                only.empty() ? "" : " from group ", only.c_str());
 
     const double K = fitK(data);
     const double startE = meanSquaredError(data, K);

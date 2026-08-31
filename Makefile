@@ -230,14 +230,31 @@ review: tools/review
 # it can perturb between passes. That object is built into build/tune/ so it can
 # never be picked up by the engine or the tests: a shipped binary with runtime
 # weights would silently lose the constant folding the evaluation depends on.
-TUNE_EVAL_OBJ = build/tune/evaluation.o
-TUNE_ENGINE_OBJ = $(filter-out src/engine/evaluation.o,$(ENGINE_OBJ)) $(TUNE_EVAL_OBJ)
+# EVERY engine object is rebuilt with -DEVAL_TUNING, not just evaluation.o.
+#
+# It used to be only evaluation.o, which worked while the tunable weights were
+# private to that file. It stops working the moment `pieceValues` becomes
+# tunable: the header declares it `extern const int[7]`, see.cpp and search.cpp
+# are compiled against that, and a definition as `int[7]` in one object is a
+# different type for the same symbol -- an ODR violation the linker is under no
+# obligation to diagnose. Compiling the whole engine one way keeps every
+# translation unit agreeing about what the symbol is.
+TUNE_ENGINE_OBJ = $(patsubst src/engine/%.cpp,build/tune/%.o,$(ENGINE_SRC))
+TUNE_DEP = $(TUNE_ENGINE_OBJ:.o=.d)
+-include $(TUNE_DEP)
 
-$(TUNE_EVAL_OBJ): src/engine/evaluation.cpp
+build/tune/%.o: src/engine/%.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) -DEVAL_TUNING -c $< -o $@
 
-tools/tune: tools/tune.o $(TUNE_ENGINE_OBJ)
+# tune.o also needs -DEVAL_TUNING, or the header hands it `const int
+# pieceValues[7]` while the engine objects define `int pieceValues[7]` -- the
+# same ODR mismatch the comment above describes, seen from the other side.
+build/tune/tune.o: tools/tune.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -DEVAL_TUNING -c $< -o $@
+
+tools/tune: build/tune/tune.o $(TUNE_ENGINE_OBJ)
 	$(CXX) $^ -o $@ $(LDFLAGS)
 
 tune: tools/tune

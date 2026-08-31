@@ -9,7 +9,13 @@
 #include <vector>
 
 // Piece values indexed by PieceType (NONE=0, KING=1, PAWN=2, KNIGHT=3, BISHOP=4, ROOK=5, QUEEN=6)
-const int pieceValues[] = { 0, 20000, 100, 325, 335, 525, 950 };
+// Tunable in the -DEVAL_TUNING build. KING is not a real value -- it exists so
+// the array can be indexed by PieceType -- and must never be tuned.
+#ifdef EVAL_TUNING
+int pieceValues[7] = { 0, 20000, 100, 325, 335, 525, 950 };
+#else
+const int pieceValues[7] = { 0, 20000, 100, 325, 335, 525, 950 };
+#endif
 
 // There is no king-danger term here -- no charge for enemy pieces attacking
 // the squares around the king -- and like the hanging-piece penalty below, the
@@ -87,8 +93,12 @@ const int threatBonus[] = { 0, 0, 10, 25, 30, 50, 100 };
 // ---------------------------------------------------------------------------
 #ifdef EVAL_TUNING
   #define EVAL_WEIGHT int
+  // Piece-square tables lose both `static` and `const` so tools/tune can bind
+  // to them by name. In the shipped build they stay exactly as they were.
+  #define EVAL_TABLE
 #else
   #define EVAL_WEIGHT constexpr int
+  #define EVAL_TABLE static const
 #endif
 
 namespace EvalWeights {
@@ -145,7 +155,7 @@ EVAL_WEIGHT KING_ACTIVITY    =  5;   // endgame only
 // Standard simplified evaluation tables. Black uses the vertically mirrored table (sq ^ 56).
 
 // Pawn
-static const int PST_PAWN[64] = {
+EVAL_TABLE int PST_PAWN[64] = {
       0,  0,  0,  0,  0,  0,  0,  0,
      50, 50, 50, 50, 50, 50, 50, 50,
      10, 10, 20, 30, 30, 20, 10, 10,
@@ -157,7 +167,7 @@ static const int PST_PAWN[64] = {
 };
 
 // Knight
-static const int PST_KNIGHT[64] = {
+EVAL_TABLE int PST_KNIGHT[64] = {
     -50,-40,-30,-30,-30,-30,-40,-50,
     -40,-20,  0,  0,  0,  0,-20,-40,
     -30,  0, 10, 15, 15, 10,  0,-30,
@@ -169,7 +179,7 @@ static const int PST_KNIGHT[64] = {
 };
 
 // Bishop
-static const int PST_BISHOP[64] = {
+EVAL_TABLE int PST_BISHOP[64] = {
     -20,-10,-10,-10,-10,-10,-10,-20,
     -10,  0,  0,  0,  0,  0,  0,-10,
     -10,  0,  5, 10, 10,  5,  0,-10,
@@ -181,7 +191,7 @@ static const int PST_BISHOP[64] = {
 };
 
 // Rook
-static const int PST_ROOK[64] = {
+EVAL_TABLE int PST_ROOK[64] = {
       0,  0,  0,  0,  0,  0,  0,  0,
       5, 10, 10, 10, 10, 10, 10,  5,
      -5,  0,  0,  0,  0,  0,  0, -5,
@@ -193,7 +203,7 @@ static const int PST_ROOK[64] = {
 };
 
 // Queen
-static const int PST_QUEEN[64] = {
+EVAL_TABLE int PST_QUEEN[64] = {
     -20,-10,-10, -5, -5,-10,-10,-20,
     -10,  0,  0,  0,  0,  0,  0,-10,
     -10,  0,  5,  5,  5,  5,  0,-10,
@@ -205,7 +215,7 @@ static const int PST_QUEEN[64] = {
 };
 
 // King (middlegame)
-static const int PST_KING_MG[64] = {
+EVAL_TABLE int PST_KING_MG[64] = {
     -30,-40,-40,-50,-50,-40,-40,-30,
     -30,-40,-40,-50,-50,-40,-40,-30,
     -30,-40,-40,-50,-50,-40,-40,-30,
@@ -217,7 +227,7 @@ static const int PST_KING_MG[64] = {
 };
 
 // King (endgame)
-static const int PST_KING_EG[64] = {
+EVAL_TABLE int PST_KING_EG[64] = {
     -50,-40,-30,-20,-20,-30,-40,-50,
     -30,-20,-10,  0,  0,-10,-20,-30,
     -30,-10, 20, 30, 30, 20,-10,-30,
