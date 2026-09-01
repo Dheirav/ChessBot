@@ -482,3 +482,63 @@ Caveat carried from `BUGS.md` 6: play is deterministic and 32% of the archive is
 against sixteen repeated opponents, so these samples are worth less than their
 counts. And accuracy is a function of the analysing engine and depth — these
 numbers compare this engine to itself and to nothing else.
+
+---
+
+## Contention calibration — 2026-09-01, and what `nps-health` never had a number for
+
+`BUGS.md` 16 is the most expensive measurement error in this project: on
+2026-08-23 the engine ran at roughly a third of its speed for twenty-one hours,
+and thirty-four rated games were recorded, analysed and written up as evidence
+that `razoring` had regressed. Re-measured on healthy hardware the same build
+came back at +0.11 sigma. `tools/nps-health.py` was built so that could not
+recur silently.
+
+What the tool never had was a **calibration point** — a reading taken while the
+machine was known to be busy, with the load described. Every day in its table
+so far is either healthy or the 08-23 disaster. This is the middle case.
+
+### The load
+
+Seven CPU-bound workers from an unrelated project (`BrassBot`, CFR training),
+six at `nice 5` and one at `nice 19`, on an 8-core WSL. Load average **7.23**.
+The engine runs at `nice 0` and is single-threaded (`Threads` min 1 max 1), so
+it contends for one core against seven niced ones — and CFS weights are
+exponential, so `nice 5` carries roughly 2.5x less weight than the engine and
+`nice 19` about 68x less.
+
+### The reading
+
+Measured directly, `go depth 12` from the start position, while all seven ran:
+
+| | knps |
+|---|---|
+| engine under load, depth 10 / 11 / 12 | 525 / 528 / 485 |
+| baseline, median of daily medians in real games | **593** |
+| `nps-health` degraded threshold (0.6x) | 356 |
+| that day's own game median | 595, reported `ok` |
+
+**82-89% of baseline.** Well clear of the flag, and materially different from
+the 08-23 failure, which was near a third.
+
+### What this calibrates
+
+**The flag threshold is not the interesting boundary.** A machine can be 15%
+slow and pass, which is correct for the flag's purpose — it exists to catch the
+catastrophic case that invalidated a whole day of games. But 11-18% fewer nodes
+is a fraction of a ply and worth a few Elo, so a *passing* reading is not the
+same as a clean one.
+
+**The distinction is between playing and measuring, not between fast and slow.**
+Rated games tolerate this: the loss is small, it applies to every game equally,
+and the rating absorbs it. A gate does not. `shard-gate.sh 14 60` wants fourteen
+engine processes against seven already-busy cores, and the pooled result would
+be load-dependent in exactly the way 16 describes. So the standing rule is now
+stated as a number rather than a caution: **the bot may run on a machine at this
+load; a gate may not.**
+
+Also worth carrying: the day's game median read 595 while a direct probe read
+485-528. Not a contradiction — most of that day's games were played before the
+poker job scaled up. **A daily median is a lagging indicator**, so a same-day
+reading cannot clear a machine that got busy an hour ago. Probe directly before
+trusting a gate.
