@@ -529,6 +529,14 @@ this engine today.
 Sum of the priors: **650–1100**. So 3000 is inside the range, and the ordering
 below is by Elo per unit of effort rather than by size.
 
+> **Superseded on ordering, 2026-09-01 — the reasoning below still holds, the
+> sequence does not.** The pruning suite in item 1 has largely shipped
+> (razoring, revfutility, LMP; singular undecided). Two things reorder the rest:
+> the **move-ordering history family is entirely absent** and is now the cheapest
+> item on the board, and **Lazy SMP drops below NNUE** because it cannot be gated
+> at equal nodes and would starve the bot it is measured against. Current
+> sequence lives in `HANDOFF.md` "Next, in order"; see also `TODO.md` §2.
+
 **1. The pruning suite.** Cheapest, most incremental, and the existing harness
 already measures it well. PLAN 3.4 is the first one and carries its own warning:
 the same bet swung 57 Elo on one constant, so start conservative.

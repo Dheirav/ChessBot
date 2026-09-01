@@ -1470,6 +1470,18 @@ to destabilise the search — which is exactly the trade that failed three times
 here. It is also gateable at equal nodes, being an evaluation change, unlike
 Lazy SMP.
 
+**What this entry does not say, added 2026-09-01: that NNUE is startable.** The
+argument above is about cost per node and it stands. The obstacle is the
+*corpus*. This same file records the Texel tune memorising 267 games with
+**eighteen** parameters — training error −4.41%, held-out +2.11%. A small net
+has ~10 million and this archive is 448 games, against the 10^8-10^9 positions
+published nets train on. NNUE here is a data-generation project first.
+
+**Correction history is the cheap probe of this entry's premise.** A table
+adjusting the static evaluation by how wrong it proved in similar positions
+attacks the same addressable error, needs no corpus at all, and costs almost
+nothing per node. If the premise is right it should show up there first.
+
 ### The shape to remember
 
 `ROADMAP.md` has said since Phase 6 that **the evaluation is the ceiling**. That

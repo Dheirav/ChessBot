@@ -422,14 +422,15 @@ returned ±36 Elo, so matching today's ±6.7 would cost weeks to answer a
 
 ---
 
-## Next, in order — 2026-08-27
+## Next, in order — 2026-09-01
 
 **This list is current. The `ROADMAP.md` discussion below it is the older
 reasoning that produced it, kept because the arguments still hold.**
 
-1. **Restart the bot.** Nothing blocks it. It is on a build 13 Elo stronger per
-   node and the 2100-2300 band — the one that decides the rating — is still the
-   thinnest evidence in the project.
+1. **Restart the bot.** Nothing blocks it, and it now also picks up **Syzygy**
+   — `config.yml` is read at startup, so the tablebases are inert until then.
+   The 2100-2300 band, the one that decides the rating, is still the thinnest
+   evidence in the project.
 
 2. ~~**Apply `processors=8`.**~~ **Done 2026-08-27**, `nproc` = 8. The
    justification, kept because it explains what the numbers mean: the host is 8
@@ -440,12 +441,40 @@ reasoning that produced it, kept because the arguments still hold.**
    than a clean 2x: it is a laptop and the thermal budget is shared.
 
 3. ~~**Gate `LMP_MAX_DEPTH = 2`.**~~ **Done 2026-08-27: +15.0 Elo
-   [+5.6, +24.4]**, shipped as `lmpshallow`. The 13-20 adjudication predicted
-   it and was worth more than the feature it was checking — LMP shipped at
-   +13.1 and looked finished; the diagnostic turned it into a testable question
-   worth another +15 for 2.1% more nodes.
+   [+5.6, +24.4]**, shipped as `lmpshallow`.
 
-4. **Singular extensions are implemented and UNDECIDED**, off by default.
+4. **The history family — the cheapest unsampled Elo left in the search.**
+   Added to the head of this queue 2026-09-01, ahead of everything below it.
+
+   `grep` over `src/engine/search.*` finds killer moves, a plain butterfly
+   history, MVV-LVA and SEE. It does **not** find continuation history,
+   counter-move history, capture history, correction history or probcut. That
+   is the entire modern move-ordering suite absent, and **none of it has been
+   gated here even once.**
+
+   **Why this is not more of the same, which matters given the last month.**
+   Razoring, reverse futility and LMP all *cut* the tree, and they compete for
+   the same margin — which is why the later ones keep measuring null
+   (`razortight` −1.0, `lmpdepth1` −31.3, `singularext` void). History
+   *orders* the tree instead, so it makes every one of those cuts land more
+   accurately **at identical nodes**. Different mechanism, and the returns have
+   never been sampled here.
+
+   They also fire at shallow remaining depth, so unlike singular extensions and
+   probcut they gate cheaply at `-N 100000`. `BUGS.md` 19 is why that
+   distinction decides what is affordable.
+
+   - **Continuation history** (+20-40 prior). History keyed on the *previous*
+     move as well as this one. One table, one toggle, one gate.
+   - **Capture history** (+10-20). MVV-LVA and SEE order captures statically;
+     nothing here learns which captures actually worked.
+   - **Correction history** (+15-30). A table that adjusts the **static
+     evaluation** by how wrong it proved in similar positions. Note what this
+     one is: it attacks the same ~290cp of addressable static error that NNUE
+     targets, needs **no training data**, and costs almost nothing per node.
+     It is the item that tests NNUE's premise before paying NNUE's price.
+
+5. **Singular extensions are implemented and UNDECIDED**, off by default.
    Two gates: the first was void (the probe never fired at gate depth), the
    second real but ±25 Elo wide. **`BUGS.md` 19 is the reason and it is
    structural** — gates search depth 5-7, this feature needs 10, and closing
@@ -454,26 +483,59 @@ reasoning that produced it, kept because the arguments still hold.**
 
    **Read `BUGS.md` 19 before building probcut**, which is keyed to deep nodes
    the same way and will hit the same wall. Features that fire at remaining
-   depth 1-3 — razoring, reverse futility, LMP — gate cheaply and cleanly;
-   anything deep does not. +20-40 each on the Phase 7 prior.
-   Same recipe every time: implement behind its own toggle, verify bench is
-   *bit-identical* with the toggle off, `./tests/bench 6 --opt <f>=on` to see
+   depth 1-3 — razoring, reverse futility, LMP, and the history family above —
+   gate cheaply and cleanly; anything deep does not. +20-40 each on the Phase 7
+   prior. Same recipe every time: implement behind its own toggle, verify bench
+   is *bit-identical* with the toggle off, `./tests/bench 6 --opt <f>=on` to see
    the tree, then `shard-gate.sh` at equal nodes.
 
-5. **Ponder** (+30-50). Real engine work — `go ponder`, `ponderhit`,
-   `bestmove X ponder Y`. It is currently advertised as a no-op. Threading plus
-   the time manager is the combination behind `BUGS.md` 11, so gate it on
-   `--tc` before it ever plays a rated game.
+6. ~~**Ponder**~~ **Done 2026-08-31.** Real `go ponder` / `ponderhit` /
+   `bestmove X ponder Y`, plus a real `Move Overhead` subtracted from the clock.
+   `ponderhit` restarts the search rather than injecting a deadline.
 
-6. **Lazy SMP.** Only worth its +200-280 prior *after* step 2; at 4 threads it
-   was a fraction of that. Needs `tt-16byte` merged first.
+7. ~~**Syzygy 3-4-5**~~ **Done 2026-09-01.** 290 files, 939MB, read by
+   lichess-bot rather than the engine, so it is a `config.yml` change. Verified
+   on ten positions before enabling. A different bargain from a book: a
+   tablebase move is *provably optimal*, so it can only correct the engine,
+   never flatter it — but the date is still a break in the `MEASUREMENTS.md`
+   series for endgames.
 
-7. **Opening book, last, deliberately.** `lichess-bot` already has polyglot
+8. **Lazy SMP — demoted 2026-09-01, on measurement rather than size.** The
+   +200-280 prior stands (roughly half at 8 threads). But it **cannot be gated
+   on nodes by construction**, so it needs `--tc`; and eight search threads on
+   this machine starve the very bot the rating is read from. `BUGS.md` 16 is
+   the record of what a starved machine does to evidence — thirty-four rated
+   games written up as a regression that did not exist. Do this when the
+   measurement is not competing with the thing being measured. Needs
+   `tt-16byte` merged first.
+
+9. **NNUE — the right target, and a data project before it is an engine
+   project.** `BUGS.md` 20 is the argument and it is now three-for-three: every
+   evaluation improvement *worked* and every one was cancelled by node cost
+   (+25.2 Elo for +59% nodes; 100% transfer for +32.5%; adaptive windows
+   closing only to +22.7%). NNUE inverts exactly that trade — the accumulator
+   updates incrementally, so a far more accurate evaluation costs a fixed,
+   small amount per node — and being an evaluation change it **gates at equal
+   nodes**, which Lazy SMP cannot.
+
+   **The blocker is training data, and it is the trap that has already caught
+   this project once.** The Texel tune had 267 games and memorised them
+   outright: training error −4.41% while held-out *rose* 2.11%, with **18
+   parameters**. A small net has ~10 million. This archive is 448 games;
+   published nets train on 10^8-10^9 positions. So the first deliverable is not
+   a net, it is a corpus — weeks of self-play on a machine already shared with
+   a live bot, or a public dataset — and after it a PyTorch trainer, int8
+   quantisation, AVX2 inference, and accumulator hooks threaded through
+   make/unmake. **XL is the honest size**, and item 4's correction history is
+   the cheap probe of whether the premise holds here.
+
+10. **Opening book, last, deliberately.** `lichess-bot` already has polyglot
    support in `config.yml` (lines 16-30), so it is config-only and five
-   minutes. It is last because it is **the only item that costs measurement
-   quality**: `MEASUREMENTS.md` records that every move is the engine's own, and
-   a book makes the rating measure "engine + book" and breaks comparability with
-   every past reading. Do the measured work first. When it does go in, use
+   minutes. It is last because it is **the only remaining item that costs
+   measurement quality**: a book makes the rating measure "engine + book" and
+   hides what the engine would have chosen in positions it still has to
+   understand. Syzygy was accepted above precisely because it does *not* have
+   that property. Do the measured work first. When it does go in, use
    `max_depth: 8` and record the date as a break in the series.
 
 **Closed, do not reopen without new information:** evaluation *terms*

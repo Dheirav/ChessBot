@@ -135,15 +135,39 @@ practice, not measured here**; the middle column is measured.
 
 | item | measured state today | prior | size |
 |---|---|---|---|
+| **Move-ordering history family** — continuation, counter-move, capture, correction history | **none of them exist**; `grep` finds only killers + a plain butterfly history, MVV-LVA and SEE | +45–90 combined | **S–M each** |
 | **Lazy SMP** | single-threaded; host is 8 cores / 16 threads, **WSL raised 4 → 8 on 2026-08-27** | +200–280 *(assumes ~16; at 8 threads expect roughly half)* | L |
-| **NNUE evaluation** | hand-crafted, material-dominated; ~290cp of addressable static error | +200–400 | XL |
-| **Search pruning suite** — futility, razoring, LMP, singular, probcut | **none of them exist** | +150–300 | M each |
-| **Ponder** | absent; `config.yml` says the engine has no support | +30–50 | M |
-| **Opening book + Syzygy 3-4-5** | neither exists | +20–50 | S |
+| **NNUE evaluation** | hand-crafted, material-dominated; ~290cp of addressable static error | +200–400 | XL, **and gated behind a corpus this repo does not have** |
+| **Search pruning suite** — futility, razoring, LMP, singular, probcut | razoring, revfutility, LMP **all shipped**; singular implemented but **undecided**; probcut absent | +150–300 | M each |
+| **Ponder** | **shipped 2026-08-31** | +30–50 | M |
+| **Syzygy 3-4-5** | **shipped 2026-09-01**, 290 files / 939MB, via lichess-bot | +20–30 | S |
+| **Opening book** | absent, deliberately last — the only item left that costs measurement quality | +20–30 | S |
 | **Raw speed** | ~800 knps; bitboards measured at only 1.02× | +50–100 | L |
 
-Order by Elo per effort: pruning suite → Lazy SMP → NNUE → the afternoon jobs.
-PLAN 3.4 is the first pruning item and is already in the table above.
+**Revised ordering, 2026-09-01:** **history family → probcut / resolve singular
+→ NNUE → Lazy SMP → book.**
+
+Three things changed it. The pruning suite is largely done, so the old head of
+the list is spent. The **history family turns out to be entirely absent** and is
+the cheapest unsampled Elo left — and it works by a *different mechanism* than
+everything gated recently: razoring, revfutility and LMP all **cut** the tree
+and compete for the same margin, which is why the later ones keep measuring null
+(`razortight` −1.0, `lmpdepth1` −31.3). History **orders** the tree, so it makes
+those same cuts land more accurately at identical nodes. And **Lazy SMP drops
+below NNUE** — not on size but on measurability: it cannot be gated on nodes by
+construction, and eight search threads would starve the bot the rating is read
+from (`BUGS.md` 16).
+
+**Correction history is the one to notice.** It adjusts the static evaluation by
+how wrong it proved in similar positions — the same ~290cp of addressable error
+NNUE targets, with **no training data and almost no cost per node**. It tests
+NNUE's premise before anyone pays NNUE's price.
+
+**NNUE's real blocker is the corpus, not the code.** `BUGS.md` 20 makes it the
+right target; the archive makes it not yet startable. 448 games against ~10
+million parameters, when the Texel tune already memorised 267 games with
+**eighteen** (training −4.41%, held-out +2.11%). Published nets train on
+10^8–10^9 positions. The first deliverable is a corpus, not a net.
 
 ---
 
