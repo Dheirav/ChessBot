@@ -42,9 +42,51 @@ void MoveOrderer::clear() {
             historyTable[from][to] = 0;
         }
     }
+
+    // Once per search, not once per node -- but 2.4 MB is worth not paying for
+    // when the feature is off, which matters because tests/match runs both
+    // sides of a gate in one process.
+    if (g_searchOptions.contHist) contHistory.fill(0);
+    if (g_searchOptions.captHist) captureHistory.fill(0);
 }
 
-void MoveOrderer::orderMoves(MoveList& moves, const Board& board, int depth, Move ttMove) const {
+int MoveOrderer::pieceCode(const Piece& p) {
+    const PieceType t = p.type();
+    if (t == NONE) return -1;
+    return (p.color() == COLOR_BLACK ? 6 : 0) + (int)t - 1;
+}
+
+long MoveOrderer::contIndex(const Move& prevMove, const Move& move) {
+    const int prevPiece = pieceCode(prevMove.movedPiece);
+    const int piece     = pieceCode(move.movedPiece);
+    if (prevPiece < 0 || piece < 0) return -1;
+    if (prevMove.to < 0 || prevMove.to >= 64 || move.to < 0 || move.to >= 64) return -1;
+    return (((long)prevPiece * 64 + prevMove.to) * (PIECE_CODES * 64))
+         + (long)piece * 64 + move.to;
+}
+
+long MoveOrderer::captIndex(const Move& move) {
+    const int piece  = pieceCode(move.movedPiece);
+    const int victim = (int)move.capturedPiece.type();
+    if (piece < 0 || victim == NONE) return -1;
+    if (move.to < 0 || move.to >= 64) return -1;
+    return ((long)piece * 64 + move.to) * 7 + victim;
+}
+
+int MoveOrderer::getContHistScore(const Move& move, const Move* prevMove) const {
+    if (!g_searchOptions.contHist || prevMove == nullptr) return 0;
+    const long idx = contIndex(*prevMove, move);
+    return idx < 0 ? 0 : contHistory[(size_t)idx];
+}
+
+int MoveOrderer::getCaptHistScore(const Move& move) const {
+    if (!g_searchOptions.captHist) return 0;
+    const long idx = captIndex(move);
+    return idx < 0 ? 0 : captureHistory[(size_t)idx] >> CAPT_HIST_SHIFT;
+}
+
+void MoveOrderer::orderMoves(MoveList& moves, const Board& board, int depth,
+                             Move ttMove, const Move* prevMove) const {
     const size_t count = std::min(moves.size(), MAX_ORDERED_MOVES);
     if (count < 2) return;
 
@@ -62,7 +104,8 @@ void MoveOrderer::orderMoves(MoveList& moves, const Board& board, int depth, Mov
     };
     ScoredMove scored[MAX_ORDERED_MOVES];
     for (size_t i = 0; i < count; ++i) {
-        scored[i] = ScoredMove{getMoveScore(moves[i], board, depth, ttMove), moves[i]};
+        scored[i] = ScoredMove{getMoveScore(moves[i], board, depth, ttMove, prevMove),
+                               moves[i]};
     }
 
     std::sort(scored, scored + count,
@@ -93,7 +136,7 @@ void MoveOrderer::updateKillerMove(const Move& move, int depth) {
     killerMoves[depth][0] = move;
 }
 
-void MoveOrderer::updateHistory(const Move& move, int depth) {
+void MoveOrderer::updateHistory(const Move& move, int depth, const Move* prevMove) {
     if (move.from >= 64 || move.to >= 64 || depth <= 0) return;
     
     // Don't update history for captures (they have their own ordering)
@@ -107,6 +150,39 @@ void MoveOrderer::updateHistory(const Move& move, int depth) {
     if (historyTable[move.from][move.to] > HISTORY_MAX) {
         ageHistory();
     }
+
+    // Same bonus into the continuation table, but applied with gravity rather
+    // than clamped -- and the difference is not cosmetic.
+    //
+    // historyTable halves *everything* when one entry overflows (ageHistory).
+    // A clamped table next to an aged one drifts apart: continuation scores
+    // pile up at the ceiling and stay there while butterfly scores are
+    // repeatedly cut in half, so saturated entries become indistinguishable
+    // from each other and outrank every aged move. The first bench of this
+    // showed exactly that -- +12.2% nodes, with one position up 81%.
+    //
+    // Gravity is the standard answer and needs no aging pass: the increment
+    // shrinks as the entry grows, so it approaches HISTORY_MAX without ever
+    // reaching it and keeps its resolution near the top of the range. That
+    // also spares the 2.4 MB halving this table could not afford.
+    if (g_searchOptions.contHist && prevMove != nullptr) {
+        const long idx = contIndex(*prevMove, move);
+        if (idx >= 0) {
+            int& entry = contHistory[(size_t)idx];
+            entry += bonus - (entry * bonus) / HISTORY_MAX;
+        }
+    }
+}
+
+void MoveOrderer::updateCaptureHistory(const Move& move, int depth) {
+    if (!g_searchOptions.captHist || depth <= 0) return;
+    if (move.capturedPiece.type() == NONE) return;
+    const long idx = captIndex(move);
+    if (idx < 0) return;
+    // Gravity, for the same reason as the continuation table above.
+    int& entry = captureHistory[(size_t)idx];
+    const int bonus = depth * depth;
+    entry += bonus - (entry * bonus) / HISTORY_MAX;
 }
 
 void MoveOrderer::ageHistory() {
@@ -135,7 +211,8 @@ int MoveOrderer::getMVVLVAScore(const Move& move, const Board& board) const {
     return victimValue * 10 - attackerValue;
 }
 
-int MoveOrderer::getMoveScore(const Move& move, const Board& board, int depth, Move ttMove) const {
+int MoveOrderer::getMoveScore(const Move& move, const Board& board, int depth,
+                              Move ttMove, const Move* prevMove) const {
     // 1. Transposition table move (highest priority)
     if (move == ttMove) {
         return 1000000;
@@ -157,12 +234,18 @@ int MoveOrderer::getMoveScore(const Move& move, const Board& board, int depth, M
     // exchange result as the key directly is worse — most sound captures
     // resolve to 0, which collapses QxQ, RxR and PxP into one block and
     // discards the victim-value ordering that produces early cutoffs.
+    // Capture history is added *inside* whichever band SEE chose, never across
+    // it: MVV-LVA tops out at 9 000 and the shifted history at 4 096, against
+    // bands 300 000 apart. So it reorders sound captures among themselves and
+    // losing captures among themselves, and cannot promote a losing capture
+    // above a sound one -- which is the ordering SEE was gated to produce.
     if (move.capturedPiece.type() != NONE) {
         int mvvlva = getMVVLVAScore(move, board);
+        const int ch = getCaptHistScore(move);
         if (g_searchOptions.seeOrdering && see(board, move) < 0) {
-            return 600000 + mvvlva;  // losing: below the killers
+            return 600000 + mvvlva + ch;  // losing: below the killers
         }
-        return 900000 + mvvlva;
+        return 900000 + mvvlva + ch;
     }
 
     // 3. Promotions
@@ -180,8 +263,13 @@ int MoveOrderer::getMoveScore(const Move& move, const Board& board, int depth, M
         }
     }
     
-    // 5. History heuristic
-    return getHistoryScore(move);
+    // 5. History heuristic, plus the continuation table.
+    //
+    // Summed rather than ranked: they answer different questions -- "has this
+    // move been good lately" and "has it been good *after that* move" -- and a
+    // move both tables like should outrank one only either likes. Both cap at
+    // 16 384, so the pair stays far below the killer band at 690 000.
+    return getHistoryScore(move) + getContHistScore(move, prevMove);
 }
 
 bool MoveOrderer::isKillerMove(const Move& move, int depth) const {

@@ -11,12 +11,13 @@
 Board::Board() {
     ZobristHash::initialize();
     currentHash = 0;
+    pawnHash = 0;
     setFromFEN(INITIAL_FEN);
 }
 
 // Lightweight constructor: leaves the position uninitialized, so the caller
 // must populate it (see copyForSearch). Avoids FEN parsing and hash setup.
-Board::Board(SearchCopyTag) : currentHash(0) {}
+Board::Board(SearchCopyTag) : currentHash(0), pawnHash(0) {}
 
 Board Board::copyForSearch() const {
     Board copy(SearchCopyTag{});
@@ -27,6 +28,7 @@ Board Board::copyForSearch() const {
     copy.halfmoveClock = halfmoveClock;
     copy.fullmoveNumber = fullmoveNumber;
     copy.currentHash = currentHash;
+    copy.pawnHash = pawnHash;
     return copy;
 }
 
@@ -101,7 +103,13 @@ UndoInfo Board::makeMove(const Move& move) {
         return u;
     }
 
+    u.pawnHashBefore = pawnHash;
+
     uint64_t h = currentHash;
+    // Tracked alongside h through exactly the same three piece movements. A
+    // promotion removes a pawn and adds a non-pawn, so it XORs out and never
+    // back in; the castling rook is never a pawn.
+    uint64_t ph = pawnHash;
 
     // Determine the piece actually captured and where it is removed from
     int capturedSq = -1;
@@ -122,11 +130,15 @@ UndoInfo Board::makeMove(const Move& move) {
 
     // Remove the moved piece from its source square
     h ^= ZobristHash::getPieceSquareHash(move.from, u.movedPiece.type(), u.movedPiece.color());
+    if (u.movedPiece.type() == PAWN)
+        ph ^= ZobristHash::getPieceSquareHash(move.from, PAWN, u.movedPiece.color());
     squares[move.from] = Piece();
 
     // Remove the captured piece
     if (captured.type() != NONE && capturedSq >= 0) {
         h ^= ZobristHash::getPieceSquareHash(capturedSq, captured.type(), captured.color());
+        if (captured.type() == PAWN)
+            ph ^= ZobristHash::getPieceSquareHash(capturedSq, PAWN, captured.color());
         squares[capturedSq] = Piece();
     }
 
@@ -137,6 +149,8 @@ UndoInfo Board::makeMove(const Move& move) {
         squares[move.to] = promo;
     } else {
         h ^= ZobristHash::getPieceSquareHash(move.to, u.movedPiece.type(), u.movedPiece.color());
+        if (u.movedPiece.type() == PAWN)
+            ph ^= ZobristHash::getPieceSquareHash(move.to, PAWN, u.movedPiece.color());
         squares[move.to] = u.movedPiece;
     }
 
@@ -216,6 +230,7 @@ UndoInfo Board::makeMove(const Move& move) {
     h ^= ZobristHash::getSideToMoveHash();
 
     currentHash = h;
+    pawnHash = ph;
     return u;
 }
 
@@ -276,6 +291,7 @@ void Board::unmakeMove(const UndoInfo& u) {
 
     // Restore the hash from before the move (simplest and always correct)
     currentHash = u.hashBefore;
+    pawnHash = u.pawnHashBefore;
 }
 
 void Board::saveStateForUndo() {
@@ -455,6 +471,21 @@ uint64_t Board::computeHash() const {
     return hash;
 }
 
+// Pawns only, and both colours. The side to move is not folded in: correction
+// history indexes by side separately, so putting it here as well would split
+// each structure into two half-populated entries.
+uint64_t Board::computePawnHash() const {
+    uint64_t hash = 0;
+    for (int square = 0; square < 64; ++square) {
+        const Piece& piece = squares[square];
+        if (piece.type() == PAWN) {
+            hash ^= ZobristHash::getPieceSquareHash(square, PAWN, piece.color());
+        }
+    }
+    return hash;
+}
+
 void Board::updateHash() {
     currentHash = computeHash();
+    pawnHash = computePawnHash();
 }

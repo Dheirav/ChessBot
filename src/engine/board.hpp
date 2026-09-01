@@ -56,6 +56,7 @@ inline std::string enPassantSquareToString(int square) {
 // Data required to reverse a move made via makeMove (see unmakeMove)
 struct UndoInfo {
     uint64_t hashBefore = 0;
+    uint64_t pawnHashBefore = 0;
     int from = -1;
     int to = -1;
     Piece movedPiece;
@@ -100,6 +101,20 @@ private:
     // Zobrist hash for transposition table
     uint64_t currentHash;
 
+    // Zobrist hash of the pawns alone, maintained incrementally beside
+    // currentHash and deliberately not folded into it.
+    //
+    // It exists for correction history, which needs a key that is *coarser*
+    // than the position: a table indexed by full hash would never see the same
+    // entry twice and could not learn anything. Pawn structure is the right
+    // grain -- it persists across many moves, and it is what a
+    // material-dominated evaluation misprices most consistently.
+    //
+    // Kept out of currentHash because the transposition table must keep keying
+    // on the whole position; two positions with identical pawns are not the
+    // same node.
+    uint64_t pawnHash;
+
     // Tag for a lightweight constructor that skips FEN parsing (used by copyForSearch)
     struct SearchCopyTag {};
     explicit Board(SearchCopyTag);
@@ -140,7 +155,9 @@ public:
 
     // Hash functions for transposition table
     uint64_t computeHash() const;
+    uint64_t computePawnHash() const;
     uint64_t getHash() const { return currentHash; }
+    uint64_t getPawnHash() const { return pawnHash; }
     void updateHash();
 
     // Lightweight copy for search: copies the position state but skips the

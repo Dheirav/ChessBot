@@ -8,6 +8,7 @@
 #include "see.hpp"
 #include <limits>
 #include <algorithm>
+#include <cstring>
 #include <atomic>
 #include <iostream>
 #include <chrono>
@@ -147,6 +148,57 @@ static int scoreForSideToMove(const Board& board) {
 
 SearchOptions g_searchOptions;
 
+// --- Correction history (SearchOptions::corrHist) ---
+//
+// The search already measures this evaluation's error thousands of times a
+// second and discards it: every node has a static score and, once searched, the
+// value that search actually returned. The gap between them is the error, for
+// free. This keeps a running average of it, keyed on pawn structure, and adds
+// it back as an offset next time.
+//
+// Keyed on pawns because the key has to be *coarser* than the position or it
+// never repeats -- a full-hash table would learn nothing -- and because pawn
+// structure is both persistent across moves and the thing a material-dominated
+// evaluation misprices most. Board::pawnHash exists for this and is maintained
+// beside the main hash without being folded into it.
+static constexpr int CORR_SIZE   = 16384;   // power of two: indexed by mask
+static constexpr int CORR_GRAIN  = 256;     // fixed point, so small errors survive averaging
+static constexpr int CORR_CAP    = 96 * CORR_GRAIN;  // a correction, not a second evaluation
+static constexpr int CORR_WEIGHT = 128;     // denominator of the running average
+static int g_corrHist[2][CORR_SIZE];
+
+static inline int corrSide(const Board& board) {
+    return (board.activeColor == COLOR_WHITE) ? 0 : 1;
+}
+
+static inline size_t corrSlot(const Board& board) {
+    return (size_t)(board.getPawnHash() & (uint64_t)(CORR_SIZE - 1));
+}
+
+// Static evaluation with the learned correction applied. Bit-identical to
+// scoreForSideToMove() while the toggle is off, which is what keeps the bench
+// signature intact.
+static int correctedEval(const Board& board) {
+    const int raw = scoreForSideToMove(board);
+    if (!g_searchOptions.corrHist) return raw;
+    const int adjusted = raw + g_corrHist[corrSide(board)][corrSlot(board)] / CORR_GRAIN;
+    // A correction must never manufacture a mate score: those are compared
+    // against MATE_SCORE thresholds all over the search and a fake one would
+    // propagate as a real mate.
+    return std::max(-MATE_SCORE + 1000, std::min(MATE_SCORE - 1000, adjusted));
+}
+
+// Weighted toward recent observations, and clamped. The weight rises with
+// depth because a deeper search's verdict is better evidence about the error
+// than a shallow one's.
+static void updateCorrHist(const Board& board, int depth, int diff) {
+    int& entry = g_corrHist[corrSide(board)][corrSlot(board)];
+    const int w = std::min(depth + 1, 16);
+    const long blended = ((long)entry * (CORR_WEIGHT - w)
+                          + (long)diff * CORR_GRAIN * w) / CORR_WEIGHT;
+    entry = (int)std::max((long)-CORR_CAP, std::min((long)CORR_CAP, blended));
+}
+
 // The one place a search feature is named.
 //
 // Setting an option by name and describing which options are set are the same
@@ -180,6 +232,9 @@ const SearchOptionEntry SEARCH_OPTIONS[] = {
     {"razortight",  "razortt",  "RazorTight",  &SearchOptions::razorTight},
     {"rootrandom",  "rootrnd",  "RootRandom",  &SearchOptions::rootRandom},
     {"aspadaptive", "aspadapt", "AspAdaptive", &SearchOptions::aspAdaptive},
+    {"conthist",    "conthist", "ContHist",    &SearchOptions::contHist},
+    {"capthist",    "capthist", "CaptHist",    &SearchOptions::captHist},
+    {"corrhist",    "corrhist", "CorrHist",    &SearchOptions::corrHist},
 };
 const size_t SEARCH_OPTION_COUNT = sizeof(SEARCH_OPTIONS) / sizeof(SEARCH_OPTIONS[0]);
 
@@ -470,6 +525,9 @@ void recordGamePosition(std::vector<uint64_t>& history, uint64_t hashBefore,
 // Minimax with transposition table support. `pathHashes` holds the zobrist
 // keys of the positions on the current search path (root to parent) and is
 // used to score in-search repetitions as draws.
+// `prevMove` is the move that led to this node -- nullptr at the root and below
+// a null move -- and exists for continuation history, which orders replies by
+// what they are answering.
 // `excluded` is the singular-extension probe's one intrusion into the search:
 // the move it must pretend does not exist. A node searched with an excluded
 // move is answering "how good is this position *without* that move", which is a
@@ -478,6 +536,7 @@ void recordGamePosition(std::vector<uint64_t>& history, uint64_t hashBefore,
 static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
                         const std::atomic<bool>& shouldStop, TranspositionTable& tt,
                         std::vector<uint64_t>& pathHashes,
+                        const Move* prevMove = nullptr,
                         const Move* excluded = nullptr) {
     ++g_searchNodes;
     // Check if we should stop searching
@@ -600,9 +659,22 @@ static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
     const bool nearMate = (std::abs(alpha) >= MATE_SCORE - 1000)
                        || (std::abs(beta) >= MATE_SCORE - 1000);
 
+    // Computed once and shared by the pruning tests below and the correction
+    // update at the end of the node. The condition is unchanged while corrHist
+    // is off, so the evaluation is called in exactly the same places it was.
+    int  staticEval = 0;
+    bool haveStatic = false;
+    const bool wantStatic =
+        !inCheck && (g_searchOptions.corrHist
+                     || (!isPV && !nearMate
+                         && (g_searchOptions.revFutility || g_searchOptions.razoring)));
+    if (wantStatic) {
+        staticEval = correctedEval(board);
+        haveStatic = true;
+    }
+
     if (!isPV && !inCheck && !nearMate
         && (g_searchOptions.revFutility || g_searchOptions.razoring)) {
-        const int staticEval = scoreForSideToMove(board);
 
         // Reverse futility: so far above beta that giving the opponent the best
         // reply this evaluation can imagine still would not bring it below.
@@ -634,8 +706,9 @@ static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
     if (g_searchOptions.nullMove && depth >= 3 && !inCheck && hasNonPawnMaterial(board, side)) {
         const int R = 2;
         NullUndo nu = board.makeNullMove();
+        // No previous move below a null move: there is no reply to key on.
         int nullScore = -minimaxWithTT(board, depth - 1 - R, ply + 1, -beta, -beta + 1,
-                                       shouldStop, tt, pathHashes);
+                                       shouldStop, tt, pathHashes, nullptr);
         board.unmakeNullMove(nu);
         if (!searchAborted(shouldStop) && nullScore >= beta) return beta;
     }
@@ -668,7 +741,8 @@ static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
     // work to do and the shallow search would mostly rediscover it.
     if (g_searchOptions.iid && ttMove.from == -1 && depth >= 5 && !inCheck) {
         const int R = 2;
-        minimaxWithTT(board, depth - R, ply, alpha, beta, shouldStop, tt, pathHashes);
+        minimaxWithTT(board, depth - R, ply, alpha, beta, shouldStop, tt, pathHashes,
+                      prevMove);
         // The shallow search stores its result under this same position, so the
         // move it liked is read back the way any other TT move would be. That
         // is deliberate: it keeps one path into the ordering rather than two.
@@ -678,7 +752,7 @@ static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
     }
 
     // Move ordering with killer moves and history heuristic
-    g_moveOrderer.orderMoves(moves, board, depth, ttMove);
+    g_moveOrderer.orderMoves(moves, board, depth, ttMove, prevMove);
 
     // Aggressively search TT move first if available
     if (ttMove.from != -1) {
@@ -718,7 +792,8 @@ static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
             if (probeDepth > 0) {
                 const int without = minimaxWithTT(board, probeDepth, ply,
                                                   singularBeta - 1, singularBeta,
-                                                  shouldStop, tt, pathHashes, &ttMove);
+                                                  shouldStop, tt, pathHashes,
+                                                  prevMove, &ttMove);
                 if (!searchAborted(shouldStop) && without < singularBeta)
                     singularExtension = 1;
             }
@@ -818,14 +893,14 @@ static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
         if (reduce) {
             const int R = 1;
             eval = -minimaxWithTT(board, depth - 1 - R, ply + 1, -alpha - 1, -alpha,
-                                  shouldStop, tt, pathHashes);
+                                  shouldStop, tt, pathHashes, &move);
             if (!searchAborted(shouldStop) && eval > alpha) {
                 eval = -minimaxWithTT(board, depth - 1, ply + 1, -beta, -alpha,
-                                      shouldStop, tt, pathHashes);
+                                      shouldStop, tt, pathHashes, &move);
             }
         } else {
             eval = -minimaxWithTT(board, depth - 1 + ext, ply + 1, -beta, -alpha,
-                                  shouldStop, tt, pathHashes);
+                                  shouldStop, tt, pathHashes, &move);
         }
         board.unmakeMove(undo);
 
@@ -837,7 +912,8 @@ static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
         if (alpha >= beta) {
             // Beta cutoff - update move ordering
             g_moveOrderer.updateKillerMove(move, depth);
-            g_moveOrderer.updateHistory(move, depth);
+            g_moveOrderer.updateHistory(move, depth, prevMove);
+            g_moveOrderer.updateCaptureHistory(move, depth);
             break;
         }
     }
@@ -851,6 +927,20 @@ static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
     // shouldStop discard this value anyway.
     if (searchAborted(shouldStop)) {
         return bestEval;
+    }
+
+    // Record how wrong the static evaluation turned out to be here.
+    //
+    // Excluded nodes are skipped for the same reason they do not touch the
+    // table: they answer a different question. Nodes whose best move is a
+    // capture are skipped because the gap there is tactics resolving, not a
+    // standing evaluation error -- exactly what this table must not learn. And
+    // mate scores are skipped because the difference is then unbounded and
+    // says nothing about the evaluation.
+    if (g_searchOptions.corrHist && !excluded && haveStatic && depth > 0
+        && std::abs(bestEval) < MATE_SCORE - 1000
+        && (bestMove.from == -1 || bestMove.capturedPiece.type() == NONE)) {
+        updateCorrHist(board, depth, bestEval - staticEval);
     }
 
     // Store in transposition table. Bound classification compares against the
@@ -905,6 +995,11 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
 
     // Clear move ordering data for new search
     g_moveOrderer.clear();
+    // Cleared with the ordering tables rather than persisted across moves. The
+    // corrections are learned from one search's own error and the position has
+    // moved on by the next one; carrying them would apply a stale offset to a
+    // structure that may no longer be there.
+    std::memset(g_corrHist, 0, sizeof(g_corrHist));
     g_searchNodes = 0;
     // Age the table: entries this search does not reuse are now displaceable.
     if (g_searchOptions.ttAging) tt.newSearch();
@@ -1055,7 +1150,7 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
                 int eval;
                 if (i == 0) {
                     eval = -minimaxWithTT(board, currentDepth - 1, 1, -beta, -alpha,
-                                          shouldStop, tt, pathHashes);
+                                          shouldStop, tt, pathHashes, &move);
                 } else if (randomisingHere) {
                     // Every root move searched against the *original* window,
                     // never a raised alpha. This is the only way to get a true
@@ -1075,16 +1170,16 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
                     // to the root ply and this path is off for gates and bench,
                     // so nothing measured pays for it.
                     eval = -minimaxWithTT(board, currentDepth - 1, 1, -beta, -windowLoFixed,
-                                          shouldStop, tt, pathHashes);
+                                          shouldStop, tt, pathHashes, &move);
                 } else {
                     // Principal variation search: later root moves get a cheap
                     // null-window probe first, and only a move that beats alpha
                     // is re-searched with the full window.
                     eval = -minimaxWithTT(board, currentDepth - 1, 1, -alpha - 1, -alpha,
-                                          shouldStop, tt, pathHashes);
+                                          shouldStop, tt, pathHashes, &move);
                     if (!searchAborted(shouldStop) && eval > alpha && eval < beta) {
                         eval = -minimaxWithTT(board, currentDepth - 1, 1, -beta, -alpha,
-                                              shouldStop, tt, pathHashes);
+                                              shouldStop, tt, pathHashes, &move);
                     }
                 }
                 board.unmakeMove(undo);

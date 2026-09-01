@@ -325,6 +325,54 @@ struct SearchOptions {
     // constant.
     bool aspAdaptive = false;
 
+    // --- Move-ordering history, added 2026-09-01 ---
+    //
+    // All three are OFF pending their own gate, and they are listed together
+    // because they share a premise worth stating once: everything gated here
+    // since razoring *cuts* the tree, and those cuts compete for the same
+    // margin -- which is why the recent ones keep measuring null (razortight
+    // -1.0, lmpdepth1 -31.3). These three *order* the tree instead, so they
+    // make the same cuts land more accurately at identical nodes. Different
+    // mechanism, and nothing here has sampled it before.
+    //
+    // They also fire at shallow remaining depth, so unlike singularExt they
+    // are answerable at -N 100000 rather than needing a --tc gate (BUGS.md 19).
+    //
+    // Gate them in sequence, each against the current shipped default. They
+    // are not independent -- contHist overlaps the killers, and captHist
+    // reorders inside bands seeOrdering already chose.
+
+    // History keyed on the previous move as well as this one: "after a knight
+    // landed on g4, this reply scored well". A refutation table, where the
+    // plain history table averages a move's worth over the whole search and so
+    // cannot see what it is answering.
+    bool contHist = false;
+
+    // Captures are ordered by MVV-LVA and split by SEE, both of them formulas
+    // that never learn. This adds what actually produced cutoffs, inside the
+    // bands SEE already chose rather than across them.
+    bool captHist = false;
+
+    // The odd one out: it changes the evaluation, not the move order.
+    //
+    // Every node already measures this evaluation's error for free -- the gap
+    // between the static score and what the search returned -- and throws it
+    // away. This keeps it, keyed on pawn structure, and applies it as an
+    // offset next time: "with this pawn skeleton the evaluation runs 40cp
+    // optimistic, so subtract 40".
+    //
+    // Why it matters more than its size. BUGS.md 20 closed hand-crafted
+    // evaluation tuning because three accurate fits all cost more depth than
+    // they bought. This attacks the same ~290cp of addressable static error
+    // for one array read and an add -- no new terms, no node-count blowup, and
+    // no corpus. If the premise behind NNUE holds here it should show up here
+    // first, for a day's work rather than weeks of self-play.
+    //
+    // Applied in the main search only, not in quiescence. Quiescence is where
+    // most static evaluations happen, so extending it there is the obvious
+    // follow-up -- and it is a *second* gate, not part of this one.
+    bool corrHist = false;
+
     // There is no king-safety toggle here, and on 2026-08-16 there briefly were
     // two. Both were gated and neither earned its place; the numbers and the
     // reasoning are in evaluation.cpp beside the term they describe, and in
