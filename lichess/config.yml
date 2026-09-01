@@ -97,10 +97,27 @@ engine:                            # Engine settings.
 
   lichess_bot_tbs:                 # The tablebases list here will be read by lichess-bot, not the engine.
     syzygy:
-      enabled: false               # Whether or not to use local syzygy endgame tablebases.
+      # Enabled 2026-09-01. Below five pieces the engine stops guessing: a
+      # Syzygy lookup is the *proved* result of the position, computed
+      # exhaustively, so there is nothing for a search to improve on.
+      #
+      # Worth it here specifically because the losses are at 2100-2300, where
+      # endgame technique decides games, and because `BUGS.md` 20 closed the
+      # route of making the evaluation itself better -- every attempt cost more
+      # depth than the accuracy bought. A tablebase has no such cost: it is a
+      # lookup, and it is right.
+      #
+      # On measurement purity: `MEASUREMENTS.md` records that every move so far
+      # is the engine's own, and this breaks that, as an opening book would.
+      # It is a different bargain though. A book hides what the engine would
+      # have chosen in positions it still has to understand; a tablebase move is
+      # provably optimal, so it can only ever correct the engine, never flatter
+      # it. Record the date as a break in the series and read post-2026-09-01
+      # endgame results accordingly.
+      enabled: true                # Whether or not to use local syzygy endgame tablebases.
       paths:                       # Paths to Syzygy endgame tablebases.
         - "engines/syzygy"
-      max_pieces: 7                # Maximum number of pieces in the endgame tablebase.
+      max_pieces: 5                # 3-4-5 is what is downloaded; 6-piece is ~150GB.
       move_quality: "best"         # One of "best" or "suggest" (it takes all the moves with the same WDL and tells the engine to only consider these; will move instantly if there is only 1 "good" move).
     gaviota:
       enabled: false               # Whether or not to use local gaviota endgame tablebases.
