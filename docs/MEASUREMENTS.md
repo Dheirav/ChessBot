@@ -529,13 +529,32 @@ catastrophic case that invalidated a whole day of games. But 11-18% fewer nodes
 is a fraction of a ply and worth a few Elo, so a *passing* reading is not the
 same as a clean one.
 
-**The distinction is between playing and measuring, not between fast and slow.**
-Rated games tolerate this: the loss is small, it applies to every game equally,
-and the rating absorbs it. A gate does not. `shard-gate.sh 14 60` wants fourteen
-engine processes against seven already-busy cores, and the pooled result would
-be load-dependent in exactly the way 16 describes. So the standing rule is now
-stated as a number rather than a caution: **the bot may run on a machine at this
-load; a gate may not.**
+**Corrected 2026-09-01, same day, before anything was run on it.** The
+paragraph that stood here said the distinction was between *playing and
+measuring*, and concluded "the bot may run on a machine at this load; a gate may
+not." That is wrong, and wrong in the direction that costs work: it would have
+parked every gate behind an idle machine that this project rarely has.
+
+**The distinction is between time-limited and node-limited work, not between
+games and gates.** A node budget is spent identically whatever else is running.
+`shard-gate.sh` says so in its own header -- *"A node budget is spent
+identically no matter what else is running, which is what makes the shards
+poolable at all"* -- and `match.cpp:547` refuses `--tc` together with `-N`, so a
+node gate carries no game clock at all. The only `chrono` calls on that path
+report the wall time afterwards. **A `-N` gate is deterministic from its seed
+and node budget; load changes how long it takes and nothing else.**
+
+So the rule is:
+
+| work | load-sensitive? | why |
+|---|---|---|
+| rated games | **yes** | a clock, so fewer nodes per move -- this is what 16 actually was, thirty-four *games* |
+| `--tc` gates | **yes** | same, and `shard-gate.sh` refuses to shard them for exactly this reason |
+| `-N` gates | **no** | equal nodes both sides, no clock; contention costs wall time only |
+
+BUGS 16 is still the reason `nps-health.py` exists and still invalidates
+results-based evidence taken on a sick machine. It says nothing about a node
+gate, and this entry should not have extended it to one.
 
 Also worth carrying: the day's game median read 595 while a direct probe read
 485-528. Not a contradiction — most of that day's games were played before the

@@ -542,17 +542,27 @@ reasoning that produced it, kept because the arguments still hold.**
 (`ROADMAP.md` 6.3, blindness measured at 4.3% over 651 criticised moves — there
 is nothing for a new term to be for), and the Texel weights above.
 
-### Machine load: the bot may run, a gate may not — 2026-09-01
+### Machine load: what it does and does not invalidate — 2026-09-01
 
 Calibrated rather than asserted, and the number is in `MEASUREMENTS.md`. With
 seven niced CPU-bound workers from another project and a load average of 7.23 on
 eight cores, the engine measured **485-528 knps against a 593 baseline** — 82-89%,
-comfortably past `nps-health`'s 356 flag. That is fine for rated games, where the
-loss is a few Elo applied evenly, and **not** fine for a gate, which wants
-fourteen processes against seven busy cores and would inherit `BUGS.md` 16.
+comfortably past `nps-health`'s 356 flag.
 
-Probe directly (`go depth 12`, read `nps`) rather than trusting the daily median:
-the median lags, and read 595 the same afternoon the direct probe read 485.
+**What that invalidates is time-limited work, and only that.** Rated games lose
+nodes per move, which is what `BUGS.md` 16 actually was — thirty-four *games*,
+not a gate. `--tc` gates lose them the same way, and `shard-gate.sh` refuses to
+shard one for precisely that reason.
+
+**A `-N` gate is not affected.** Equal nodes to both sides, no game clock
+(`match.cpp:547` refuses to combine them), deterministic from its seed. Load
+costs wall-clock time and changes no result. This line previously said a gate
+may not run on a loaded machine; that was wrong and would have parked work
+behind an idle machine this project rarely has.
+
+Probe directly (`go depth 12`, read `nps`) rather than trusting the daily median
+when the question *is* time-limited: the median lags, and read 595 the same
+afternoon the direct probe read 485.
 
 ### Two things about this machine that cost hours if forgotten
 
