@@ -90,6 +90,45 @@ Re-pool any of these with `./tests/pool-shards.sh <dir>/`.
 | `shard-20260904-120423/` | `corrhist` **v2** — persistent **and** applied in quiescence | **−39.7 [−53.0, −26.5]** — rejected |
 | `shard-20260904-130631/` | `corrhist` **persistence only** (`corrhistq` off both sides) | **+0.4 [−11.8, +12.7]** — null |
 | `shard-20260904-142613/` | **`capthist`** — capture history inside the SEE bands | **+2.7 [−9.7, +15.1]** — null, stays off |
+| `shard-20260904-214827/` | **`rootrandom`** — seeded tiebreak among near-equal root moves | **−90.7 [−105.0, −76.7]** — rejected; the cost is the root window, not the tiebreak |
+
+### `rootrandom` rejected, and the comment that hid why — 2026-09-04
+
+**−90.7 [−105.0, −76.7].** Far too large for a 10-centipawn tiebreak among
+near-equal moves, and the bench says why in seconds:
+
+    rootrandom off      445 492 nodes
+    rootrandom on     1 489 613 nodes      +234%, the tree more than triples
+
+The feature searches **every root move against a fixed window with alpha never
+rising**, because PVS returns bounds rather than scores and a tiebreak needs
+real ones — two earlier versions of this were wrong for exactly that reason.
+The cost is that alpha cutoffs at the root are disabled entirely. At a fixed
+100 000-node budget side A therefore searches most of a ply shallower than B.
+**The −90.7 is the depth loss, not the randomisation.**
+
+**The comment on that code said the opposite, and it is the lesson here:**
+
+> *"The price is no alpha cutoffs at the root. It is confined to the root ply
+> and this path is off for gates and bench, so nothing measured pays for it."*
+
+Being off for gates and bench did not make the cost free. It made the cost
+**unmeasured** — and it would have been paid in full in real games, which run on
+a clock where a 3.3x tree buys the same lost ply. A feature excluded from the
+instruments is not cheap; it is untested. That sentence is the reason this sat
+unqueried since 2026-09-01.
+
+**The goal survives the design.** `BUGS.md` 6 is real: deterministic play means
+32% of the archive is sixteen opponents met four or more times, whole games
+repeat, and every accuracy figure in `MEASUREMENTS.md` inherits the correlation.
+Decorrelation is worth more than its Elo because it buys validity for every
+future field measurement.
+
+**The cheap route is a seeded perturbation of the evaluation** — a few
+centipawns keyed on position hash and a per-game seed. No search cost, since
+`evaluate()` already runs; complete decorrelation; and ±5cp sits far inside the
+evaluation's own measured error, median 125cp. It never touches the root window,
+which is where all three failures of this feature have lived. Not yet built.
 
 ### The history family, all null — 2026-09-04
 

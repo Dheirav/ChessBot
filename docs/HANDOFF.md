@@ -422,6 +422,37 @@ returned ±36 Elo, so matching today's ±6.7 would cost weeks to answer a
 
 ---
 
+## Session close — 2026-09-04
+
+**Seven gates, 11 760 games, nothing shipped.** `conthist` +6.8, `capthist`
++2.7, `corrhist` closed over three gates (+6.3, +0.4, −39.7), `rootrandom`
+−90.7. All defaults unchanged. `GATES.md` has every row and the reasoning.
+
+**The finding worth carrying, and it is not any single gate.** The pruning suite
+shipped, the history family is null, hand-crafted evaluation tuning is closed
+(`BUGS.md` 20), correction history is closed. **There is no more cheap Elo in
+this search.** Everything left — NNUE, Lazy SMP, deep-node gates for probcut and
+singular extensions — is expensive in a way none of this year's work has been.
+Plan for that rather than looking for another afternoon-sized win.
+
+**Two process failures, both recorded where they happened rather than here.**
+`corrhist` v2 changed two things at once and cost an extra gate to attribute —
+the one-variable rule applied to gates but not to the implementation.
+`rootrandom` carried a comment asserting its cost was free *because* it was
+excluded from bench and gates, which made the cost unmeasured rather than
+absent; it was +234% nodes all along.
+
+**Shipped today, and the only thing that did:** Syzygy 3-4-5 tablebases
+(2026-09-01, config-only, verified on ten positions) and `tools/gate-progress.sh`.
+
+**Next session, in order.** (1) The bot is down and should go back up — it
+earned nothing all day. (2) The `BUGS.md` 6 decorrelation fix, redesigned as an
+evaluation perturbation rather than a root-window change. (3) Then the expensive
+list, starting with a decision about whether NNUE's corpus is worth committing
+to. Nothing below this line changed today except where struck through.
+
+---
+
 ## Next, in order — 2026-09-01
 
 **This list is current. The `ROADMAP.md` discussion below it is the older

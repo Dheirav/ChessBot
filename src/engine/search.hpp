@@ -305,6 +305,20 @@ struct SearchOptions {
     // make a node-limited A/B irreproducible, which is the one property the
     // whole gate methodology rests on. It is for rated games, where variety is
     // worth more than repeatability.
+    // **Gated 2026-09-04: -90.7 [-105.0, -76.7]. Rejected.**
+    //
+    // Not the tiebreak -- the root window. Searching every root move against a
+    // fixed window with alpha never rising is what makes the scores exact, and
+    // it disables root alpha cutoffs: bench goes 445,492 -> 1,489,613, +234%.
+    // At a fixed node budget that is most of a ply, which is what -90 Elo looks
+    // like. The comment on the implementation claimed the price was free
+    // because the path was off for gates and bench; that made it unmeasured,
+    // not free, and it would have been paid in full on a real clock.
+    //
+    // BUGS.md 6 still wants solving. The cheap route is a seeded few-centipawn
+    // perturbation of the evaluation -- no search cost, and it never touches the
+    // root window, where all three failures of this feature have lived.
+    // `GATES.md`.
     bool rootRandom = false;
 
     // Size the aspiration window from the engine's own recent volatility
