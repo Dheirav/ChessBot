@@ -225,6 +225,14 @@ tools/review: tools/review.o $(ENGINE_OBJ)
 
 review: tools/review
 
+# Self-play corpus generation for NNUE (docs/NNUE-DECISION.md). Same engine
+# objects as everything else: the data has to come from the engine being
+# trained, not from a variant of it.
+tools/gendata: tools/gendata.o $(ENGINE_OBJ)
+	$(CXX) $^ -o $@ $(LDFLAGS)
+
+gendata: tools/gendata
+
 # Texel tuning (tools/tune.cpp). It needs a *different* evaluation.o -- one
 # built with -DEVAL_TUNING so the EvalWeights constants become mutable globals
 # it can perturb between passes. That object is built into build/tune/ so it can
