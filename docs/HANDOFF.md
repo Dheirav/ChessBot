@@ -464,8 +464,13 @@ reasoning that produced it, kept because the arguments still hold.**
    probcut they gate cheaply at `-N 100000`. `BUGS.md` 19 is why that
    distinction decides what is affordable.
 
-   - **Continuation history** (+20-40 prior). History keyed on the *previous*
-     move as well as this one. One table, one toggle, one gate.
+   - ~~**Continuation history**~~ **Gated 2026-09-04: +6.8 [−6.1, +19.8], null,
+     stays off.** `GATES.md`. It cost +12.2% nodes at bench, and on an
+     equal-node gate that is paid in depth — the better ordering and the bigger
+     tree cancel. Reopen it only with a cheaper implementation; four times the
+     games would cost thirty hours to resolve a point estimate inside the noise.
+     Note what this says: `BUGS.md` 20 located the "costs more than it buys"
+     trap in the *evaluation*, and the search turns out to have its own.
    - **Capture history** (+10-20). MVV-LVA and SEE order captures statically;
      nothing here learns which captures actually worked.
    - **Correction history** (+15-30). A table that adjusts the **static

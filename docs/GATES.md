@@ -83,6 +83,41 @@ Re-pool any of these with `./tests/pool-shards.sh <dir>/`.
 | `shard-20260827-224417/` | `singularext` — **VOID, measured nothing** | −0.6 [−3.4, +2.1] — see below |
 | `shard-20260828-002812/` | `razortight` — razoring margin 350cp vs the shipped 500 | **−1.0 [−10.0, +7.9]** — null, 500 stays |
 | `shard-20260828-020116/` | `singularext` at `-N 3000000` | **−7.1 [−32.1, +17.8]** — **undecided, not rejected** |
+| `shard-20260904-021023/` | **`conthist`** — continuation history | **+6.8 [−6.1, +19.8]** — null, stays off |
+
+### Continuation history, null — 2026-09-04
+
+**+6.8 [−6.1, +19.8]** over 1 680 games. The interval spans zero, so `conthist`
+stays off.
+
+**This one measured something, unlike `singularext`.** The pentanomial is
+`78-170-325-175-92` — 325 level pairs, 39%, properly spread. Compare the void
+gate above at 91% level. The two sides played genuinely different games and the
+answer is "not distinguishable from nothing", which is a result rather than an
+absence of one.
+
+**The bench predicted it and could have been read harder.** `conthist` cost
+**+12.2% nodes** at bench 6 (445 492 → 499 901), concentrated in two of twelve
+positions, with midgame-2 changing its move. This is an equal-*node* gate, so
+that cost is paid directly in depth: A reaches slightly less than B on the same
+100 000-node budget. The ordering is better and the tree it orders is bigger,
+and the two roughly cancel.
+
+That is the `BUGS.md` 20 shape for the fourth time — an improvement that works
+and costs more than it buys. Worth noting because 20 argued the *evaluation* was
+where that trap lived, and this says the search has its own version of it.
+
+**Resolving +6.8 would take about four times the games**, which at the
+contention this ran under is over thirty hours, for a point estimate inside the
+noise. Not worth it. If it is ever reopened, the thing to change first is the
+node cost, not the gate size: a version that orders without growing the tree is
+a different feature, not a longer measurement of this one.
+
+**On the machine it ran on.** Load averaged well over 20 for most of the run and
+the gate took 7h32m against a predicted 35 minutes. The *result* is unaffected —
+a `-N` gate is deterministic from its seed and node budget, which is the whole
+reason `shard-gate.sh` refuses to shard a timed one. What contention broke was
+the ETA, not the measurement. See `MEASUREMENTS.md`, contention calibration.
 
 ### A gate that ran a feature that never fired — 2026-08-27
 

@@ -346,6 +346,16 @@ struct SearchOptions {
     // landed on g4, this reply scored well". A refutation table, where the
     // plain history table averages a move's worth over the whole search and so
     // cannot see what it is answering.
+    //
+    // **Gated 2026-09-04: +6.8 Elo [−6.1, +19.8] over 1 680 games. Null, stays
+    // off.** The pentanomial `78-170-325-175-92` is properly spread, so this is
+    // a real measurement and not another accidental null control.
+    //
+    // The bench said it first: +12.2% nodes (445 492 → 499 901). At an equal
+    // node budget that is paid in depth, so the better ordering and the bigger
+    // tree it orders roughly cancel. Reopening this means making it cheaper,
+    // not measuring it longer — four times the games would cost thirty hours to
+    // resolve a point estimate that sits inside the noise. `GATES.md`.
     bool contHist = false;
 
     // Captures are ordered by MVV-LVA and split by SEE, both of them formulas
