@@ -26,6 +26,10 @@ std::atomic<bool> g_stop{false};
 std::thread g_searchThread;
 int g_hashMb = 256;
 
+// Set when RootSeed is given explicitly. A pinned seed must survive
+// ucinewgame, or replaying a logged game would not reproduce it.
+bool g_seedPinned = false;
+
 // Assumed round-trip cost of a move: the time between the search deciding and
 // the server registering it. The clock the engine is handed has already spent
 // it, so planning against the raw figure plans against time that is gone. Four
@@ -401,6 +405,7 @@ void handleSetOption(std::istringstream& is) {
         const long v = std::atol(value.c_str());
         if (v > 0) {
             g_rootSeed = (uint64_t)v;
+            g_seedPinned = true;
             std::cout << "info string root seed " << g_rootSeed << " (set)" << std::endl;
         }
         return;
@@ -502,6 +507,19 @@ int uciLoop() {
             stopSearch();
             g_tt->clear();
             clearCorrectionHistory();
+            // A seed per *game*, not per process. lichess-bot keeps one engine
+            // process across every game it plays, so a process-lifetime seed
+            // would give every game the same perturbation and decorrelate
+            // nothing -- which is the entire point (`BUGS.md` 6). Announced, so
+            // any game remains replayable by setting RootSeed to the logged
+            // value; pinned if RootSeed was set explicitly, so a replay stays a
+            // replay.
+            if (!g_seedPinned) {
+                g_rootSeed ^= g_rootSeed >> 33;
+                g_rootSeed *= 0xff51afd7ed558ccdULL;
+                g_rootSeed ^= g_rootSeed >> 33;
+                std::cout << "info string root seed " << g_rootSeed << std::endl;
+            }
             g_board.setFromFEN(Board::INITIAL_FEN);
             g_gameHistory.clear();
             g_pliesPlayed = 0;

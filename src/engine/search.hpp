@@ -432,6 +432,35 @@ struct SearchOptions {
     // persistence-only gate at +0.4. Stays off.
     bool corrHistQ = false;
 
+    // --- Decorrelation (`BUGS.md` 6), added 2026-09-04 ---
+    //
+    // A few centipawns of seeded noise on the static score, so that two games
+    // against the same opponent diverge instead of repeating move for move.
+    //
+    // This is the replacement for `rootRandom`, which was rejected at −90.7 —
+    // and the reason it is here rather than at the root is that all three
+    // failures of that feature lived in the root window. This never touches it:
+    // no extra searches, no disabled cutoffs, no bounds mistaken for scores.
+    // The cost is one hash multiply on a path that already runs `evaluate()`.
+    //
+    // **Deliberately in `scoreForSideToMove()` and not inside `evaluate()`.**
+    // `g_evalCache` is keyed on position alone, so an evaluation toggle cannot
+    // be gated with `--optA/--optB` in one process (`BUGS.md` 8) — putting the
+    // noise on the search's side of that boundary is what keeps this gateable
+    // the ordinary way.
+    //
+    // Deterministic given (position, seed): the same position scores the same
+    // way throughout a search, so nothing oscillates and no search instability
+    // is introduced. ±5cp is far inside the evaluation's own measured error,
+    // median 125cp and 90th percentile 407 (`MEASUREMENTS.md`), so this is
+    // noise below the resolution of the thing it perturbs.
+    //
+    // The point is not Elo — a null gate is the *success* case. It buys
+    // decorrelated future measurements, and `BUGS.md` 6 is why that matters:
+    // 32% of the archive is sixteen opponents met four or more times, whole
+    // games repeat, and every accuracy figure inherits the correlation.
+    bool evalNoise = false;
+
     // There is no king-safety toggle here, and on 2026-08-16 there briefly were
     // two. Both were gated and neither earned its place; the numbers and the
     // reasoning are in evaluation.cpp beside the term they describe, and in

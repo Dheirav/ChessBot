@@ -141,9 +141,22 @@ static constexpr int MATE_SCORE = SEARCH_MATE_SCORE;
 static constexpr int INF = 32000;
 
 // evaluate() is white-perspective; the search is not.
+// Seeded per-position noise for SearchOptions::evalNoise. Splitmix finalizer on
+// the zobrist hash mixed with the game seed: deterministic given both, so one
+// position keeps one offset for the whole search and the search stays stable.
+static constexpr int EVAL_NOISE_CP = 5;
+
+static inline int evalNoise(const Board& board) {
+    uint64_t h = board.getHash() ^ (g_rootSeed * 0x9E3779B97F4A7C15ULL);
+    h ^= h >> 33; h *= 0xff51afd7ed558ccdULL;
+    h ^= h >> 33; h *= 0xc4ceb9fe1a85ec53ULL; h ^= h >> 33;
+    return (int)(h % (uint64_t)(2 * EVAL_NOISE_CP + 1)) - EVAL_NOISE_CP;
+}
+
 static int scoreForSideToMove(const Board& board) {
     int white = evaluate(board);
-    return (board.activeColor == COLOR_WHITE) ? white : -white;
+    const int s = (board.activeColor == COLOR_WHITE) ? white : -white;
+    return g_searchOptions.evalNoise ? s + evalNoise(board) : s;
 }
 
 SearchOptions g_searchOptions;
@@ -254,6 +267,7 @@ const SearchOptionEntry SEARCH_OPTIONS[] = {
     {"capthist",    "capthist", "CaptHist",    &SearchOptions::captHist},
     {"corrhist",    "corrhist", "CorrHist",    &SearchOptions::corrHist},
     {"corrhistq",   "corrhistq","CorrHistQ",   &SearchOptions::corrHistQ},
+    {"evalnoise",   "evalnoise","EvalNoise",   &SearchOptions::evalNoise},
 };
 const size_t SEARCH_OPTION_COUNT = sizeof(SEARCH_OPTIONS) / sizeof(SEARCH_OPTIONS[0]);
 
