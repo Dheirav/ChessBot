@@ -84,6 +84,104 @@ Re-pool any of these with `./tests/pool-shards.sh <dir>/`.
 | `shard-20260828-002812/` | `razortight` — razoring margin 350cp vs the shipped 500 | **−1.0 [−10.0, +7.9]** — null, 500 stays |
 | `shard-20260828-020116/` | `singularext` at `-N 3000000` | **−7.1 [−32.1, +17.8]** — **undecided, not rejected** |
 | `shard-20260904-021023/` | **`conthist`** — continuation history | **+6.8 [−6.1, +19.8]** — null, stays off |
+| `shard-20260904-094422/` | `corrhist` **v1**, run 1 | +11.2 [−1.0, +23.4] |
+| `shard-20260904-110450/` | `corrhist` **v1**, run 2, base 20260904 | +1.4 [−10.8, +13.7] |
+| `shard-pooled-corrhist/` | **both v1 runs pooled, 3 360 games** | **+6.3 [−2.3, +15.0]** — null, stays off |
+| `shard-20260904-120423/` | `corrhist` **v2** — persistent **and** applied in quiescence | **−39.7 [−53.0, −26.5]** — rejected |
+| `shard-20260904-130631/` | `corrhist` **persistence only** (`corrhistq` off both sides) | **+0.4 [−11.8, +12.7]** — null |
+| `shard-20260904-142613/` | **`capthist`** — capture history inside the SEE bands | **+2.7 [−9.7, +15.1]** — null, stays off |
+
+### The history family, all null — 2026-09-04
+
+Five gates, **10 080 games, nothing shipped.**
+
+| gate | result |
+|---|---|
+| `conthist` — continuation history | +6.8 [−6.1, +19.8] null |
+| `capthist` — capture history | +2.7 [−9.7, +15.1] null |
+| `corrhist` — three gates, closed below | null, then −39.7 |
+
+These went to the head of the queue on 2026-09-01 as "the cheapest unsampled
+Elo left in the search", with priors of +20-40, +10-20 and +15-30 taken from
+general engine practice. **This engine's answer is no.** The priors were not
+measured here and did not survive being measured here, which is the same
+warning `ROADMAP.md` Phase 7 attaches to its own Elo column.
+
+**They fired.** Every pentanomial is properly spread — `capthist` at
+`82-144-364-179-71`, 43% level — so unlike the void `singularext` gate these
+features changed the games and simply did not help. That is a result, not a
+missed measurement.
+
+**The regime caveat, logged and deliberately not acted on.** `-N 100000` reaches
+depth 5-7; the bot plays at 10-12. History tables accumulate over a search, so
+they plausibly pay more at depth than these gates can see — `BUGS.md` 19 again.
+But 19 was a feature that *provably never fired*, and these fired. Re-gating at
+`-N 3000000` costs 30x per game, and "measure it again at a bigger budget" is
+how a losing bet gets tuned indefinitely. Open question, not a queued task.
+
+**What this closes, and it is the useful part.** The pruning suite shipped, the
+history family is null, hand-crafted evaluation tuning is closed (`BUGS.md` 20)
+and correction history is closed below. **There is no more cheap Elo in this
+search.** What remains — NNUE, Lazy SMP, deep-node gates for probcut and
+singular extensions — is expensive in a way none of this year's work has been.
+
+### Correction history, closed over three gates — 2026-09-04
+
+The idea: the search already measures this evaluation's error for free at every
+node — the gap between the static score and what the search returned — and threw
+it away. Keep a running average of it keyed on pawn structure and apply it as an
+offset. It attacks the same ~290cp of addressable static error NNUE targets, for
+one array read and an add. `BUGS.md` 20 is why that mattered: it closed
+hand-crafted evaluation tuning because three accurate fits each cost more depth
+than they bought, and a *learned* correction is the cheapest possible test of
+whether a learned evaluation escapes that trade.
+
+**It does not. Three gates, and the family is closed.**
+
+| version | what it did | result |
+|---|---|---|
+| v1 | table cleared every search, main search only | **+6.3 [−2.3, +15.0]** null |
+| persistence only | cleared per *game*, main search only | **+0.4 [−11.8, +12.7]** null |
+| v2 | persistent **and** applied at quiescence stand-pat | **−39.7 [−53.0, −26.5]** rejected |
+
+**Persistence does nothing. Quiescence application costs about 40 Elo.** That is
+the attributable finding, and it took a third gate to get because v2 changed two
+things at once — the same one-variable rule this file enforces on gates, not
+applied to the implementation. Three gates produced one citable conclusion where
+they should have produced two.
+
+**Why quiescence is where it goes wrong, as far as the evidence supports.** A
+stand-pat score is compared straight against beta, so an offset there does not
+merely reorder moves — it changes which subtrees are entered at all, and the
+same for razoring, reverse futility and delta pruning. `CORR_CAP` is ±96cp.
+v1's per-search clearing is probably the only reason entries never grew near it;
+persistence lets them, and quiescence is where that magnitude lands. Offered as
+the best available reading, not as a measured fact — one hypothesis has already
+been falsified in this family (see the note on bench below).
+
+**Bench attributed the tree change and was structurally blind to the rest.**
+`corrhist` alone reads 446 010 against v1's 446 009 — one node — while
+`corrhist`+`corrhistq` reads 456 284, +2.4%, with two best moves changed. So the
+quiescence half owns the entire visible effect. But bench runs **one search per
+position**, and persistence is about carrying the table *across moves*: within a
+single search, "persist" and "clear per search" are the same thing. Bench could
+not have answered the persistence question at any node count. `BUGS.md` 17, 18
+and 19 are the same shape — instrument and subject in different regimes — and
+this is the first time that was recognised *before* a gate was wasted on it
+rather than after.
+
+**What this does and does not say about NNUE.** It is not evidence against NNUE:
+a single scalar keyed on a pawn hash is the crudest caricature of a learned
+evaluation, and its failure does not transfer to a network with millions of
+parameters seeing the whole board. What it does say is that this mechanism, at
+this granularity, is inert at best and harmful when it actually operates — which
+is not the cheap green light the roadmap was hoping for before committing weeks
+to corpus generation. The NNUE question stays open and stays expensive.
+
+**Not reopened by tuning.** `CORR_CAP`, the key, the update weight and the
+application sites are all knobs, and turning them is exactly what six negative
+king-safety gates and three cancelled evaluation tunes look like from the
+inside.
 
 ### Continuation history, null — 2026-09-04
 

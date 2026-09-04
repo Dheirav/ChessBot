@@ -443,8 +443,22 @@ reasoning that produced it, kept because the arguments still hold.**
 3. ~~**Gate `LMP_MAX_DEPTH = 2`.**~~ **Done 2026-08-27: +15.0 Elo
    [+5.6, +24.4]**, shipped as `lmpshallow`.
 
-4. **The history family — the cheapest unsampled Elo left in the search.**
-   Added to the head of this queue 2026-09-01, ahead of everything below it.
+4. ~~**The history family**~~ **CLOSED 2026-09-04. All three null; five
+   gates, 10 080 games, nothing shipped.** `GATES.md` has the table and the
+   reasoning. It was put at the head of this queue on 2026-09-01 on priors from
+   general engine practice (+20-40, +10-20, +15-30) and this engine did not
+   reproduce them. They fired — every pentanomial is properly spread — so this
+   is an answer, not a missed measurement.
+
+   **The strategic consequence is the part to carry forward: there is no more
+   cheap Elo in this search.** Pruning shipped, history is null, evaluation
+   tuning is closed (`BUGS.md` 20), correction history is closed. Everything
+   left — NNUE, Lazy SMP, deep-node gates — is expensive in a way none of this
+   year's work has been. Plan accordingly rather than looking for another
+   afternoon-sized win.
+
+   The original reasoning is kept below because the *mechanism* argument was
+   sound even though the answer was no.
 
    `grep` over `src/engine/search.*` finds killer moves, a plain butterfly
    history, MVV-LVA and SEE. It does **not** find continuation history,
@@ -471,13 +485,16 @@ reasoning that produced it, kept because the arguments still hold.**
      games would cost thirty hours to resolve a point estimate inside the noise.
      Note what this says: `BUGS.md` 20 located the "costs more than it buys"
      trap in the *evaluation*, and the search turns out to have its own.
-   - **Capture history** (+10-20). MVV-LVA and SEE order captures statically;
-     nothing here learns which captures actually worked.
-   - **Correction history** (+15-30). A table that adjusts the **static
-     evaluation** by how wrong it proved in similar positions. Note what this
-     one is: it attacks the same ~290cp of addressable static error that NNUE
-     targets, needs **no training data**, and costs almost nothing per node.
-     It is the item that tests NNUE's premise before paying NNUE's price.
+   - ~~**Capture history**~~ **Gated 2026-09-04: +2.7 [−9.7, +15.1], null,
+     stays off.** `GATES.md`.
+   - ~~**Correction history**~~ **Closed 2026-09-04 over three gates.**
+     Persistence +0.4 [−11.8, +12.7]; applying it at quiescence stand-pat
+     **−39.7 [−53.0, −26.5]**. `GATES.md`. Persistence does nothing, quiescence
+     application costs ~40 Elo, and the family is closed rather than tuned.
+     **For NNUE this is not a negative result** — a single scalar on a pawn hash
+     is not a network — but it was meant to be the cheap green light before
+     committing weeks to a corpus, and it is not one. NNUE stays open and stays
+     expensive.
 
 5. **Singular extensions are implemented and UNDECIDED**, off by default.
    Two gates: the first was void (the probe never fired at gate depth), the

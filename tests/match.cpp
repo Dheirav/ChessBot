@@ -221,6 +221,9 @@ static GameOutcome playGame(const std::vector<Move>& opening, bool aPlaysWhite,
 
     ttA.clear();
     ttB.clear();
+    // Correction history persists across moves and must not persist across
+    // games; this is the harness's equivalent of `ucinewgame`.
+    clearCorrectionHistory();
     std::atomic<bool> stop{false};
     std::unordered_map<uint64_t, int> seen;
     seen[board.getHash()] = 1;

@@ -378,10 +378,45 @@ struct SearchOptions {
     // no corpus. If the premise behind NNUE holds here it should show up here
     // first, for a day's work rather than weeks of self-play.
     //
-    // Applied in the main search only, not in quiescence. Quiescence is where
-    // most static evaluations happen, so extending it there is the obvious
-    // follow-up -- and it is a *second* gate, not part of this one.
+    // **v1 gated 2026-09-04: +6.3 [-2.3, +15.0] over 3 360 games. Null.**
+    // Two runs, +11.2 then +1.4, pooled at a fixed total decided in advance.
+    // `GATES.md`. That null was against an implementation crippled two ways,
+    // both of them choices made here rather than facts about the heuristic:
+    // the table was cleared every *search*, so it only ever learned inside one
+    // move and started from zero on the next; and the offset was applied in
+    // the main search only, missing quiescence, where most static evaluations
+    // happen. **v2 fixes both** -- persistent across moves and cleared per game
+    // (`clearCorrectionHistory()`), and applied at both quiescence stand-pat
+    // and the qBound horizon. Ungated as of this line.
+    //
+    // **v2 gated 2026-09-04: -39.7 [-53.0, -26.5]. Rejected.** And the gate
+    // could not say *which* half did it, because v2 changed two things at once
+    // -- the one-variable rule this repo enforces on gates, not applied to the
+    // implementation. That is why the quiescence half now has its own toggle
+    // below: `corrHist` alone is persistence only, `corrHist`+`corrHistQ` is
+    // what measured -39.7.
+    //
+    // **Persistence alone gated 2026-09-04: +0.4 [-11.8, +12.7]. Null.** So the
+    // whole of v2's -39.7 belongs to corrHistQ. Three gates, one conclusion:
+    // persistence does nothing, quiescence application costs ~40 Elo.
+    // **The family is closed** -- CORR_CAP, the key and the update weight are
+    // all knobs, and turning them is what the king-safety and Texel entries in
+    // BUGS.md 20 look like from the inside. `GATES.md`.
     bool corrHist = false;
+
+    // Apply the correction at quiescence stand-pat and the qBound horizon, not
+    // only in the main search. Requires corrHist; alone it does nothing.
+    //
+    // Separated because it is the suspect. Quiescence is where most static
+    // evaluations happen, and a stand-pat score is compared straight against
+    // beta -- so an offset there does not merely reorder moves, it changes
+    // which subtrees are entered at all. CORR_CAP is +/-96cp, and v1's
+    // per-search clearing is probably the only reason entries never grew near
+    // it. Persistence lets them, and this is where that magnitude lands.
+    //
+    // **Owns all of v2's -39.7 [-53.0, -26.5]**, by difference against the
+    // persistence-only gate at +0.4. Stays off.
+    bool corrHistQ = false;
 
     // There is no king-safety toggle here, and on 2026-08-16 there briefly were
     // two. Both were gated and neither earned its place; the numbers and the
@@ -420,6 +455,10 @@ struct SearchOptionEntry {
 // the same seed back through the `RootSeed` UCI option. `BUGS.md` 6 asks for
 // precisely that: randomness is acceptable only if it is seeded and logged.
 extern uint64_t g_rootSeed;
+
+// Reset the correction-history table. Call at the start of a game, beside the
+// transposition table's clear() -- not per search. See search.cpp.
+void clearCorrectionHistory();
 
 extern const SearchOptionEntry SEARCH_OPTIONS[];
 extern const size_t SEARCH_OPTION_COUNT;

@@ -167,6 +167,18 @@ static constexpr int CORR_CAP    = 96 * CORR_GRAIN;  // a correction, not a seco
 static constexpr int CORR_WEIGHT = 128;     // denominator of the running average
 static int g_corrHist[2][CORR_SIZE];
 
+// Cleared per *game*, not per search.
+//
+// The correction is a claim about this evaluation's standing error in a class
+// of pawn structure, and that claim is still true on the next move -- which is
+// the whole point, and what v1 threw away by clearing every search. It is not
+// true across games, where the lineage of positions is unrelated, so both the
+// UCI `ucinewgame` path and tests/match's per-game reset call this beside the
+// transposition table's own clear().
+void clearCorrectionHistory() {
+    std::memset(g_corrHist, 0, sizeof(g_corrHist));
+}
+
 static inline int corrSide(const Board& board) {
     return (board.activeColor == COLOR_WHITE) ? 0 : 1;
 }
@@ -191,6 +203,12 @@ static int correctedEval(const Board& board) {
 // Weighted toward recent observations, and clamped. The weight rises with
 // depth because a deeper search's verdict is better evidence about the error
 // than a shallow one's.
+// Quiescence's static score. Separate from correctedEval() so the quiescence
+// half of the correction can be gated on its own -- see SearchOptions.
+static inline int quiescenceEval(const Board& board) {
+    return g_searchOptions.corrHistQ ? correctedEval(board) : scoreForSideToMove(board);
+}
+
 static void updateCorrHist(const Board& board, int depth, int diff) {
     int& entry = g_corrHist[corrSide(board)][corrSlot(board)];
     const int w = std::min(depth + 1, 16);
@@ -235,6 +253,7 @@ const SearchOptionEntry SEARCH_OPTIONS[] = {
     {"conthist",    "conthist", "ContHist",    &SearchOptions::contHist},
     {"capthist",    "capthist", "CaptHist",    &SearchOptions::captHist},
     {"corrhist",    "corrhist", "CorrHist",    &SearchOptions::corrHist},
+    {"corrhistq",   "corrhistq","CorrHistQ",   &SearchOptions::corrHistQ},
 };
 const size_t SEARCH_OPTION_COUNT = sizeof(SEARCH_OPTIONS) / sizeof(SEARCH_OPTIONS[0]);
 
@@ -368,7 +387,7 @@ static int quiescence(Board& board, int ply, int qDepth, int alpha, int beta,
     // not an alternative: it is a budget overrun, and on a clock that is a
     // forfeit rather than a bad move.
     if (g_searchOptions.qBound && qDepth >= QS_MAX_DEPTH) {
-        return scoreForSideToMove(board);
+        return quiescenceEval(board);
     }
 
     PieceColor side = board.activeColor;
@@ -380,9 +399,14 @@ static int quiescence(Board& board, int ply, int qDepth, int alpha, int beta,
     // Kept in scope past this block because delta pruning below needs it: the
     // question "can this capture reach alpha" is asked relative to where the
     // position already stands.
+    // Corrected, unlike v1, which applied the offset in the main search only.
+    // Quiescence is where most static evaluations actually happen, so leaving it
+    // out meant the correction reached a small minority of the evaluations it
+    // was learned from. correctedEval() is identical to scoreForSideToMove()
+    // while the toggle is off, so this changes no node count when it is.
     int standPat = 0;
     if (!inCheck) {
-        standPat = scoreForSideToMove(board);
+        standPat = quiescenceEval(board);
         if (standPat >= beta) return beta;
         if (standPat > alpha) alpha = standPat;
     }
@@ -995,11 +1019,10 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
 
     // Clear move ordering data for new search
     g_moveOrderer.clear();
-    // Cleared with the ordering tables rather than persisted across moves. The
-    // corrections are learned from one search's own error and the position has
-    // moved on by the next one; carrying them would apply a stale offset to a
-    // structure that may no longer be there.
-    std::memset(g_corrHist, 0, sizeof(g_corrHist));
+    // Deliberately NOT cleared here -- see clearCorrectionHistory(). The first
+    // version of this feature reset the table every search and gated null;
+    // a table that starts from zero on every move only ever learns inside one
+    // search, which is not what the heuristic is for.
     g_searchNodes = 0;
     // Age the table: entries this search does not reuse are now displaceable.
     if (g_searchOptions.ttAging) tt.newSearch();

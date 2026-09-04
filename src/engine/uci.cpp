@@ -501,6 +501,7 @@ int uciLoop() {
         } else if (command == "ucinewgame") {
             stopSearch();
             g_tt->clear();
+            clearCorrectionHistory();
             g_board.setFromFEN(Board::INITIAL_FEN);
             g_gameHistory.clear();
             g_pliesPlayed = 0;
