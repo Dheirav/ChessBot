@@ -138,3 +138,43 @@ this repo keeps hitting is not a wrong idea, it is an instrument that could not
 see the thing being measured (`BUGS.md` 17, 18, 19, and `corrhist` today). A net
 that cannot be A/B'd against the hand-crafted evaluation in one binary is not
 ready to gate, whatever its training loss says.
+
+---
+
+## Addendum — 2026-09-06: section 3 is partly wrong
+
+Section 3 argued that a 2150 engine can bootstrap itself because "the label is
+not the static evaluation, it is the **search result**", and that search is
+strictly better informed than the evaluation it calls. The first half is true.
+The quantity was never checked, and it is small.
+
+Measured on 200 000 held-out positions, hand-crafted evaluation against the
+5 000-node search score that `tools/gendata` writes as its label:
+
+| | MAE | correlation |
+|---|---|---|
+| constant | 313.4 | — |
+| **hand-crafted evaluation** | **68.7** | **0.945** |
+
+**The evaluation explains 94.5% of its own labels.** At depth 7-8 a search score
+is mostly the static evaluation propagated a few plies, so a net fitted to this
+corpus is largely being taught to imitate the evaluation it was meant to
+replace. The bootstrap argument survives only in the 5.5% that is genuinely new,
+which is a far thinner margin than section 3 implied.
+
+**This costs one command and should have preceded the corpus.** 25M positions
+and fifteen hours were generated on an unmeasured prior — the same mistake this
+document opens by criticising in `ROADMAP.md`'s Elo column, made two sections
+later in the same file.
+
+**What it does not say.** It does not close NNUE. It says self-play labels *at
+this node count* carry little the evaluation does not already have. Three routes
+remain, in ascending cost: deeper labels (regenerate at a much higher node count
+and re-measure this correlation first — one hour, and it decides weeks), external
+labels from a stronger engine (`tools/sf-label.py` exists and has never been
+run; it is also a measurement-purity decision, and a larger one than the opening
+book), or accepting the thin margin and iterating nets across generations.
+
+**The ordering recommendation in section 6 stands and is strengthened.** Lazy
+SMP first. It has a solid prior, no corpus, no premise risk, and none of this
+document's arguments underneath it.

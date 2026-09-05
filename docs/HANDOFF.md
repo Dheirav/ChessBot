@@ -422,6 +422,46 @@ returned ±36 Elo, so matching today's ±6.7 would cost weeks to answer a
 
 ---
 
+## 2026-09-06 — `evalnoise` shipped, and NNUE's premise weakened
+
+**Shipped: `evalnoise`**, −3.9 [−16.9, +9.0], on by default. `BUGS.md` 6 is
+closed after two designs — `rootrandom` at −90.7, then this. A null was the
+success case: the point is decorrelated games, not Elo, and every measurement
+from here is taken on them. Bench signature is now **461,693**. Read the row in
+`GATES.md` before treating −3.9 as free; −17 is not excluded.
+
+**NNUE: a first net was trained and rejected at the kill-check**, before any
+accumulator code was written. That sequencing was the point and it worked — an
+hour of checking replaced weeks of work inside `makeMove`/`unmakeMove`.
+
+| on 200k held-out positions | MAE | corr with the label |
+|---|---|---|
+| constant | 313.4 | — |
+| **hand-crafted evaluation** | **68.7** | **0.945** |
+| the trained net | 295.2 | 0.194 |
+
+**The 0.945 is the finding, not the failed net**, and it partly falsifies
+`docs/NNUE-DECISION.md`. That document argued the search-score label carries
+knowledge the evaluation lacks. At 5 000 nodes the evaluation explains 94.5% of
+it, so a corpus labelled this way mostly teaches a net to *imitate* the HCE.
+**Measure that correlation before generating another corpus** — it is one
+command and it would have changed the plan before 25M positions were written.
+
+The net itself failed on three initialization-class bugs, all mine: a summing
+feature transformer initialised like a Linear layer (89% of the accumulator
+saturated outside `clamp(0,1)`), an output that could not reach the label range
+(±52cp against labels spanning ±800), and after both fixes an accumulator with
+too little spread to differentiate positions. `tools/nnue-train.py` now refuses
+to start on the first two. The corpus is sound and reusable — 25.2M positions,
+99.5% unique, labels monotonic with results (`tools/corpus-stats.py`).
+
+**Do not start the accumulator.** Next NNUE step, if any, is one cheap
+experiment: generate a small corpus at a much higher node count and re-measure
+that correlation. If it stays near 0.945, self-play NNUE is dead for this engine
+and only external labels would work — which is a measurement-purity decision.
+
+---
+
 ## Session close — 2026-09-04
 
 **Seven gates, 11 760 games, nothing shipped.** `conthist` +6.8, `capthist`

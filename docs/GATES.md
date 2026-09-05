@@ -91,6 +91,50 @@ Re-pool any of these with `./tests/pool-shards.sh <dir>/`.
 | `shard-20260904-130631/` | `corrhist` **persistence only** (`corrhistq` off both sides) | **+0.4 [−11.8, +12.7]** — null |
 | `shard-20260904-142613/` | **`capthist`** — capture history inside the SEE bands | **+2.7 [−9.7, +15.1]** — null, stays off |
 | `shard-20260904-214827/` | **`rootrandom`** — seeded tiebreak among near-equal root moves | **−90.7 [−105.0, −76.7]** — rejected; the cost is the root window, not the tiebreak |
+| `shard-20260906-002113/` | **`evalnoise`** — ±5cp seeded perturbation of the static score | **−3.9 [−16.9, +9.0]** — **accepted and ON**, see below: a null is the success case here |
+
+### `evalnoise` shipped on a null — 2026-09-06
+
+**−3.9 [−16.9, +9.0]**, pentanomial `78-203-301-176-82`, properly spread. **On by
+default.**
+
+**A null is the success case here, and that inverts how this row should be
+read.** The feature is not for Elo. It is the `BUGS.md` 6 fix: play was
+deterministic, so 32% of the archive is sixteen opponents met four or more
+times, whole games repeat, and every accuracy figure in `MEASUREMENTS.md`
+inherits the correlation and is worth less than its game count claims.
+
+**Read the number honestly rather than as a win.** The interval spans zero so no
+loss is demonstrated, but the point estimate is negative and −17 is not
+excluded. It ships because a cost near zero is what theory predicts — ±5cp is
+five times smaller than the evaluation's own median error of 125cp — and because
+what it buys compounds: every future gate and every field reading from here is
+taken on decorrelated games. That is a deliberate trade of possibly-real Elo for
+measurement validity, and it should be re-examined if the engine ever sits near
+a rating boundary that matters.
+
+**This is the second design for `BUGS.md` 6.** The first, `rootrandom`, was
+rejected at −90.7 — and the cost there was never the tiebreak, it was searching
+every root move on a fixed window to get exact scores, which disabled root alpha
+cutoffs and tripled the tree. `evalnoise` never touches the root window, which
+is where all three failures of that feature lived. One hash multiply on a path
+that already runs `evaluate()`.
+
+**Placed in `scoreForSideToMove()` rather than inside `evaluate()`**, and that is
+a gateability decision, not an aesthetic one: `g_evalCache` is keyed on position
+alone, so an evaluation toggle cannot be A/B'd with `--optA/--optB` in one
+process (`BUGS.md` 8). On the search side of that boundary it gates the ordinary
+way — which is why this row exists at all.
+
+**The seed advances per game, not per process**, announced each time, and is
+pinned when `RootSeed` is set explicitly so a logged game still replays.
+lichess-bot keeps one engine process across every game it plays, so a
+process-lifetime seed would perturb every game identically and decorrelate
+nothing.
+
+Bench moved 445 492 → **461 693**, and exactly one best move changed:
+`startpos` `g1f3` → `e2e4`. Two near-equal openings swapping is the feature
+working, not a regression — and eleven of twelve positions kept their move.
 
 ### `rootrandom` rejected, and the comment that hid why — 2026-09-04
 

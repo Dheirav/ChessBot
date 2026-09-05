@@ -459,7 +459,15 @@ struct SearchOptions {
     // decorrelated future measurements, and `BUGS.md` 6 is why that matters:
     // 32% of the archive is sixteen opponents met four or more times, whole
     // games repeat, and every accuracy figure inherits the correlation.
-    bool evalNoise = false;
+    //
+    // **Gated 2026-09-06: -3.9 [-16.9, +9.0] over 1 680 games. ON by default.**
+    // Read that honestly: the interval spans zero so there is no demonstrated
+    // loss, but the point estimate is negative and -17 is not excluded. It ships
+    // because the thing it buys is not Elo -- it is that every future gate and
+    // field reading is taken on decorrelated games, which compounds, while a
+    // cost near zero is what theory predicts for a perturbation five times
+    // smaller than the evaluation's own median error of 125cp. `GATES.md`.
+    bool evalNoise = true;
 
     // There is no king-safety toggle here, and on 2026-08-16 there briefly were
     // two. Both were gated and neither earned its place; the numbers and the

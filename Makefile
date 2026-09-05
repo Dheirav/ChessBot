@@ -228,7 +228,14 @@ review: tools/review
 # Self-play corpus generation for NNUE (docs/NNUE-DECISION.md). Same engine
 # objects as everything else: the data has to come from the engine being
 # trained, not from a variant of it.
-tools/gendata: tools/gendata.o $(ENGINE_OBJ)
+tools/gendata: tools/gendata
+
+# Hand-crafted evaluation over a list of FENs, for comparing a trained net
+# against the evaluation it would replace (docs/NNUE-DECISION.md).
+tools/evaldump: tools/evaldump.o $(ENGINE_OBJ)
+	$(CXX) $^ -o $@ $(LDFLAGS)
+
+evaldump: tools/evaldump.o $(ENGINE_OBJ)
 	$(CXX) $^ -o $@ $(LDFLAGS)
 
 gendata: tools/gendata
