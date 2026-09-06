@@ -288,8 +288,24 @@ SearchInfoFn g_searchInfo = nullptr;
 // once per search. When no budget is set, searchAborted() short-circuits on
 // g_hasDeadline and the search behaves exactly as it did before time control
 // existed — which is what keeps tests/bench reproducible.
+// --- Timing state, and which of it is safe to share between threads ---
+//
+// Everything here except g_outOfTime is written once in
+// findBestMoveIterativeDeepening *before* any search begins and only read
+// afterwards, so several threads may share it without synchronisation. That is
+// a property worth stating rather than inferring: Phase 3 spawns threads that
+// all read these, and a later change that made one of them mutable mid-search
+// would introduce a race with no compiler diagnostic and no test failure.
 static bool g_hasDeadline = false;
-static bool g_outOfTime = false;
+
+// The exception. Whichever thread first notices the clock has run out sets it,
+// and every thread reads it. Relaxed ordering: it is a one-way latch, false to
+// true, never reset mid-search. A thread that misses the write for a few
+// hundred nanoseconds simply checks the clock itself a moment later and reaches
+// the same conclusion -- there is nothing to synchronise-with, only a flag to
+// publish.
+static std::atomic<bool> g_outOfTime{false};
+
 static std::chrono::steady_clock::time_point g_deadline;
 
 // A *soft* deadline, separate from the hard one above (BUGS.md 11).
@@ -335,11 +351,12 @@ static inline bool searchAborted(SearchContext& ctx, const std::atomic<bool>& sh
     // match reproduce move for move.
     if (g_nodeLimit && ctx.nodes >= g_nodeLimit) return true;
     if (!g_hasDeadline) return false;
-    if (g_outOfTime) return true;
+    if (g_outOfTime.load(std::memory_order_relaxed)) return true;
     if (ctx.nodes < ctx.nextTimeCheck) return false;
     ctx.nextTimeCheck = ctx.nodes + TIME_CHECK_INTERVAL;
-    if (std::chrono::steady_clock::now() >= g_deadline) g_outOfTime = true;
-    return g_outOfTime;
+    if (std::chrono::steady_clock::now() >= g_deadline)
+        g_outOfTime.store(true, std::memory_order_relaxed);
+    return g_outOfTime.load(std::memory_order_relaxed);
 }
 
 // Null-move pruning assumes that passing is worse than any real move. That is
@@ -1042,7 +1059,7 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
     // Arm the deadline. With no budget the search is depth-limited and every
     // clock check short-circuits, which is what keeps tests/bench reproducible.
     g_hasDeadline = (limits.moveTimeMs > 0);
-    g_outOfTime = false;
+    g_outOfTime.store(false, std::memory_order_relaxed);
     ctx.nextTimeCheck = TIME_CHECK_INTERVAL;
     g_nodeLimit = limits.maxNodes;
     if (g_hasDeadline) {
