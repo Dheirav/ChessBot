@@ -304,7 +304,6 @@ SearchInfoFn g_searchInfo = nullptr;
 static bool g_hasDeadline = false;
 static bool g_outOfTime = false;
 static std::chrono::steady_clock::time_point g_deadline;
-static uint64_t g_nextTimeCheck = 0;
 
 // A *soft* deadline, separate from the hard one above (BUGS.md 11).
 //
@@ -341,17 +340,17 @@ static constexpr uint64_t TIME_CHECK_INTERVAL = 2048;
 
 // The search stops for two reasons: the GUI asked it to, or it ran out of
 // time. Everywhere the search used to test shouldStop it now tests this.
-static inline bool searchAborted(const std::atomic<bool>& shouldStop) {
+static inline bool searchAborted(SearchContext& ctx, const std::atomic<bool>& shouldStop) {
     if (shouldStop.load()) return true;
     // The node budget is exact rather than sampled: the counter is already in
     // a register's reach at every node, so unlike the clock there is nothing to
     // amortize, and an exactly-enforced budget is what makes a node-limited
     // match reproduce move for move.
-    if (g_nodeLimit && g_searchNodes >= g_nodeLimit) return true;
+    if (g_nodeLimit && ctx.nodes >= g_nodeLimit) return true;
     if (!g_hasDeadline) return false;
     if (g_outOfTime) return true;
-    if (g_searchNodes < g_nextTimeCheck) return false;
-    g_nextTimeCheck = g_searchNodes + TIME_CHECK_INTERVAL;
+    if (ctx.nodes < ctx.nextTimeCheck) return false;
+    ctx.nextTimeCheck = ctx.nodes + TIME_CHECK_INTERVAL;
     if (std::chrono::steady_clock::now() >= g_deadline) g_outOfTime = true;
     return g_outOfTime;
 }
@@ -390,10 +389,11 @@ static MoveList generateCaptures(Board& board, PieceColor side) {
 // only how deep *this* quiescence descent has gone, which is what the bound
 // below applies to — the two differ because quiescence starts at whatever ply
 // the main search stopped at.
-static int quiescence(Board& board, int ply, int qDepth, int alpha, int beta,
+static int quiescence(SearchContext& ctx,
+                      Board& board, int ply, int qDepth, int alpha, int beta,
                       const std::atomic<bool>& shouldStop) {
-    ++g_searchNodes;
-    if (searchAborted(shouldStop)) {
+    ++ctx.nodes;
+    if (searchAborted(ctx, shouldStop)) {
         return 0;
     }
 
@@ -521,15 +521,15 @@ static int quiescence(Board& board, int ply, int qDepth, int alpha, int beta,
             if (standPat + victim + QS_DELTA_MARGIN <= alpha) continue;
         }
 
-        if (searchAborted(shouldStop)) {
+        if (searchAborted(ctx, shouldStop)) {
             break;
         }
 
         UndoInfo undo = board.makeMove(move);
-        int score = -quiescence(board, ply + 1, qDepth + 1, -beta, -alpha, shouldStop);
+        int score = -quiescence(ctx, board, ply + 1, qDepth + 1, -beta, -alpha, shouldStop);
         board.unmakeMove(undo);
 
-        if (searchAborted(shouldStop)) {
+        if (searchAborted(ctx, shouldStop)) {
             break;
         }
 
@@ -578,9 +578,9 @@ static int minimaxWithTT(SearchContext& ctx,
                         std::vector<uint64_t>& pathHashes,
                         const Move* prevMove = nullptr,
                         const Move* excluded = nullptr) {
-    ++g_searchNodes;
+    ++ctx.nodes;
     // Check if we should stop searching
-    if (searchAborted(shouldStop)) {
+    if (searchAborted(ctx, shouldStop)) {
         return 0; // Return neutral score when stopped
     }
 
@@ -656,11 +656,11 @@ static int minimaxWithTT(SearchContext& ctx,
     }
 
     if (depth == 0) {
-        int score = quiescence(board, ply, 0, alpha, beta, shouldStop);
+        int score = quiescence(ctx, board, ply, 0, alpha, beta, shouldStop);
         // Quiescence is fail-hard: a result clipped to the window is only a
         // bound, not an exact score. Never store anything from a stopped
         // search — it returns fake neutral values.
-        if (!searchAborted(shouldStop)) {
+        if (!searchAborted(ctx, shouldStop)) {
             TTEntry::NodeType nodeType;
             if (score <= alpha) {
                 nodeType = TTEntry::UPPER_BOUND;
@@ -729,8 +729,8 @@ static int minimaxWithTT(SearchContext& ctx,
         // this from being the -50 Elo version of the bet.
         if (g_searchOptions.razoring && depth <= RAZOR_MAX_DEPTH
             && staticEval + RAZOR_MARGIN <= alpha) {
-            const int qScore = quiescence(board, ply, 0, alpha, beta, shouldStop);
-            if (!searchAborted(shouldStop) && qScore <= alpha) return qScore;
+            const int qScore = quiescence(ctx, board, ply, 0, alpha, beta, shouldStop);
+            if (!searchAborted(ctx, shouldStop) && qScore <= alpha) return qScore;
         }
     }
 
@@ -750,7 +750,7 @@ static int minimaxWithTT(SearchContext& ctx,
         int nullScore = -minimaxWithTT(ctx, board, depth - 1 - R, ply + 1, -beta, -beta + 1,
                                        shouldStop, tt, pathHashes, nullptr);
         board.unmakeNullMove(nu);
-        if (!searchAborted(shouldStop) && nullScore >= beta) return beta;
+        if (!searchAborted(ctx, shouldStop) && nullScore >= beta) return beta;
     }
 
     MoveList moves = generateLegalMoves(board, side);
@@ -787,7 +787,7 @@ static int minimaxWithTT(SearchContext& ctx,
         // move it liked is read back the way any other TT move would be. That
         // is deliberate: it keeps one path into the ordering rather than two.
         int ignored;
-        if (!searchAborted(shouldStop))
+        if (!searchAborted(ctx, shouldStop))
             tt.probe(hash, 0, ply, -INF, INF, ignored, ttMove);
     }
 
@@ -834,7 +834,7 @@ static int minimaxWithTT(SearchContext& ctx,
                                                   singularBeta - 1, singularBeta,
                                                   shouldStop, tt, pathHashes,
                                                   prevMove, &ttMove);
-                if (!searchAborted(shouldStop) && without < singularBeta)
+                if (!searchAborted(ctx, shouldStop) && without < singularBeta)
                     singularExtension = 1;
             }
         }
@@ -848,7 +848,7 @@ static int minimaxWithTT(SearchContext& ctx,
     int moveIndex = 0;
     for (const Move& move : moves) {
         // Check stop condition before each move
-        if (searchAborted(shouldStop)) {
+        if (searchAborted(ctx, shouldStop)) {
             break;
         }
         // The one move a singular probe is pretending does not exist.
@@ -934,7 +934,7 @@ static int minimaxWithTT(SearchContext& ctx,
             const int R = 1;
             eval = -minimaxWithTT(ctx, board, depth - 1 - R, ply + 1, -alpha - 1, -alpha,
                                   shouldStop, tt, pathHashes, &move);
-            if (!searchAborted(shouldStop) && eval > alpha) {
+            if (!searchAborted(ctx, shouldStop) && eval > alpha) {
                 eval = -minimaxWithTT(ctx, board, depth - 1, ply + 1, -beta, -alpha,
                                       shouldStop, tt, pathHashes, &move);
             }
@@ -965,7 +965,7 @@ static int minimaxWithTT(SearchContext& ctx,
     // that would poison the table for every later search, since the TT
     // persists across moves. Return without storing; callers that see
     // shouldStop discard this value anyway.
-    if (searchAborted(shouldStop)) {
+    if (searchAborted(ctx, shouldStop)) {
         return bestEval;
     }
 
@@ -1046,7 +1046,13 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
     // version of this feature reset the table every search and gated null;
     // a table that starts from zero on every move only ever learns inside one
     // search, which is not what the heuristic is for.
-    g_searchNodes = 0;
+    // Published to g_searchNodes on every exit from this function, so callers
+    // outside the engine see a total without the search paying for a shared
+    // counter on the hot path.
+    struct PublishNodes {
+        const SearchContext& c;
+        ~PublishNodes() { g_searchNodes = c.nodes; }
+    } publishNodes{ctx};
     // Age the table: entries this search does not reuse are now displaceable.
     if (g_searchOptions.ttAging) tt.newSearch();
 
@@ -1054,7 +1060,7 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
     // clock check short-circuits, which is what keeps tests/bench reproducible.
     g_hasDeadline = (limits.moveTimeMs > 0);
     g_outOfTime = false;
-    g_nextTimeCheck = TIME_CHECK_INTERVAL;
+    ctx.nextTimeCheck = TIME_CHECK_INTERVAL;
     g_nodeLimit = limits.maxNodes;
     if (g_hasDeadline) {
         const auto now = std::chrono::steady_clock::now();
@@ -1072,7 +1078,7 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
     if (moves.empty()) return Move();
 
     // Early stop check
-    if (searchAborted(shouldStop)) {
+    if (searchAborted(ctx, shouldStop)) {
         return moves[0];
     }
 
@@ -1095,13 +1101,13 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
 
     // Iterative deepening loop
     for (int currentDepth = 1; currentDepth <= maxDepth; ++currentDepth) {
-        if (searchAborted(shouldStop)) {
+        if (searchAborted(ctx, shouldStop)) {
             if (!g_searchOptions.quiet) std::cout << "Search stopped at depth " << (currentDepth - 1) << std::endl;
             break;
         }
 
         auto depthStart = std::chrono::steady_clock::now();
-        const uint64_t depthStartNodes = g_searchNodes;
+        const uint64_t depthStartNodes = ctx.nodes;
         if (!g_searchOptions.quiet) std::cout << "Searching depth " << currentDepth << "..." << std::endl;
         
         // Try to get best move from transposition table for move ordering
@@ -1186,7 +1192,7 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
             for (size_t i = 0; i < moves.size(); ++i) {
                 const Move& move = moves[i];
                 // Check stop condition before evaluating each move
-                if (searchAborted(shouldStop)) {
+                if (searchAborted(ctx, shouldStop)) {
                     if (!g_searchOptions.quiet) std::cout << "Search interrupted during depth " << currentDepth << std::endl;
                     completedDepth = false;
                     break;
@@ -1223,14 +1229,14 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
                     // is re-searched with the full window.
                     eval = -minimaxWithTT(ctx, board, currentDepth - 1, 1, -alpha - 1, -alpha,
                                           shouldStop, tt, pathHashes, &move);
-                    if (!searchAborted(shouldStop) && eval > alpha && eval < beta) {
+                    if (!searchAborted(ctx, shouldStop) && eval > alpha && eval < beta) {
                         eval = -minimaxWithTT(ctx, board, currentDepth - 1, 1, -beta, -alpha,
                                               shouldStop, tt, pathHashes, &move);
                     }
                 }
                 board.unmakeMove(undo);
 
-                if (!searchAborted(shouldStop)) {
+                if (!searchAborted(ctx, shouldStop)) {
                     // Exact iff this move raised alpha (or is the first, which
                     // is searched on the full window). Anything else is a bound.
                     if (i == 0 || randomisingHere || eval > alpha)
@@ -1243,7 +1249,7 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
                 }
             }
 
-            if (!completedDepth || searchAborted(shouldStop) || !useAspiration) break;
+            if (!completedDepth || searchAborted(ctx, shouldStop) || !useAspiration) break;
 
             // The score landed outside the window, so this result is only a
             // bound. Widen on the failing side and search the depth again.
@@ -1267,7 +1273,7 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
         // Applied per iteration so the reported best move and the played move
         // never disagree. Skipped entirely when off, which is why bench is
         // unchanged and gates stay reproducible.
-        if (randomisingHere && completedDepth && !searchAborted(shouldStop)
+        if (randomisingHere && completedDepth && !searchAborted(ctx, shouldStop)
             && exactRootScores.size() > 1 && std::abs(currentBestScore) < 29000) {
             std::vector<Move> tied;
             for (const auto& ms : exactRootScores)
@@ -1284,14 +1290,14 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
 
         // Feed the volatility tracker before bestScore is overwritten, so the
         // measurement is genuinely |this depth - previous depth|.
-        if (completedDepth && !searchAborted(shouldStop) && haveScore
+        if (completedDepth && !searchAborted(ctx, shouldStop) && haveScore
             && std::abs(currentBestScore) < 29000 && std::abs(bestScore) < 29000) {
             scoreSwing = scoreSwing / 2 + std::abs(currentBestScore - bestScore);
             scoreSwingSamples = scoreSwingSamples / 2 + 1;
         }
 
         // Only update best move if we completed the full depth
-        if (completedDepth && !searchAborted(shouldStop)) {
+        if (completedDepth && !searchAborted(ctx, shouldStop)) {
             bestMove = currentBestMove;
             bestScore = currentBestScore;
             haveScore = true;
@@ -1300,7 +1306,7 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
             if (g_searchInfo) {
                 auto sinceStart = std::chrono::duration_cast<std::chrono::milliseconds>(
                     depthEnd - searchStart).count();
-                g_searchInfo(currentDepth, bestScore, g_searchNodes,
+                g_searchInfo(currentDepth, bestScore, ctx.nodes,
                              (long)sinceStart, bestMove);
             }
             if (!g_searchOptions.quiet) {
@@ -1326,7 +1332,7 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
         // that share is spent differently by the two sides of an A/B, which is
         // exactly the sort of difference a gate must not invent.
         if (g_nodeLimit && currentDepth < maxDepth) {
-            const uint64_t used = g_searchNodes;
+            const uint64_t used = ctx.nodes;
             const uint64_t lastIteration = used - depthStartNodes;
             const double BRANCHING = 2.3;
             if (used >= g_nodeLimit ||

@@ -533,6 +533,11 @@ std::string describeSearchOptions(const SearchOptions& opts);
 // It exists for two reasons: UCI reports nodes and nps, and tests/bench.cpp
 // uses the total as a signature. Any change that claims to preserve search
 // behaviour must reproduce the signature exactly.
+// Total nodes of the last completed search, for callers outside the engine
+// (tests/bench reads it, and the UCI info line reports it). Written from the
+// search context when a search ends rather than incremented on the hot path --
+// with several threads this is a sum, and summing on every node would put a
+// shared cache line in the middle of the search.
 extern uint64_t g_searchNodes;
 
 // Checkmate score, from the perspective of the side to move: being mated is
@@ -565,6 +570,18 @@ extern SearchInfoFn g_searchInfo;
 // which is fine on the heap and is not something to put on a thread stack.
 struct SearchContext {
     MoveOrderer orderer;
+
+    // Nodes searched by *this* thread. The node budget is enforced per thread,
+    // which is exact today and stays correct later because node-limited runs
+    // are pinned to one thread -- a threaded search is not reproducible from
+    // its seed, and every number in GATES.md depends on that reproducibility.
+    uint64_t nodes = 0;
+
+    // When this thread next consults the clock. Amortising the check is only
+    // sound per thread: a shared counter would let one thread's progress
+    // suppress another's check, and a search that never looks at the clock
+    // overruns its budget, which on a real game is a forfeit (BUGS.md 11).
+    uint64_t nextTimeCheck = 0;
 };
 
 // What the search is allowed to spend.
