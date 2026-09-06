@@ -1,5 +1,6 @@
 #pragma once
 #include "board.hpp"
+#include "move_ordering.hpp"
 #include "move.hpp"
 #include "transposition_table.hpp"
 #include <atomic>
@@ -546,6 +547,25 @@ constexpr int SEARCH_MATE_SCORE = 30000;
 using SearchInfoFn = void (*)(int depth, int score, uint64_t nodes,
                               long elapsedMs, const Move& best);
 extern SearchInfoFn g_searchInfo;
+
+// Per-thread search state.
+//
+// Everything here is written during a search and must not be shared between
+// threads. It exists because Lazy SMP needs N searches running at once, and
+// `move_ordering.cpp` used to carry the warning that made this necessary:
+// *"Not synchronized: safe only because every search in the process runs under
+// ChessBotEngine::ttMutex."*
+//
+// A struct passed by reference rather than `thread_local`. The 2026-08-15
+// profile is the reason: `Piece::type()` was moved into a header because 1.87
+// billion calls made per-access cost about 21% of runtime, and `thread_local`
+// costs an indirection per access on some ABIs. This is the same path.
+//
+// Heap-allocate it. `MoveOrderer` carries a 2.4MB continuation-history table,
+// which is fine on the heap and is not something to put on a thread stack.
+struct SearchContext {
+    MoveOrderer orderer;
+};
 
 // What the search is allowed to spend.
 //

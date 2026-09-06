@@ -101,5 +101,7 @@ private:
     int getCaptHistScore(const Move& move) const;
 };
 
-// Global move orderer instance
-extern MoveOrderer g_moveOrderer;
+// No global instance. Move ordering state is per-search and, from Phase 3 of
+// Lazy SMP, per-thread: it lives in SearchContext (search.hpp). The global that
+// used to be here carried the warning that made this necessary -- "safe only
+// because every search in the process runs under ChessBotEngine::ttMutex".

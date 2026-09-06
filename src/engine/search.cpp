@@ -8,6 +8,7 @@
 #include "see.hpp"
 #include <limits>
 #include <algorithm>
+#include <memory>
 #include <cstring>
 #include <atomic>
 #include <iostream>
@@ -571,7 +572,8 @@ void recordGamePosition(std::vector<uint64_t>& history, uint64_t hashBefore,
 // move is answering "how good is this position *without* that move", which is a
 // different question from the one the table stores -- so such a node neither
 // reads nor writes the table, and never extends again.
-static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
+static int minimaxWithTT(SearchContext& ctx,
+                        Board& board, int depth, int ply, int alpha, int beta,
                         const std::atomic<bool>& shouldStop, TranspositionTable& tt,
                         std::vector<uint64_t>& pathHashes,
                         const Move* prevMove = nullptr,
@@ -745,7 +747,7 @@ static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
         const int R = 2;
         NullUndo nu = board.makeNullMove();
         // No previous move below a null move: there is no reply to key on.
-        int nullScore = -minimaxWithTT(board, depth - 1 - R, ply + 1, -beta, -beta + 1,
+        int nullScore = -minimaxWithTT(ctx, board, depth - 1 - R, ply + 1, -beta, -beta + 1,
                                        shouldStop, tt, pathHashes, nullptr);
         board.unmakeNullMove(nu);
         if (!searchAborted(shouldStop) && nullScore >= beta) return beta;
@@ -779,7 +781,7 @@ static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
     // work to do and the shallow search would mostly rediscover it.
     if (g_searchOptions.iid && ttMove.from == -1 && depth >= 5 && !inCheck) {
         const int R = 2;
-        minimaxWithTT(board, depth - R, ply, alpha, beta, shouldStop, tt, pathHashes,
+        minimaxWithTT(ctx, board, depth - R, ply, alpha, beta, shouldStop, tt, pathHashes,
                       prevMove);
         // The shallow search stores its result under this same position, so the
         // move it liked is read back the way any other TT move would be. That
@@ -790,7 +792,7 @@ static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
     }
 
     // Move ordering with killer moves and history heuristic
-    g_moveOrderer.orderMoves(moves, board, depth, ttMove, prevMove);
+    ctx.orderer.orderMoves(moves, board, depth, ttMove, prevMove);
 
     // Aggressively search TT move first if available
     if (ttMove.from != -1) {
@@ -828,7 +830,7 @@ static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
             const int singularBeta = ttValue - SINGULAR_MARGIN * depth;
             const int probeDepth = depth / 2 - 1;
             if (probeDepth > 0) {
-                const int without = minimaxWithTT(board, probeDepth, ply,
+                const int without = minimaxWithTT(ctx, board, probeDepth, ply,
                                                   singularBeta - 1, singularBeta,
                                                   shouldStop, tt, pathHashes,
                                                   prevMove, &ttMove);
@@ -930,14 +932,14 @@ static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
         int eval;
         if (reduce) {
             const int R = 1;
-            eval = -minimaxWithTT(board, depth - 1 - R, ply + 1, -alpha - 1, -alpha,
+            eval = -minimaxWithTT(ctx, board, depth - 1 - R, ply + 1, -alpha - 1, -alpha,
                                   shouldStop, tt, pathHashes, &move);
             if (!searchAborted(shouldStop) && eval > alpha) {
-                eval = -minimaxWithTT(board, depth - 1, ply + 1, -beta, -alpha,
+                eval = -minimaxWithTT(ctx, board, depth - 1, ply + 1, -beta, -alpha,
                                       shouldStop, tt, pathHashes, &move);
             }
         } else {
-            eval = -minimaxWithTT(board, depth - 1 + ext, ply + 1, -beta, -alpha,
+            eval = -minimaxWithTT(ctx, board, depth - 1 + ext, ply + 1, -beta, -alpha,
                                   shouldStop, tt, pathHashes, &move);
         }
         board.unmakeMove(undo);
@@ -949,9 +951,9 @@ static int minimaxWithTT(Board& board, int depth, int ply, int alpha, int beta,
         if (bestEval > alpha) alpha = bestEval;
         if (alpha >= beta) {
             // Beta cutoff - update move ordering
-            g_moveOrderer.updateKillerMove(move, depth);
-            g_moveOrderer.updateHistory(move, depth, prevMove);
-            g_moveOrderer.updateCaptureHistory(move, depth);
+            ctx.orderer.updateKillerMove(move, depth);
+            ctx.orderer.updateHistory(move, depth, prevMove);
+            ctx.orderer.updateCaptureHistory(move, depth);
             break;
         }
     }
@@ -1012,6 +1014,13 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
                                    const std::vector<uint64_t>& gameHistory) {
     const int maxDepth = limits.maxDepth;
 
+    // The per-thread state for this search. One per search today; one per
+    // thread once Phase 3 spawns them. Heap-allocated because MoveOrderer
+    // carries a 2.4MB continuation-history table and a thread stack is not
+    // where that belongs.
+    auto ctxOwner = std::make_unique<SearchContext>();
+    SearchContext& ctx = *ctxOwner;
+
     // Whether this search randomises among near-equal root moves: the toggle,
     // and only while still in the opening. Computed once so every use agrees.
     const bool randomisingHere = g_searchOptions.rootRandom
@@ -1032,7 +1041,7 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
     g_gameHistory = gameHistory;
 
     // Clear move ordering data for new search
-    g_moveOrderer.clear();
+    ctx.orderer.clear();
     // Deliberately NOT cleared here -- see clearCorrectionHistory(). The first
     // version of this feature reset the table every search and gated null;
     // a table that starts from zero on every move only ever learns inside one
@@ -1109,7 +1118,7 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
         }
         
         // Order moves using previous iteration knowledge
-        g_moveOrderer.orderMoves(moves, board, currentDepth, ttMove);
+        ctx.orderer.orderMoves(moves, board, currentDepth, ttMove);
         
         int currentBestScore = -INF;
         Move currentBestMove = moves[0];
@@ -1186,7 +1195,7 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
                 UndoInfo undo = board.makeMove(move);
                 int eval;
                 if (i == 0) {
-                    eval = -minimaxWithTT(board, currentDepth - 1, 1, -beta, -alpha,
+                    eval = -minimaxWithTT(ctx, board, currentDepth - 1, 1, -beta, -alpha,
                                           shouldStop, tt, pathHashes, &move);
                 } else if (randomisingHere) {
                     // Every root move searched against the *original* window,
@@ -1206,16 +1215,16 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
                     // The price is no alpha cutoffs at the root. It is confined
                     // to the root ply and this path is off for gates and bench,
                     // so nothing measured pays for it.
-                    eval = -minimaxWithTT(board, currentDepth - 1, 1, -beta, -windowLoFixed,
+                    eval = -minimaxWithTT(ctx, board, currentDepth - 1, 1, -beta, -windowLoFixed,
                                           shouldStop, tt, pathHashes, &move);
                 } else {
                     // Principal variation search: later root moves get a cheap
                     // null-window probe first, and only a move that beats alpha
                     // is re-searched with the full window.
-                    eval = -minimaxWithTT(board, currentDepth - 1, 1, -alpha - 1, -alpha,
+                    eval = -minimaxWithTT(ctx, board, currentDepth - 1, 1, -alpha - 1, -alpha,
                                           shouldStop, tt, pathHashes, &move);
                     if (!searchAborted(shouldStop) && eval > alpha && eval < beta) {
-                        eval = -minimaxWithTT(board, currentDepth - 1, 1, -beta, -alpha,
+                        eval = -minimaxWithTT(ctx, board, currentDepth - 1, 1, -beta, -alpha,
                                               shouldStop, tt, pathHashes, &move);
                     }
                 }
