@@ -506,7 +506,6 @@ int uciLoop() {
         } else if (command == "ucinewgame") {
             stopSearch();
             g_tt->clear();
-            clearCorrectionHistory();
             // A seed per *game*, not per process. lichess-bot keeps one engine
             // process across every game it plays, so a process-lifetime seed
             // would give every game the same perturbation and decorrelate

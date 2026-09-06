@@ -401,8 +401,10 @@ struct SearchOptions {
     // move and started from zero on the next; and the offset was applied in
     // the main search only, missing quiescence, where most static evaluations
     // happen. **v2 fixes both** -- persistent across moves and cleared per game
-    // (`clearCorrectionHistory()`), and applied at both quiescence stand-pat
-    // and the qBound horizon. Ungated as of this line.
+    // and applied at both quiescence stand-pat and the qBound horizon.
+    // (The per-game reset it used is gone; the table is per-search and
+    // per-thread again -- see SearchContext, and the measurement that made
+    // that free.)
     //
     // **v2 gated 2026-09-04: -39.7 [-53.0, -26.5]. Rejected.** And the gate
     // could not say *which* half did it, because v2 changed two things at once
@@ -508,9 +510,6 @@ struct SearchOptionEntry {
 // precisely that: randomness is acceptable only if it is seeded and logged.
 extern uint64_t g_rootSeed;
 
-// Reset the correction-history table. Call at the start of a game, beside the
-// transposition table's clear() -- not per search. See search.cpp.
-void clearCorrectionHistory();
 
 extern const SearchOptionEntry SEARCH_OPTIONS[];
 extern const size_t SEARCH_OPTION_COUNT;
@@ -582,6 +581,20 @@ struct SearchContext {
     // suppress another's check, and a search that never looks at the clock
     // overruns its budget, which on a real game is a forfeit (BUGS.md 11).
     uint64_t nextTimeCheck = 0;
+
+    // Correction history, per thread and per search.
+    //
+    // v2 persisted this across the moves of a game and reset it per game, which
+    // is why clearCorrectionHistory() used to exist and be called from
+    // ucinewgame, tests/match and gendata. It is per-search again, and that is
+    // a measured decision rather than a convenience: persistence gated
+    // **+0.4 [-11.8, +12.7]** against v1's **+6.3 [-2.3, +15.0]** -- both null
+    // and statistically indistinguishable, so carrying the table across moves
+    // bought nothing observable. `GATES.md`.
+    //
+    // Sized 2 x 16384 ints = 128KB per thread. The toggle is off; the family is
+    // closed.
+    int corrHist[2][16384] = {};
 };
 
 // What the search is allowed to spend.

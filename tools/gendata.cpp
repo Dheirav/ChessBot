@@ -155,7 +155,6 @@ int main(int argc, char** argv) {
         if (aborted) continue;
 
         tt.clear();
-        clearCorrectionHistory();
 
         std::vector<Sample> pending;
         std::unordered_map<uint64_t, int> seen;

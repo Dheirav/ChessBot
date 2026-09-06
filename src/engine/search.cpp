@@ -179,19 +179,6 @@ static constexpr int CORR_SIZE   = 16384;   // power of two: indexed by mask
 static constexpr int CORR_GRAIN  = 256;     // fixed point, so small errors survive averaging
 static constexpr int CORR_CAP    = 96 * CORR_GRAIN;  // a correction, not a second evaluation
 static constexpr int CORR_WEIGHT = 128;     // denominator of the running average
-static int g_corrHist[2][CORR_SIZE];
-
-// Cleared per *game*, not per search.
-//
-// The correction is a claim about this evaluation's standing error in a class
-// of pawn structure, and that claim is still true on the next move -- which is
-// the whole point, and what v1 threw away by clearing every search. It is not
-// true across games, where the lineage of positions is unrelated, so both the
-// UCI `ucinewgame` path and tests/match's per-game reset call this beside the
-// transposition table's own clear().
-void clearCorrectionHistory() {
-    std::memset(g_corrHist, 0, sizeof(g_corrHist));
-}
 
 static inline int corrSide(const Board& board) {
     return (board.activeColor == COLOR_WHITE) ? 0 : 1;
@@ -204,10 +191,10 @@ static inline size_t corrSlot(const Board& board) {
 // Static evaluation with the learned correction applied. Bit-identical to
 // scoreForSideToMove() while the toggle is off, which is what keeps the bench
 // signature intact.
-static int correctedEval(const Board& board) {
+static int correctedEval(SearchContext& ctx, const Board& board) {
     const int raw = scoreForSideToMove(board);
     if (!g_searchOptions.corrHist) return raw;
-    const int adjusted = raw + g_corrHist[corrSide(board)][corrSlot(board)] / CORR_GRAIN;
+    const int adjusted = raw + ctx.corrHist[corrSide(board)][corrSlot(board)] / CORR_GRAIN;
     // A correction must never manufacture a mate score: those are compared
     // against MATE_SCORE thresholds all over the search and a fake one would
     // propagate as a real mate.
@@ -219,12 +206,12 @@ static int correctedEval(const Board& board) {
 // than a shallow one's.
 // Quiescence's static score. Separate from correctedEval() so the quiescence
 // half of the correction can be gated on its own -- see SearchOptions.
-static inline int quiescenceEval(const Board& board) {
-    return g_searchOptions.corrHistQ ? correctedEval(board) : scoreForSideToMove(board);
+static inline int quiescenceEval(SearchContext& ctx, const Board& board) {
+    return g_searchOptions.corrHistQ ? correctedEval(ctx, board) : scoreForSideToMove(board);
 }
 
-static void updateCorrHist(const Board& board, int depth, int diff) {
-    int& entry = g_corrHist[corrSide(board)][corrSlot(board)];
+static void updateCorrHist(SearchContext& ctx, const Board& board, int depth, int diff) {
+    int& entry = ctx.corrHist[corrSide(board)][corrSlot(board)];
     const int w = std::min(depth + 1, 16);
     const long blended = ((long)entry * (CORR_WEIGHT - w)
                           + (long)diff * CORR_GRAIN * w) / CORR_WEIGHT;
@@ -402,7 +389,7 @@ static int quiescence(SearchContext& ctx,
     // not an alternative: it is a budget overrun, and on a clock that is a
     // forfeit rather than a bad move.
     if (g_searchOptions.qBound && qDepth >= QS_MAX_DEPTH) {
-        return quiescenceEval(board);
+        return quiescenceEval(ctx, board);
     }
 
     PieceColor side = board.activeColor;
@@ -421,7 +408,7 @@ static int quiescence(SearchContext& ctx,
     // while the toggle is off, so this changes no node count when it is.
     int standPat = 0;
     if (!inCheck) {
-        standPat = quiescenceEval(board);
+        standPat = quiescenceEval(ctx, board);
         if (standPat >= beta) return beta;
         if (standPat > alpha) alpha = standPat;
     }
@@ -709,7 +696,7 @@ static int minimaxWithTT(SearchContext& ctx,
                      || (!isPV && !nearMate
                          && (g_searchOptions.revFutility || g_searchOptions.razoring)));
     if (wantStatic) {
-        staticEval = correctedEval(board);
+        staticEval = correctedEval(ctx, board);
         haveStatic = true;
     }
 
@@ -980,7 +967,7 @@ static int minimaxWithTT(SearchContext& ctx,
     if (g_searchOptions.corrHist && !excluded && haveStatic && depth > 0
         && std::abs(bestEval) < MATE_SCORE - 1000
         && (bestMove.from == -1 || bestMove.capturedPiece.type() == NONE)) {
-        updateCorrHist(board, depth, bestEval - staticEval);
+        updateCorrHist(ctx, board, depth, bestEval - staticEval);
     }
 
     // Store in transposition table. Bound classification compares against the
@@ -1042,10 +1029,6 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
 
     // Clear move ordering data for new search
     ctx.orderer.clear();
-    // Deliberately NOT cleared here -- see clearCorrectionHistory(). The first
-    // version of this feature reset the table every search and gated null;
-    // a table that starts from zero on every move only ever learns inside one
-    // search, which is not what the heuristic is for.
     // Published to g_searchNodes on every exit from this function, so callers
     // outside the engine see a total without the search paying for a shared
     // counter on the hot path.
