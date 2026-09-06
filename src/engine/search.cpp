@@ -9,6 +9,7 @@
 #include <limits>
 #include <algorithm>
 #include <memory>
+#include <thread>
 #include <cstring>
 #include <atomic>
 #include <iostream>
@@ -335,6 +336,41 @@ static std::chrono::steady_clock::time_point g_softDeadline;
 // is the only state tests/bench and tests/perft ever see.
 static uint64_t g_nodeLimit = 0;
 
+// Requested thread count, clamped to what the machine has.
+static int g_threads = 1;
+
+int maxThreadCount() {
+    const unsigned hw = std::thread::hardware_concurrency();
+    return hw ? (int)hw : 1;
+}
+void setThreadCount(int n) {
+    if (n < 1) n = 1;
+    const int hi = maxThreadCount();
+    g_threads = n > hi ? hi : n;
+}
+int getThreadCount() { return g_threads; }
+
+// The count this search will actually use, and the single place that decision
+// is made.
+//
+// **Threads require a clock.** A search bounded by depth or by nodes is a
+// *measurement* -- tests/bench, every shard gate, tests/timecontrol -- and its
+// value is that it reproduces move for move from its seed. A threaded search
+// races on the transposition table by design and reproduces nothing.
+//
+// The first version of this checked only for a node budget, which would have
+// left tests/bench unprotected: bench is depth-limited, so any run with Threads
+// set above 1 would have been non-deterministic and the 461,727 signature
+// meaningless. Requiring a clock covers both by construction rather than by
+// remembering to pin threads at each of nine call sites.
+//
+// The cost is that threading cannot be exercised at a fixed depth; use a
+// movetime instead.
+static int effectiveThreads(const SearchLimits& limits) {
+    const bool measuring = (limits.maxNodes != 0) || (limits.moveTimeMs <= 0);
+    return measuring ? 1 : g_threads;
+}
+
 // Checking the clock costs far more than a node does, so it is checked once
 // every few thousand nodes instead of at every one. At the measured ~165k
 // nodes/second this bounds overshoot to roughly 12ms, well inside any real
@@ -345,6 +381,7 @@ static constexpr uint64_t TIME_CHECK_INTERVAL = 2048;
 // time. Everywhere the search used to test shouldStop it now tests this.
 static inline bool searchAborted(SearchContext& ctx, const std::atomic<bool>& shouldStop) {
     if (shouldStop.load()) return true;
+    if (ctx.extraStop && ctx.extraStop->load(std::memory_order_relaxed)) return true;
     // The node budget is exact rather than sampled: the counter is already in
     // a register's reach at every node, so unlike the clock there is nothing to
     // amortize, and an exactly-enforced budget is what makes a node-limited
@@ -1012,10 +1049,23 @@ static int minimaxWithTT(SearchContext& ctx,
 // entries and move ordering, so the extra cost of starting shallow is far less
 // than the ordering it buys — and it is what makes a time limit usable at all,
 // since there is always a completed result to fall back on.
-Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
-                                   const std::atomic<bool>& shouldStop,
-                                   TranspositionTable& tt,
-                                   const std::vector<uint64_t>& gameHistory) {
+// One thread's search. Thread 0 is the main thread and owns everything the
+// outside world sees -- the returned move, the info lines, the console output.
+// Helpers search the same root into the same table and their answers are
+// discarded; the table is the whole point of them.
+//
+// `board` is taken **by value**: generateLegalMoves mutates the board it is
+// given and restores it, which is fine per thread and catastrophic shared.
+static Move searchWorker(int threadIndex, Board board, const SearchLimits& limits,
+                         const std::atomic<bool>& shouldStop,
+                         TranspositionTable& tt,
+                         const std::atomic<bool>* extraStop,
+                         uint64_t* nodesOut) {
+    const bool isMain = (threadIndex == 0);
+    // Helpers are silent. They exist to fill the transposition table; their
+    // move, their info lines and their console output are all discarded, and
+    // eight threads narrating the same search would be unreadable anyway.
+    const bool verbose = isMain && !g_searchOptions.quiet;
     const int maxDepth = limits.maxDepth;
 
     // The per-thread state for this search. One per search today; one per
@@ -1038,41 +1088,16 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
     long scoreSwing = 0;
     int scoreSwingSamples = 0;
 
-    // Copied, not referenced: the caller owns its history and may edit it the
-    // moment this returns, and a search reading a half-updated list would score
-    // draws that are not there. It is at most fifty-odd entries by
-    // construction, so the copy is not worth avoiding.
-    g_gameHistory = gameHistory;
-
-    // Clear move ordering data for new search
+    ctx.extraStop = extraStop;
     ctx.orderer.clear();
-    // Published to g_searchNodes on every exit from this function, so callers
-    // outside the engine see a total without the search paying for a shared
-    // counter on the hot path.
-    struct PublishNodes {
-        const SearchContext& c;
-        ~PublishNodes() { g_searchNodes = c.nodes; }
-    } publishNodes{ctx};
-    // Age the table: entries this search does not reuse are now displaceable.
-    if (g_searchOptions.ttAging) tt.newSearch();
-
-    // Arm the deadline. With no budget the search is depth-limited and every
-    // clock check short-circuits, which is what keeps tests/bench reproducible.
-    g_hasDeadline = (limits.moveTimeMs > 0);
-    g_outOfTime.store(false, std::memory_order_relaxed);
     ctx.nextTimeCheck = TIME_CHECK_INTERVAL;
-    g_nodeLimit = limits.maxNodes;
-    if (g_hasDeadline) {
-        const auto now = std::chrono::steady_clock::now();
-        g_softDeadline = now + std::chrono::milliseconds(limits.moveTimeMs);
-        // hardTimeMs of 0 means "no separate hard limit", i.e. the two coincide
-        // and the search behaves exactly as it did before the split existed.
-        // A hard limit below the soft one would be nonsense, so it is clamped
-        // rather than trusted.
-        const long hard = (limits.hardTimeMs > limits.moveTimeMs)
-                              ? limits.hardTimeMs : limits.moveTimeMs;
-        g_deadline = now + std::chrono::milliseconds(hard);
-    }
+
+    // Written on every exit, including the early returns below, so the caller
+    // can sum what each thread actually searched.
+    struct PublishNodes {
+        const SearchContext& c; uint64_t* out;
+        ~PublishNodes() { if (out) *out = c.nodes; }
+    } publishNodes{ctx, nodesOut};
     
     MoveList moves = generateLegalMoves(board, board.activeColor);
     if (moves.empty()) return Move();
@@ -1093,22 +1118,29 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
     bool haveScore = false;
 
     auto searchStart = std::chrono::steady_clock::now();
-    if (!g_searchOptions.quiet) {
+    if (verbose) {
         std::cout << "Starting iterative deepening search up to depth " << maxDepth;
         if (g_hasDeadline) std::cout << " within " << limits.moveTimeMs << "ms";
         std::cout << std::endl;
     }
 
-    // Iterative deepening loop
-    for (int currentDepth = 1; currentDepth <= maxDepth; ++currentDepth) {
+    // Iterative deepening loop.
+    //
+    // Helpers start one ply deeper on odd thread indices. Without some such
+    // stagger every thread walks the same iterations in the same order and
+    // mostly re-derives what the others already stored; offsetting them makes
+    // the table fill from several depths at once, which is the entire mechanism
+    // Lazy SMP runs on. Thread 0 is never offset -- 0 % 2 == 0 -- so the single
+    // threaded search is bit-for-bit what it was.
+    for (int currentDepth = 1 + (threadIndex % 2); currentDepth <= maxDepth; ++currentDepth) {
         if (searchAborted(ctx, shouldStop)) {
-            if (!g_searchOptions.quiet) std::cout << "Search stopped at depth " << (currentDepth - 1) << std::endl;
+            if (verbose) std::cout << "Search stopped at depth " << (currentDepth - 1) << std::endl;
             break;
         }
 
         auto depthStart = std::chrono::steady_clock::now();
         const uint64_t depthStartNodes = ctx.nodes;
-        if (!g_searchOptions.quiet) std::cout << "Searching depth " << currentDepth << "..." << std::endl;
+        if (verbose) std::cout << "Searching depth " << currentDepth << "..." << std::endl;
         
         // Try to get best move from transposition table for move ordering
         uint64_t hash = board.getHash();
@@ -1193,7 +1225,7 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
                 const Move& move = moves[i];
                 // Check stop condition before evaluating each move
                 if (searchAborted(ctx, shouldStop)) {
-                    if (!g_searchOptions.quiet) std::cout << "Search interrupted during depth " << currentDepth << std::endl;
+                    if (verbose) std::cout << "Search interrupted during depth " << currentDepth << std::endl;
                     completedDepth = false;
                     break;
                 }
@@ -1256,13 +1288,13 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
             if (currentBestScore <= windowLo) {
                 delta *= 4;
                 windowLo = (bestScore - delta < -29000) ? INF_LO : bestScore - delta;
-                if (!g_searchOptions.quiet) std::cout << "  aspiration fail low, widening" << std::endl;
+                if (verbose) std::cout << "  aspiration fail low, widening" << std::endl;
                 continue;
             }
             if (currentBestScore >= windowHi) {
                 delta *= 4;
                 windowHi = (bestScore + delta > 29000) ? INF_HI : bestScore + delta;
-                if (!g_searchOptions.quiet) std::cout << "  aspiration fail high, widening" << std::endl;
+                if (verbose) std::cout << "  aspiration fail high, widening" << std::endl;
                 continue;
             }
             break;
@@ -1303,19 +1335,19 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
             haveScore = true;
             auto depthEnd = std::chrono::steady_clock::now();
             auto depthDuration = std::chrono::duration_cast<std::chrono::milliseconds>(depthEnd - depthStart);
-            if (g_searchInfo) {
+            if (isMain && g_searchInfo) {
                 auto sinceStart = std::chrono::duration_cast<std::chrono::milliseconds>(
                     depthEnd - searchStart).count();
                 g_searchInfo(currentDepth, bestScore, ctx.nodes,
                              (long)sinceStart, bestMove);
             }
-            if (!g_searchOptions.quiet) {
+            if (verbose) {
                 std::cout << "Depth " << currentDepth << " complete in " << depthDuration.count()
                          << "ms. Best move: " << bestMove.toString()
                          << " (score: " << (whiteToMove ? bestScore : -bestScore) << ")" << std::endl;
             }
         } else {
-            if (!g_searchOptions.quiet) std::cout << "Depth " << currentDepth << " incomplete, using previous result" << std::endl;
+            if (verbose) std::cout << "Depth " << currentDepth << " incomplete, using previous result" << std::endl;
             break;
         }
         
@@ -1337,7 +1369,7 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
             const double BRANCHING = 2.3;
             if (used >= g_nodeLimit ||
                 (double)lastIteration * BRANCHING > (double)(g_nodeLimit - used)) {
-                if (!g_searchOptions.quiet) {
+                if (verbose) {
                     std::cout << "Stopping at depth " << currentDepth << ": next iteration needs ~"
                               << (uint64_t)((double)lastIteration * BRANCHING) << " nodes, "
                               << (g_nodeLimit - std::min(used, g_nodeLimit)) << " left" << std::endl;
@@ -1379,7 +1411,7 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
                                   : (remaining <= 0 ||
                                      (double)lastIteration * BRANCHING > (double)remaining);
             if (stop) {
-                if (!g_searchOptions.quiet) {
+                if (verbose) {
                     std::cout << "Stopping at depth " << currentDepth << ": next iteration needs ~"
                               << (long)((double)lastIteration * BRANCHING) << "ms, "
                               << remaining << "ms left" << std::endl;
@@ -1392,14 +1424,14 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
         // Only stop if we detect an actual mate score (near ±MATE_SCORE which is around ±30000)
         // Do NOT stop for large evaluation scores from material imbalances
         if (abs(bestScore) > 29000 && abs(bestScore) < 31000) {
-            if (!g_searchOptions.quiet) std::cout << "Mate detected at depth " << currentDepth << ", stopping search" << std::endl;
+            if (verbose) std::cout << "Mate detected at depth " << currentDepth << ", stopping search" << std::endl;
             break;
         }
     }
     
     auto searchEnd = std::chrono::steady_clock::now();
     auto totalDuration = std::chrono::duration_cast<std::chrono::milliseconds>(searchEnd - searchStart);
-    if (!g_searchOptions.quiet) {
+    if (verbose) {
         std::cout << "Iterative deepening search completed in " << totalDuration.count()
                  << "ms. Final best move: " << bestMove.toString()
                  << " (score: " << (whiteToMove ? bestScore : -bestScore) << ")" << std::endl;
@@ -1407,6 +1439,78 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
     
     return bestMove;
 }
+
+// The public entry point. Arms everything shared by the whole search, runs
+// thread 0 here, and lets any helpers run beside it.
+Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
+                                   const std::atomic<bool>& shouldStop,
+                                   TranspositionTable& tt,
+                                   const std::vector<uint64_t>& gameHistory) {
+    // Copied, not referenced: the caller owns its history and may edit it the
+    // moment this returns, and a search reading a half-updated list would score
+    // draws that are not there.
+    g_gameHistory = gameHistory;
+
+    // Age the table once for the search, not once per thread.
+    if (g_searchOptions.ttAging) tt.newSearch();
+
+    // Arm the deadline. With no budget the search is depth-limited and every
+    // clock check short-circuits, which is what keeps tests/bench reproducible.
+    g_hasDeadline = (limits.moveTimeMs > 0);
+    g_outOfTime.store(false, std::memory_order_relaxed);
+    g_nodeLimit = limits.maxNodes;
+    if (g_hasDeadline) {
+        const auto now = std::chrono::steady_clock::now();
+        g_softDeadline = now + std::chrono::milliseconds(limits.moveTimeMs);
+        // hardTimeMs of 0 means "no separate hard limit", i.e. the two coincide
+        // and the search behaves exactly as it did before the split existed.
+        const long hard = (limits.hardTimeMs > limits.moveTimeMs)
+                              ? limits.hardTimeMs : limits.moveTimeMs;
+        g_deadline = now + std::chrono::milliseconds(hard);
+    }
+
+    const int threads = effectiveThreads(limits);
+
+    if (threads <= 1) {
+        uint64_t nodes = 0;
+        Move best = searchWorker(0, board, limits, shouldStop, tt, nullptr, &nodes);
+        g_searchNodes = nodes;
+        return best;
+    }
+
+    // Helpers stop when the main thread has its answer. Declared before the
+    // pool and destroyed after it, so no thread can outlive the flag it reads.
+    std::atomic<bool> helpersStop{false};
+    std::vector<uint64_t> helperNodes(threads, 0);
+    std::vector<std::thread> pool;
+    pool.reserve(threads - 1);
+
+    for (int i = 1; i < threads; ++i) {
+        pool.emplace_back([&, i] {
+            // board by value into the worker: each thread needs its own,
+            // because generateLegalMoves mutates the board it is handed.
+            searchWorker(i, board, limits, shouldStop, tt, &helpersStop,
+                         &helperNodes[i]);
+        });
+    }
+
+    uint64_t mainNodes = 0;
+    Move best = searchWorker(0, board, limits, shouldStop, tt, nullptr, &mainNodes);
+
+    helpersStop.store(true, std::memory_order_relaxed);
+    for (auto& t : pool) t.join();
+
+    // The reported total is every thread's work, which is what nps means with
+    // several of them. The per-iteration info lines during the search still
+    // report thread 0 alone and therefore understate it; fixing that would mean
+    // reading other threads' counters mid-search, which is a shared cache line
+    // on the hot path for a cosmetic number.
+    uint64_t total = mainNodes;
+    for (int i = 1; i < threads; ++i) total += helperNodes[i];
+    g_searchNodes = total;
+    return best;
+}
+
 
 // Depth-only convenience overload: no clock, exactly the behaviour that
 // existed before time control.

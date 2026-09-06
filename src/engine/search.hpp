@@ -552,6 +552,19 @@ using SearchInfoFn = void (*)(int depth, int score, uint64_t nodes,
                               long elapsedMs, const Move& best);
 extern SearchInfoFn g_searchInfo;
 
+// How many threads a search may use. 1 until Phase 3 of Lazy SMP spawns them.
+//
+// **A node-limited search is forced to one thread regardless of this**, and
+// that is not a convenience -- it is what keeps every number in GATES.md
+// meaningful. A threaded search races on the transposition table by design, so
+// it is not reproducible from its seed; `tests/bench`, `tests/match -N` and
+// every shard gate depend on reproducing move for move. The forcing lives in
+// the search rather than in each caller, because a rule that has to be
+// remembered at nine call sites is a rule that will be forgotten at one.
+void setThreadCount(int n);
+int getThreadCount();
+int maxThreadCount();
+
 // Per-thread search state.
 //
 // Everything here is written during a search and must not be shared between
@@ -595,6 +608,12 @@ struct SearchContext {
     // Sized 2 x 16384 ints = 128KB per thread. The toggle is off; the family is
     // closed.
     int corrHist[2][16384] = {};
+
+    // A second stop flag, for helper threads. The main thread sets it when it
+    // has its answer, so helpers stop populating a table nobody will read.
+    // Null on the main thread. Checked in searchAborted beside the caller's own
+    // stop; both are one-way latches, so relaxed loads are enough.
+    const std::atomic<bool>* extraStop = nullptr;
 };
 
 // What the search is allowed to spend.
