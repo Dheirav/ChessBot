@@ -422,6 +422,46 @@ returned ±36 Elo, so matching today's ±6.7 would cost weeks to answer a
 
 ---
 
+## 2026-09-07 — Lazy SMP built, Phases 0-3, on branch `lazy-smp`
+
+**Not on main and not merged.** The gate that decides it is running.
+
+| phase | what | commit |
+|---|---|---|
+| 0 | `TTEntry` packed 40 → **16 bytes** | `118724f` |
+| 1 | TT probe/store **lock-free**, mutex gone | `eef82a6` |
+| 2 | per-thread search state, four verified steps | `e68a48b`…`6b5a98d` |
+| 3 | thread pool, `Threads` a real UCI option | `a36e3be` |
+
+Phases 0 and 1 shipped on **atomicity, not speed** — 40 bytes cannot be written
+atomically and eight threads cannot share a mutex. Neither has a strength claim
+and the commits say so.
+
+**Single-threaded bench held at 461,727 through every step.** That was the whole
+correctness criterion for a refactor that must change nothing, and splitting
+Phase 2 into four separately-verified commits is what made two defects
+attributable rather than buried.
+
+**Read `docs/LAZY-SMP-PLAN.md` before continuing** — its closing section records
+five things the plan got wrong or the build turned up, including a determinism
+guard that was wrong on its first writing and would have silently invalidated
+the bench signature.
+
+**Two things outstanding regardless of how the gate lands:**
+
+1. **`tools/gendata` is unbuildable on `main`** — a substring anchor in the
+   `evaldump` Makefile edit orphaned its recipe. Fixed on `lazy-smp` only;
+   cherry-pick it whatever happens to Lazy SMP.
+2. **The bot is down** and has been since 09-06. It should stay down until the
+   `--tc` gate finishes, because contention penalises the eight-thread side
+   specifically and biases the result against the change.
+
+**If the gate is below about +50**, the decision is not automatic. Threading
+costs search determinism permanently at `Threads>1`, `ROADMAP.md`'s +200-280
+prior assumed ~16 threads, and this is a thermally-throttled laptop with 8.
+
+---
+
 ## 2026-09-06 — `evalnoise` shipped, and NNUE's premise weakened
 
 **Shipped: `evalnoise`**, −3.9 [−16.9, +9.0], on by default. `BUGS.md` 6 is

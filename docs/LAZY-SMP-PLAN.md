@@ -1,5 +1,23 @@
 # Lazy SMP — scope, phases and the gate problem — 2026-09-06
 
+> **Status, 2026-09-07: Phases 0-3 are built and pushed on branch `lazy-smp`.
+> Phase 4, the gate, is running.** The phase descriptions below are the plan as
+> written; where reality differed, the difference is recorded in
+> "What the build actually found" at the end, because the differences are the
+> useful part.
+>
+> | phase | commit | state |
+> |---|---|---|
+> | 0 — 16-byte entry | `118724f` | done |
+> | 1 — lock-free TT | `eef82a6` | done |
+> | 2 — per-thread state (4 steps) | `e68a48b` `0a7fbff` `65c2e48` `6b5a98d` | done |
+> | 3 — thread pool | `a36e3be` | done |
+> | 4 — `--tc` gate | — | **running** |
+> | 5 — merge and land | — | blocked on 4 |
+>
+> Single-threaded bench held at **461,727** through every step, which was the
+> whole correctness criterion for Phases 0-2.
+
 Eight cores sit idle on every move this engine makes. `ROADMAP.md` Phase 7 puts
 Lazy SMP at +200-280 assuming ~16 threads, so **expect roughly half at 8**, and
 less again on a laptop that thermally throttles. That prior is from general
@@ -146,3 +164,80 @@ enforced in code rather than remembered.
 **The 2026-08-15 profile is the guide for where not to add cost.** `Piece::type()`
 at 1.87 billion calls, `Move`'s default constructor at 116 million. An
 indirection added on those paths costs more than a thread buys.
+
+
+---
+
+## What the build actually found — 2026-09-07
+
+Five things the plan did not anticipate. They are recorded because each one was
+either a defect the plan would not have caught, or a place where the plan itself
+was wrong.
+
+### The plan's Phase 2 split was wrong
+
+Step 2 was to move the node counter and step 3 the clock amortiser. They cannot
+be separated: `searchAborted` reads both in the same function, so splitting them
+would have left a global and a context field deciding the same question. Step 2
+absorbed both; step 3 became correction history alone.
+
+### `tools/gendata` was unbuildable on `main` and nothing noticed
+
+The commit that added `tools/evaldump` inserted its Makefile rule using the
+anchor `"gendata: tools/gendata"`, which matches as a **substring** inside
+`tools/gendata: tools/gendata.o $(ENGINE_OBJ)`. That split the line and orphaned
+its recipe, leaving a self-dependency with no commands, so make fell back to its
+builtin rule and linked with the C driver:
+
+    undefined reference to `__gxx_personality_v0'
+    make: *** [<builtin>: tools/gendata] Error 1
+
+It survived because the binary already existed and was never rebuilt — the
+corpus had finished generating by then. **A tool that is not rebuilt is not
+tested, and a substring is not an anchor.** Fixed on `lazy-smp`; **still broken
+on `main`** until cherry-picked.
+
+### The determinism guard was written wrong the first time
+
+It forced one thread when a *node* budget was set. `tests/bench` is
+**depth**-limited, so that would have left the 461,727 signature meaningless the
+moment anyone set `Threads` above 1. The rule is now **threads require a
+clock**: a search bounded by depth or nodes is a measurement and must reproduce
+move for move. One function decides it, rather than nine call sites
+remembering to.
+
+Verified with `RootSeed` pinned: a depth-limited search returns 952,402 nodes
+and `b1c3` identically at 1, 2 and 8 threads.
+
+### `tests/match` could not express this gate at all
+
+The one-variable check compared `SearchOptions` and was blind to
+`--uciA`/`--uciB`. `Threads` is not a SearchOption, so the entire variable under
+test was invisible and the harness refused the gate as a match against itself.
+
+The omission cut both ways, which is why it was fixed rather than worked around:
+it refused a valid gate, and it would equally have *allowed* a pair whose only
+intended difference was a mistyped `--uciA` — the exact failure that check
+exists to catch. It now prints `difference: Threads (A 8, B 1)`.
+
+### TT statistics cost 5% and had to be settled before threading
+
+Counting hits and misses is an atomic read-modify-write on the hottest path in
+the program: measured at 5% of bench wall time single-threaded, and a single
+shared cache line across eight cores is worse than 5%. Nothing depends on the
+numbers — `printStats` has one caller and is a diagnostic — so counting is now
+opt-in behind `-DTT_STATS`.
+
+### What Phase 3 measured, and what it does not claim
+
+A 3-second timed search reaches **depth 11 at one thread and depth 12 at eight**.
+That is the mechanism working. It is not a strength claim and must not be quoted
+as one; only the Phase 4 gate can say whether an extra ply converts, and it is
+the only instrument that can, because a node-limited gate divides out exactly
+what threading buys.
+
+One imperfection left in deliberately: the per-iteration info lines report
+thread 0's node count alone and so **understate nps while threading**. The total
+returned to callers is every thread's work. Fixing the live number means reading
+other threads' counters on the hot path — a shared cache line for a cosmetic
+value, which is the cost that made TT statistics opt-in in the first place.

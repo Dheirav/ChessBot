@@ -753,11 +753,38 @@ int main(int argc, char** argv) {
             if (!diff.empty()) diff += ", ";
             diff += "depth ceiling";
         }
+        // Raw UCI options count as a difference, and this had to be added when
+        // Lazy SMP became the first gate whose whole variable lives here rather
+        // than in SearchOptions: `--uciA Threads=8 --uciB Threads=1` is one
+        // difference, and without this the harness refused it as a match
+        // against itself. The omission cut both ways -- it would equally have
+        // *allowed* a pair whose only intended difference was a mistyped
+        // --uciA, which is the failure this check exists to catch.
+        if (A.uciOptions != B.uciOptions) {
+            for (const auto& a : A.uciOptions) {
+                std::string bv = "<unset>";
+                for (const auto& b : B.uciOptions)
+                    if (b.first == a.first) bv = b.second;
+                if (bv != a.second) {
+                    if (!diff.empty()) diff += ", ";
+                    diff += a.first + " (A " + a.second + ", B " + bv + ")";
+                }
+            }
+            for (const auto& b : B.uciOptions) {
+                bool inA = false;
+                for (const auto& a : A.uciOptions) if (a.first == b.first) inA = true;
+                if (!inA) {
+                    if (!diff.empty()) diff += ", ";
+                    diff += b.first + " (A <unset>, B " + b.second + ")";
+                }
+            }
+        }
 
         if (diff.empty()) {
             std::printf("\nREFUSING TO RUN: A and B are configured identically, "
                         "so this match cannot measure anything.\n"
-                        "Set the feature under test with --optA <name>=on.\n");
+                        "Set the feature under test with --optA <name>=on, or\n"
+                        "--uciA <Name>=<value> for an option the engine exposes over UCI.\n");
             return 1;
         }
         std::printf("difference: %s\n", diff.c_str());
