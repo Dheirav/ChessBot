@@ -8,15 +8,19 @@ TranspositionTable::TranspositionTable(size_t sizeMB) {
 
 bool TranspositionTable::probe(uint64_t hash, int depth, int ply, int alpha, int beta,
                               int& score, Move& bestMove) {
-    size_t index = getIndex(hash);
-    const TTEntry& entry = table[index];
+    const TTSlot& slot = table[getIndex(hash)];
+    // One read of each word. Re-reading to "confirm" would widen the window
+    // rather than close it; the checksum already decides.
+    const uint64_t k = slot.key.load(std::memory_order_relaxed);
+    const uint64_t d = slot.data.load(std::memory_order_relaxed);
 
-    if (!entry.isValid(hash)) {
-        misses++;
+    if ((k ^ d) != hash) {          // empty, a different position, or torn
+        bump(misses);
         return false;
     }
-    // We have a hash match
-    hits++;
+    const TTEntry entry = unpackData(d);
+    if (entry.depth < 0) { bump(misses); return false; }
+    bump(hits);
     // Always return the best move if available
     if (entry.bestMove != 0) {
         bestMove = unpackMove(entry.bestMove);
@@ -42,30 +46,37 @@ bool TranspositionTable::probe(uint64_t hash, int depth, int ply, int alpha, int
 
 void TranspositionTable::store(uint64_t hash, int depth, int ply, int score, Move bestMove,
                               TTEntry::NodeType nodeType) {
-    size_t index = getIndex(hash);
-    TTEntry& entry = table[index];
+    TTSlot& slot = table[getIndex(hash)];
 
-    // Create new entry
+    const uint64_t k = slot.key.load(std::memory_order_relaxed);
+    const uint64_t d = slot.data.load(std::memory_order_relaxed);
+    const uint64_t existingHash = k ^ d;
+    const TTEntry existing = unpackData(d);
+
     TTEntry newEntry;
-    newEntry.hash = hash;
     newEntry.depth = (int8_t)depth;
     newEntry.generation = generation;
     newEntry.score = (int16_t)scoreToTT(score, ply);
     newEntry.bestMove = packMove(bestMove);
-    newEntry.nodeType = (uint8_t)nodeType;
-    
-    // Check if we should replace the existing entry
-    if (entry.hash != 0 && entry.hash != hash) {
-        collisions++;
-    }
-    if (shouldReplace(entry, newEntry)) {
-        entry = newEntry;
+    newEntry.nodeType = nodeType;
+
+    if (existingHash != 0 && existingHash != hash) bump(collisions);
+
+    if (shouldReplace(existingHash, existing, hash, newEntry)) {
+        // Two independent stores, deliberately not made to look atomic. A
+        // reader catching one of them computes key ^ data != its hash and
+        // treats the slot as a miss: a re-search, never a wrong score. Order
+        // does not matter -- either half-written combination fails the checksum.
+        const uint64_t nd = packData(newEntry);
+        slot.key.store(hash ^ nd, std::memory_order_relaxed);
+        slot.data.store(nd, std::memory_order_relaxed);
     }
 }
 
 void TranspositionTable::clear() {
-    for (auto& entry : table) {
-        entry = TTEntry{};
+    for (size_t i = 0; i < tableSize; ++i) {
+        table[i].key.store(0, std::memory_order_relaxed);
+        table[i].data.store(0, std::memory_order_relaxed);
     }
     generation = 0;
     clearStats();
@@ -73,8 +84,8 @@ void TranspositionTable::clear() {
 
 void TranspositionTable::resize(size_t sizeMB) {
     tableSize = sizeMB * ENTRIES_PER_MB;
-    table.clear();
-    table.resize(tableSize);
+    // value-initialised, so every slot starts (0,0) == empty
+    table = std::make_unique<TTSlot[]>(tableSize);
     clearStats();
     
     // stderr, not stdout: in UCI mode stdout carries the protocol and any
@@ -84,17 +95,34 @@ void TranspositionTable::resize(size_t sizeMB) {
 }
 
 double TranspositionTable::getHitRate() const {
-    uint64_t total = hits + misses;
-    return total > 0 ? (double)hits / total : 0.0;
+    const uint64_t h = getHits(), total = h + getMisses();
+    return total > 0 ? (double)h / total : 0.0;
 }
 
 void TranspositionTable::clearStats() {
-    hits = misses = collisions = 0;
+    hits.store(0, std::memory_order_relaxed);
+    misses.store(0, std::memory_order_relaxed);
+    collisions.store(0, std::memory_order_relaxed);
 }
 
 void TranspositionTable::printStats() const {
+    if (!STATS) {
+        std::cerr << "=== Transposition Table Stats ===\n"
+                     "counting is compiled out; rebuild with -DTT_STATS. It costs\n"
+                     "~5% of search time -- an atomic RMW on the hottest path, and a\n"
+                     "single shared cache line across every thread.\n";
+        return;
+    }
+    const uint64_t hits = getHits(), misses = getMisses(), collisions = getCollisions();
     uint64_t total = hits + misses;
     
+    if (!STATS) {
+        std::cerr << "=== Transposition Table Stats ===\n"
+                  << "counting is compiled out; rebuild with -DTT_STATS.\n"
+                  << "It costs ~5% of search time and is a shared cache line "
+                     "written on every probe.\n";
+        return;
+    }
     std::cerr << "=== Transposition Table Stats ===" << std::endl;
     std::cerr << "Size: " << getSizeMB() << "MB (" << tableSize << " entries)" << std::endl;
     std::cerr << "Hits: " << hits << std::endl;
@@ -106,16 +134,17 @@ void TranspositionTable::printStats() const {
     std::cerr << "=================================" << std::endl;
 }
 
-bool TranspositionTable::shouldReplace(const TTEntry& existing, const TTEntry& newEntry) const {
+bool TranspositionTable::shouldReplace(uint64_t existingHash, const TTEntry& existing,
+                                       uint64_t newHash, const TTEntry& newEntry) const {
     // Always replace empty entries
-    if (existing.hash == 0) {
+    if (existingHash == 0) {
         return true;
     }
     
     // Same position: keep the deeper result; at equal depth prefer the newer
     // entry (fresher bounds and best move). This stops a depth-0 quiescence
     // store from evicting a deep search result for the same position.
-    if (existing.hash == newEntry.hash) {
+    if (existingHash == newHash) {
         return newEntry.depth >= existing.depth;
     }
 

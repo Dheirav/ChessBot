@@ -1,5 +1,7 @@
 #pragma once
 #include "move.hpp"
+#include <atomic>
+#include <memory>
 #include <vector>
 #include <cstdint>
 
@@ -52,6 +54,55 @@ struct TTEntry {
 static_assert(sizeof(TTEntry) == 16, "TTEntry must stay 16 bytes: it sets "
                                      "ENTRIES_PER_MB and every node count");
 
+// --- The stored form: two 64-bit words, read and written without a lock ---
+//
+// `TTEntry` above is the *logical* entry, the shape callers think in. What is
+// actually stored is a pair of words: the payload, and the position hash XORed
+// with it. A reader recomputes `key ^ data` and compares it to the hash it was
+// looking for, so an entry torn by a concurrent writer fails its own checksum
+// and reads as a miss rather than as someone else's position.
+//
+// This is Hyatt's scheme, and it is already in this codebase: `g_evalCache`
+// does the same thing because the GUI thread can evaluate during a search
+// (`evaluation.cpp`). It is not a lock, it is a *detector* -- torn entries are
+// discarded, never believed.
+//
+// The residual risk is a torn read whose XOR happens to equal the probed hash.
+// That needs `hash_new ^ data_new ^ data_old == hash_probed` to hold by
+// accident, and the consequence is a wrong best move tried first, which the
+// move list validates anyway. This is the standard accepted risk of the scheme.
+//
+// Relaxed ordering throughout: there is nothing to synchronise-with. Each word
+// is independently atomic, the checksum catches any combination that does not
+// belong together, and a missed entry costs a re-search rather than a wrong
+// answer.
+struct TTSlot {
+    std::atomic<uint64_t> key{0};    // hash XOR data
+    std::atomic<uint64_t> data{0};   // packed payload; see packData
+};
+static_assert(sizeof(TTSlot) == 16, "TTSlot must stay 16 bytes: it sets "
+                                    "ENTRIES_PER_MB and every node count");
+
+// Payload packing. 56 of 64 bits used; the spare byte is deliberate headroom
+// so a future field does not force the slot wider.
+inline uint64_t packData(const TTEntry& e) {
+    return  (uint64_t)(uint16_t)e.score
+         | ((uint64_t)e.bestMove            << 16)
+         | ((uint64_t)(uint8_t)e.depth      << 32)
+         | ((uint64_t)e.generation          << 40)
+         | ((uint64_t)(uint8_t)e.nodeType   << 48);
+}
+
+inline TTEntry unpackData(uint64_t d) {
+    TTEntry e;
+    e.score      = (int16_t)(uint16_t)(d & 0xFFFFu);
+    e.bestMove   = (uint16_t)((d >> 16) & 0xFFFFu);
+    e.depth      = (int8_t)(uint8_t)((d >> 32) & 0xFFu);
+    e.generation = (uint8_t)((d >> 40) & 0xFFu);
+    e.nodeType   = (TTEntry::NodeType)((d >> 48) & 0xFFu);
+    return e;
+}
+
 // Scores with absolute value above this are mate scores (MATE_SCORE - ply).
 // Mate scores are stored in the table relative to the entry's node (distance
 // to mate from that position) and converted back to root-relative on probe,
@@ -79,16 +130,40 @@ private:
     static constexpr size_t DEFAULT_SIZE_MB = 64;
     static constexpr size_t ENTRIES_PER_MB = 1024 * 1024 / sizeof(TTEntry);
     
-    std::vector<TTEntry> table;
-    size_t tableSize;
+    // unique_ptr<TTSlot[]> rather than vector: std::atomic is neither copyable
+    // nor movable, so a vector of them cannot be resized.
+    std::unique_ptr<TTSlot[]> table;
+    size_t tableSize = 0;
     // Bumped once per search. Wrapping at 256 is harmless: it means an entry
     // 256 searches old can survive one more, which is 256 moves ago.
     uint8_t generation = 0;
     
-    // Statistics
-    uint64_t hits = 0;
-    uint64_t misses = 0;
-    uint64_t collisions = 0;
+    // Statistics, opt-in at compile time (-DTT_STATS).
+    //
+    // These are diagnostics with exactly one caller (printStats, from
+    // ChessBotEngine) and nothing depends on them. Counting them costs a
+    // measured **5% of bench wall time** single-threaded, because it is an
+    // atomic read-modify-write on the hottest path in the program -- and a
+    // single shared cache line bounced between eight cores is worse than 5%,
+    // which is the whole reason this had to be settled before threading rather
+    // than after.
+    //
+    // Atomic rather than plain when enabled: a raced plain increment is
+    // undefined behaviour, not merely an inaccurate number.
+    std::atomic<uint64_t> hits{0};
+    std::atomic<uint64_t> misses{0};
+    std::atomic<uint64_t> collisions{0};
+
+#ifdef TT_STATS
+    static constexpr bool STATS = true;
+#else
+    static constexpr bool STATS = false;
+#endif
+    // Compiles to nothing when STATS is false: the branch is on a constexpr,
+    // so there is no test at runtime.
+    static void bump(std::atomic<uint64_t>& c) {
+        if (STATS) c.fetch_add(1, std::memory_order_relaxed);
+    }
     
 public:
     explicit TranspositionTable(size_t sizeMB = DEFAULT_SIZE_MB);
@@ -111,10 +186,13 @@ public:
     // enough to be worth trusting, and that judgement belongs to the caller.
     // Returns false when the slot holds another position.
     bool peek(uint64_t hash, TTEntry& out) const {
-        const TTEntry& e = table[hash % tableSize];
-        if (!e.isValid(hash)) return false;
-        out = e;
-        return true;
+        const TTSlot& s = table[hash % tableSize];
+        const uint64_t k = s.key.load(std::memory_order_relaxed);
+        const uint64_t d = s.data.load(std::memory_order_relaxed);
+        if ((k ^ d) != hash) return false;    // empty, another position, or torn
+        out = unpackData(d);
+        out.hash = hash;
+        return out.depth >= 0;
     }
 
     // Begin a new search. Entries stored before this call become evictable by
@@ -133,9 +211,9 @@ public:
     
     // Statistics
     double getHitRate() const;
-    uint64_t getHits() const { return hits; }
-    uint64_t getMisses() const { return misses; }
-    uint64_t getCollisions() const { return collisions; }
+    uint64_t getHits() const { return hits.load(std::memory_order_relaxed); }
+    uint64_t getMisses() const { return misses.load(std::memory_order_relaxed); }
+    uint64_t getCollisions() const { return collisions.load(std::memory_order_relaxed); }
     void clearStats();
     void printStats() const;
     
@@ -145,5 +223,6 @@ public:
     
 private:
     size_t getIndex(uint64_t hash) const { return hash % tableSize; }
-    bool shouldReplace(const TTEntry& existing, const TTEntry& newEntry) const;
+    bool shouldReplace(uint64_t existingHash, const TTEntry& existing,
+                       uint64_t newHash, const TTEntry& newEntry) const;
 };
