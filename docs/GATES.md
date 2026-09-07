@@ -416,6 +416,52 @@ usefulness. The alternatives are a `--tc` gate, which cannot be sharded and took
 gate can see it — which measures a different feature than the one that would
 play. `BUGS.md` 19.
 
+### Singular extensions, closed by cost — 2026-09-07
+
+**Not rejected. Closed because the only measurement that could resolve it is not
+worth its price**, and that should be stated once rather than rediscovered every
+few weeks.
+
+Lazy SMP looked like it might unblock this: threading buys about a ply at any
+given clock, and a `--tc` gate now costs 4h26m for 600 games rather than the 17
+hours the last one took. Measured, it does not:
+
+| `Threads=6`, per move | depth reached |
+|---|---|
+| 250 ms — what `--tc 10+0.1` gives | **7.0** |
+| 500 ms | 8.3 |
+| 1000 ms | 8.7 |
+| `SINGULAR_MIN_DEPTH` | **10** |
+
+At the control that made the Lazy SMP gate affordable **the probe never fires**.
+Reaching depth 10 needs roughly 5 s per move, so ~600 s per game, so 600 games
+is about **100 hours**. Threading bought a ply; the gap is three.
+
+**Lowering the threshold is not the escape either.** The constant was chosen by
+measuring the probe's price, and the numbers are on it in `search.cpp`: at
+`MIN_DEPTH 8` the tree grows **+49.8%**, against +11.1% at 10. On an equal-node
+gate that is paid in depth — the mechanism that made `conthist` null at only
++12.2%. A shallower variant is not a cheaper way to ask the question; it is a
+different and much worse feature.
+
+**So the only real option is more games at `-N 3000000`**, where the feature does
+fire (`17-44-77-46-12`, properly spread). Narrowing ±25 to about ±12 needs four
+times the 392 games already played: **~1 570 games, ~20 hours unshardable.**
+
+Three reasons that is not worth spending, in order of weight:
+
+1. **The point estimate is already negative** (−7.1). Twenty hours would most
+   likely confirm a small loss or another null.
+2. **General-practice priors have stopped predicting anything here.** The history
+   family carried +20-40, +10-20 and +15-30 and returned +6.8, +2.7 and a closed
+   family over five gates and 10 080 games. Singular extensions carry the same
+   kind of prior from the same kind of source.
+3. It would be the most expensive gate this project has ever run, for a feature
+   whose own measurement does not suggest it is helping.
+
+The code stays, off, with its verdict on the toggle. Reopen only if the hardware
+changes enough to move the depth table above.
+
 ### The LMP depth curve has a peak, and it is 2
 
 | setting | result |
