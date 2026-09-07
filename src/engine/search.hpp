@@ -159,6 +159,12 @@ struct SearchOptions {
     // times the games — about twenty hours of unshardable wall clock, because
     // `--tc` cannot be sharded — which is why this is where it stops.
     //
+    // The faster `--tc` harness built for Lazy SMP (600 games in 4h26m at
+    // 10+0.1) does **not** reopen this. Time management has to be gated near the
+    // control it plays at, so measuring allocation at 10+0.1 would describe a
+    // regime the bot never sees. The cheap instrument answers the wrong
+    // question and the right one still costs twenty hours.
+    //
     // Worth knowing before reopening it: after softTime shipped, *every*
     // allocation formula converges to the same total, about 97% of the clock.
     // The `remaining/4` cap and the increment dominate. So there is no more
@@ -279,6 +285,17 @@ struct SearchOptions {
     // nested search inside move ordering, and that search must not read or
     // write the transposition table for this node, because it is answering a
     // different question about the same position.
+    // **Closed by cost 2026-09-07, not rejected.** −7.1 [−32.1, +17.8] over 392
+    // games at `-N 3000000`, where it does fire. Resolving that interval needs
+    // ~1 570 games and ~20 unshardable hours, against a point estimate that is
+    // already negative.
+    //
+    // Lazy SMP did not rescue it. At `Threads=6` a 250ms move — what
+    // `--tc 10+0.1` gives — reaches depth 7.0 and 1000ms reaches 8.7, against a
+    // threshold of 10; depth 10 wants ~5s per move, i.e. ~100 hours for 600
+    // games. Lowering the threshold is a different feature rather than a cheaper
+    // measurement: `MIN_DEPTH 8` costs +49.8% nodes against 10's +11.1%, and on
+    // an equal-node gate that is paid in depth. `GATES.md`.
     bool singularExt = false;
 
     // Razoring at a 350cp margin instead of the shipped 500.

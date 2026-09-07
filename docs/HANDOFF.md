@@ -422,6 +422,37 @@ returned ±36 Elo, so matching today's ±6.7 would cost weeks to answer a
 
 ---
 
+## 2026-09-07 — the search is finished
+
+With Lazy SMP shipped and `singularext` closed by cost, **there is no open search
+work left that this project can afford to measure.**
+
+| family | state |
+|---|---|
+| pruning suite | shipped — razoring, revfutility, LMP, lmpshallow |
+| history family | null over five gates, 10 080 games |
+| evaluation tuning | closed, `BUGS.md` 20 |
+| correction history | closed over three gates |
+| `rootrandom` | rejected; `evalnoise` shipped in its place |
+| **Lazy SMP** | **shipped, +162** |
+| `singularext` | **closed by cost** — ~20 unshardable hours against a negative point estimate |
+| `timeAlloc` | closed — bounded upside, and the cheap harness answers the wrong regime |
+| probcut | never built, and it hits the same depth wall `singularext` did |
+
+What remains is three things, none of them small:
+
+1. **NNUE** — the only triple-digit prior left, and the weakest evidence. Parked
+   behind one experiment: regenerate a small corpus at a high node count and
+   re-measure the **0.945** correlation between the hand-crafted evaluation and
+   its own labels. Do not touch the accumulator before that number.
+2. **Re-measure contention at 6 threads.** `MEASUREMENTS.md`'s 82-89% describes
+   an engine that wanted one core of eight. Nobody knows what six threads lose to
+   the other jobs on this box, and it plays against them daily.
+3. **Opening book** — +20-30, config-only, still last because it is the one item
+   that costs measurement quality.
+
+---
+
 ## 2026-09-07 — Lazy SMP shipped, +162 Elo
 
 **Merged to main and live at `Threads=6`.** Gated at **+162 [+139, +186]** over
