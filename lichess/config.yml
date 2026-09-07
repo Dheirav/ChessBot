@@ -135,9 +135,33 @@ engine:                            # Engine settings.
 
   uci_options:                     # ONLY options the engine advertises in its `uci`
                                    # reply. python-chess raises on any other name,
-                                   # so no Threads (single-threaded), no Syzygy,
-                                   # no Move Overhead (see move_overhead below).
+                                   # so no Syzygy, no Move Overhead (see
+                                   # move_overhead below).
     Hash: 256                      # Transposition table, megabytes.
+    Threads: 6                     # Lazy SMP, gated 2026-09-07 at +162 Elo
+                                   # [+139, +186] over 600 games -- but that gate
+                                   # ran Threads=8. Six is shipped instead, and
+                                   # the reason is measured: summed depth over
+                                   # twelve positions gives 4 threads +9.4%,
+                                   # 6 +13.1%, 8 +13.9% against one. The 6-vs-8
+                                   # gap (+0.8) is inside the spread between
+                                   # repeat runs of the same setting (0-2), so
+                                   # they are not distinguishable; 4 clearly is
+                                   # worse and gives up a third of the gain.
+                                   #
+                                   # Six leaves two cores. That is not caution
+                                   # for its own sake: at one thread the engine
+                                   # needed one core of eight and held 82-89% of
+                                   # baseline under load, and at six it wants
+                                   # most of the machine, so anything else
+                                   # running now comes straight out of playing
+                                   # strength. This box regularly has five to
+                                   # eight cores busy with other work.
+                                   #
+                                   # Treat +162 as an upper bound for what
+                                   # actually runs: it was measured at eight
+                                   # threads on an idle machine, at 10+0.1
+                                   # rather than the 900+10 the bot plays.
 #   SeeOrdering: true              # Turn on once PLAN.md 3.2's gates pass.
 #   SeePruning: true
 #   go_commands:                   # Additional options to pass to the UCI go command.

@@ -485,7 +485,17 @@ numbers compare this engine to itself and to nothing else.
 
 ---
 
-## Contention calibration — 2026-09-01, and what `nps-health` never had a number for
+## Contention calibration — 2026-09-01
+
+> **Superseded in scope on 2026-09-07: this reading is single-threaded and the
+> bot now plays at `Threads=6`.** The 82-89% below describes an engine that
+> wanted one core of eight and could shrug off six busy ones. At six threads it
+> wants most of the machine, so the same external load costs it far more. The
+> conclusion that a `-N` gate is load-independent still holds — that is about
+> node budgets, not thread counts — but the *number* no longer describes the
+> running bot, and re-measuring it threaded is unfinished work.
+
+### The original single-threaded reading, and what `nps-health` never had a number for
 
 `BUGS.md` 16 is the most expensive measurement error in this project: on
 2026-08-23 the engine ran at roughly a third of its speed for twenty-one hours,

@@ -92,6 +92,63 @@ Re-pool any of these with `./tests/pool-shards.sh <dir>/`.
 | `shard-20260904-142613/` | **`capthist`** — capture history inside the SEE bands | **+2.7 [−9.7, +15.1]** — null, stays off |
 | `shard-20260904-214827/` | **`rootrandom`** — seeded tiebreak among near-equal root moves | **−90.7 [−105.0, −76.7]** — rejected; the cost is the root window, not the tiebreak |
 | `shard-20260906-002113/` | **`evalnoise`** — ±5cp seeded perturbation of the static score | **−3.9 [−16.9, +9.0]** — **accepted and ON**, see below: a null is the success case here |
+| *(unsharded, `--tc 10+0.1`)* | **Lazy SMP** — `Threads=8` against `Threads=1`, 600 games | **+162 [+139, +186]** — **accepted**, shipped at `Threads=6`, see below |
+
+### Lazy SMP, +162 — and the first gate here that could not be sharded — 2026-09-07
+
+**+162 Elo [+139, +186]** over 600 games, pentanomial `2-19-90-94-95`, score
+71.8%. The largest accepted gain in this file, and the first shipped Elo after
+eleven consecutive gates that shipped nothing.
+
+**It could not be a `-N` gate, and that is not a detail.** Every other row here
+is node-limited: equal nodes to both sides, deterministic from the seed,
+shardable 14 ways, load-independent. Threading buys *more nodes per unit time*,
+which a node budget divides out exactly. So this needed `--tc`, two processes,
+serial, unshardable, 4h26m on an idle machine — and it is load-sensitive in the
+one direction that matters, because contention penalises the eight-thread side
+specifically and biases *against* the change.
+
+**`tests/match` could not express it either.** The one-variable check compared
+`SearchOptions` and was blind to `--uciA`/`--uciB`; `Threads` is not a
+SearchOption, so the whole variable under test was invisible and the harness
+refused the gate as a match against itself. Fixed rather than worked around: the
+omission would equally have *allowed* a pair whose only difference was a
+mistyped `--uciA`, which is the failure that check exists to catch.
+
+### Shipped at 6 threads, gated at 8
+
+The gate ran `Threads=8`. **`lichess/config.yml` sets 6**, and the reason is
+measured rather than cautious. Summed depth at a 5s movetime over twelve
+positions, two runs each:
+
+| threads | vs 1 thread | within-setting spread |
+|---|---|---|
+| 1 | — | 0 |
+| 2 | +6.6% | 2 |
+| 4 | +9.4% | 1 |
+| **6** | **+13.1%** | 2 |
+| 8 | +13.9% | 0 |
+
+Between-setting gaps of 2-7 against a within-setting spread of 0-2, so 1/2/4/6
+are genuinely separated and **6 vs 8 is not** (+0.8, inside the noise). Four
+gives up a third of the gain and is not a free choice; six is indistinguishable
+from eight and leaves two cores.
+
+That headroom matters more than it would have before. At one thread the engine
+needed one core of eight and held 82-89% of baseline under load
+(`MEASUREMENTS.md`); at six it wants most of the machine, so every other job now
+comes directly out of playing strength.
+
+**So +162 is an upper bound for what actually runs**, on two counts: it was
+measured at eight threads, and at 10+0.1 rather than the 900+10 the bot plays —
+a 90x longer control. Threading generally holds or improves with more time, but
+that is a prior, not a measurement here.
+
+**What it costs permanently: search determinism at `Threads>1`.** TT races make
+a threaded search irreproducible by construction. Threads therefore require a
+clock — anything bounded by depth or nodes is a measurement and is pinned to one
+thread in code, not by memory. Verified with `RootSeed` pinned: a depth-limited
+search returns identical nodes and moves at 1, 2, 6 and 8 threads.
 
 ### `evalnoise` shipped on a null — 2026-09-06
 

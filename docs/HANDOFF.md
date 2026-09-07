@@ -422,43 +422,43 @@ returned ±36 Elo, so matching today's ±6.7 would cost weeks to answer a
 
 ---
 
-## 2026-09-07 — Lazy SMP built, Phases 0-3, on branch `lazy-smp`
+## 2026-09-07 — Lazy SMP shipped, +162 Elo
 
-**Not on main and not merged.** The gate that decides it is running.
+**Merged to main and live at `Threads=6`.** Gated at **+162 [+139, +186]** over
+600 games — the largest accepted gain in `GATES.md`, and the first shipped Elo
+after eleven gates that shipped nothing.
 
-| phase | what | commit |
-|---|---|---|
-| 0 | `TTEntry` packed 40 → **16 bytes** | `118724f` |
-| 1 | TT probe/store **lock-free**, mutex gone | `eef82a6` |
-| 2 | per-thread search state, four verified steps | `e68a48b`…`6b5a98d` |
-| 3 | thread pool, `Threads` a real UCI option | `a36e3be` |
+| phase | what |
+|---|---|
+| 0 | `TTEntry` 40 → **16 bytes**, on atomicity not capacity |
+| 1 | TT probe/store **lock-free** (Hyatt XOR), mutex gone |
+| 2 | per-thread `SearchContext`, four separately-verified steps |
+| 3 | thread pool, `Threads` a real UCI option |
+| 4 | `--tc` gate, unshardable, 4h26m |
 
-Phases 0 and 1 shipped on **atomicity, not speed** — 40 bytes cannot be written
-atomically and eight threads cannot share a mutex. Neither has a strength claim
-and the commits say so.
+Bench signature is now **461,727**.
 
-**Single-threaded bench held at 461,727 through every step.** That was the whole
-correctness criterion for a refactor that must change nothing, and splitting
-Phase 2 into four separately-verified commits is what made two defects
-attributable rather than buried.
+**Shipped at 6 threads though gated at 8**, and the reason is measured: summed
+depth gives 4 threads +9.4%, 6 +13.1%, 8 +13.9%, with a within-setting spread of
+0-2 — so 6 and 8 are indistinguishable and 4 gives up a third. Six leaves two
+cores, which matters because this box regularly has five to eight busy.
+**Treat +162 as an upper bound for what runs**: measured at eight threads, on an
+idle machine, at 10+0.1 rather than the bot's 900+10.
 
-**Read `docs/LAZY-SMP-PLAN.md` before continuing** — its closing section records
-five things the plan got wrong or the build turned up, including a determinism
-guard that was wrong on its first writing and would have silently invalidated
-the bench signature.
+**What it costs permanently: search determinism at `Threads>1`.** Threads
+require a clock; anything bounded by depth or nodes is pinned to one thread in
+code. Every `-N` gate and `tests/bench` are unaffected and still reproduce.
 
-**Two things outstanding regardless of how the gate lands:**
+**Read `docs/LAZY-SMP-PLAN.md`'s closing section before touching this.** It
+records five things the plan got wrong or the build turned up — including a
+determinism guard that was wrong on first writing and would have silently
+invalidated the bench signature, and `tools/gendata` being unbuildable on main
+for a week from a substring anchor in a Makefile edit.
 
-1. **`tools/gendata` is unbuildable on `main`** — a substring anchor in the
-   `evaldump` Makefile edit orphaned its recipe. Fixed on `lazy-smp` only;
-   cherry-pick it whatever happens to Lazy SMP.
-2. **The bot is down** and has been since 09-06. It should stay down until the
-   `--tc` gate finishes, because contention penalises the eight-thread side
-   specifically and biases the result against the change.
-
-**If the gate is below about +50**, the decision is not automatic. Threading
-costs search determinism permanently at `Threads>1`, `ROADMAP.md`'s +200-280
-prior assumed ~16 threads, and this is a thermally-throttled laptop with 8.
+**Unfinished:** the contention calibration in `MEASUREMENTS.md` is
+single-threaded and no longer describes the running bot; re-measuring it at six
+threads is open. And the bot has been **down since 09-06** — it should be
+restarted now that this is merged.
 
 ---
 
