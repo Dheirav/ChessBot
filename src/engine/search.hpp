@@ -1,5 +1,6 @@
 #pragma once
 #include "board.hpp"
+#include "move_ordering.hpp"
 #include "move.hpp"
 #include "transposition_table.hpp"
 #include <atomic>
@@ -400,8 +401,10 @@ struct SearchOptions {
     // move and started from zero on the next; and the offset was applied in
     // the main search only, missing quiescence, where most static evaluations
     // happen. **v2 fixes both** -- persistent across moves and cleared per game
-    // (`clearCorrectionHistory()`), and applied at both quiescence stand-pat
-    // and the qBound horizon. Ungated as of this line.
+    // and applied at both quiescence stand-pat and the qBound horizon.
+    // (The per-game reset it used is gone; the table is per-search and
+    // per-thread again -- see SearchContext, and the measurement that made
+    // that free.)
     //
     // **v2 gated 2026-09-04: -39.7 [-53.0, -26.5]. Rejected.** And the gate
     // could not say *which* half did it, because v2 changed two things at once
@@ -507,9 +510,6 @@ struct SearchOptionEntry {
 // precisely that: randomness is acceptable only if it is seeded and logged.
 extern uint64_t g_rootSeed;
 
-// Reset the correction-history table. Call at the start of a game, beside the
-// transposition table's clear() -- not per search. See search.cpp.
-void clearCorrectionHistory();
 
 extern const SearchOptionEntry SEARCH_OPTIONS[];
 extern const size_t SEARCH_OPTION_COUNT;
@@ -532,6 +532,11 @@ std::string describeSearchOptions(const SearchOptions& opts);
 // It exists for two reasons: UCI reports nodes and nps, and tests/bench.cpp
 // uses the total as a signature. Any change that claims to preserve search
 // behaviour must reproduce the signature exactly.
+// Total nodes of the last completed search, for callers outside the engine
+// (tests/bench reads it, and the UCI info line reports it). Written from the
+// search context when a search ends rather than incremented on the hot path --
+// with several threads this is a sum, and summing on every node would put a
+// shared cache line in the middle of the search.
 extern uint64_t g_searchNodes;
 
 // Checkmate score, from the perspective of the side to move: being mated is
@@ -546,6 +551,70 @@ constexpr int SEARCH_MATE_SCORE = 30000;
 using SearchInfoFn = void (*)(int depth, int score, uint64_t nodes,
                               long elapsedMs, const Move& best);
 extern SearchInfoFn g_searchInfo;
+
+// How many threads a search may use. 1 until Phase 3 of Lazy SMP spawns them.
+//
+// **A node-limited search is forced to one thread regardless of this**, and
+// that is not a convenience -- it is what keeps every number in GATES.md
+// meaningful. A threaded search races on the transposition table by design, so
+// it is not reproducible from its seed; `tests/bench`, `tests/match -N` and
+// every shard gate depend on reproducing move for move. The forcing lives in
+// the search rather than in each caller, because a rule that has to be
+// remembered at nine call sites is a rule that will be forgotten at one.
+void setThreadCount(int n);
+int getThreadCount();
+int maxThreadCount();
+
+// Per-thread search state.
+//
+// Everything here is written during a search and must not be shared between
+// threads. It exists because Lazy SMP needs N searches running at once, and
+// `move_ordering.cpp` used to carry the warning that made this necessary:
+// *"Not synchronized: safe only because every search in the process runs under
+// ChessBotEngine::ttMutex."*
+//
+// A struct passed by reference rather than `thread_local`. The 2026-08-15
+// profile is the reason: `Piece::type()` was moved into a header because 1.87
+// billion calls made per-access cost about 21% of runtime, and `thread_local`
+// costs an indirection per access on some ABIs. This is the same path.
+//
+// Heap-allocate it. `MoveOrderer` carries a 2.4MB continuation-history table,
+// which is fine on the heap and is not something to put on a thread stack.
+struct SearchContext {
+    MoveOrderer orderer;
+
+    // Nodes searched by *this* thread. The node budget is enforced per thread,
+    // which is exact today and stays correct later because node-limited runs
+    // are pinned to one thread -- a threaded search is not reproducible from
+    // its seed, and every number in GATES.md depends on that reproducibility.
+    uint64_t nodes = 0;
+
+    // When this thread next consults the clock. Amortising the check is only
+    // sound per thread: a shared counter would let one thread's progress
+    // suppress another's check, and a search that never looks at the clock
+    // overruns its budget, which on a real game is a forfeit (BUGS.md 11).
+    uint64_t nextTimeCheck = 0;
+
+    // Correction history, per thread and per search.
+    //
+    // v2 persisted this across the moves of a game and reset it per game, which
+    // is why clearCorrectionHistory() used to exist and be called from
+    // ucinewgame, tests/match and gendata. It is per-search again, and that is
+    // a measured decision rather than a convenience: persistence gated
+    // **+0.4 [-11.8, +12.7]** against v1's **+6.3 [-2.3, +15.0]** -- both null
+    // and statistically indistinguishable, so carrying the table across moves
+    // bought nothing observable. `GATES.md`.
+    //
+    // Sized 2 x 16384 ints = 128KB per thread. The toggle is off; the family is
+    // closed.
+    int corrHist[2][16384] = {};
+
+    // A second stop flag, for helper threads. The main thread sets it when it
+    // has its answer, so helpers stop populating a table nobody will read.
+    // Null on the main thread. Checked in searchAborted beside the caller's own
+    // stop; both are one-way latches, so relaxed loads are enough.
+    const std::atomic<bool>* extraStop = nullptr;
+};
 
 // What the search is allowed to spend.
 //

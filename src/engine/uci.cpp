@@ -417,12 +417,16 @@ void handleSetOption(std::istringstream& is) {
         return;
     }
 
-    // Accepted and ignored, correctly in both cases. `Threads` is genuinely
-    // unimplemented. `Ponder` is a *declaration* in UCI, not a switch: it tells
-    // the engine the GUI may ponder, and the actual work arrives as
-    // `go ponder`, which this engine now implements. Nothing here needs to
-    // change when the GUI sets it either way.
-    if (name == "Threads" || name == "Ponder") return;
+    if (name == "Threads") {
+        const int n = std::atoi(value.c_str());
+        if (n >= 1) setThreadCount(n);
+        return;
+    }
+
+    // Accepted and ignored, and correctly so: `Ponder` is a *declaration* in
+    // UCI rather than a switch. It tells the engine the GUI may ponder, and the
+    // actual work arrives as `go ponder`, which this engine implements.
+    if (name == "Ponder") return;
 
     if (name == "Hash") {
         int mb = std::atoi(value.c_str());
@@ -484,9 +488,12 @@ int uciLoop() {
             // Advertised because a GUI's default configuration sets them and
             // python-chess raises on any name the engine did not announce --
             // one unannounced option is a harness that dies on game one
-            // (EXTERNAL_RATING.md). Threads is honest about being single:
-            // min and max are both 1 rather than pretending to accept more.
-            std::cout << "option name Threads type spin default 1 min 1 max 1\n";
+            // (EXTERNAL_RATING.md). Threads advertises what this machine can
+            // actually run; a node-limited search still forces one thread
+            // whatever is set here, because a threaded search is not
+            // reproducible from its seed.
+            std::cout << "option name Threads type spin default 1 min 1 max "
+                      << maxThreadCount() << "\n";
             std::cout << "option name Ponder type check default false\n";
             std::cout << "option name Move Overhead type spin default 100 min 0 max 5000\n";
             // Seeded and logged, which is the condition BUGS.md 6 attaches to
@@ -506,7 +513,6 @@ int uciLoop() {
         } else if (command == "ucinewgame") {
             stopSearch();
             g_tt->clear();
-            clearCorrectionHistory();
             // A seed per *game*, not per process. lichess-bot keeps one engine
             // process across every game it plays, so a process-lifetime seed
             // would give every game the same perturbation and decorrelate

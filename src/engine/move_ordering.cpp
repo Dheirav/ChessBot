@@ -6,13 +6,6 @@
 #include <algorithm>
 #include <limits>
 
-// Global move orderer instance
-// Global mutable search state (killer moves / history table). Not
-// synchronized: safe only because every search in the process runs under
-// ChessBotEngine::ttMutex. Concurrent searches from multiple engine
-// instances would race on this and need per-search state instead.
-MoveOrderer g_moveOrderer;
-
 // Piece values for MVV-LVA
 static const int PIECE_VALUES[7] = {
     0,     // NONE
