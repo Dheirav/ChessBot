@@ -1491,6 +1491,90 @@ cheaper per node, not merely more correct.
 
 ---
 
+## 21. The bench signature is a property of the compiler, not just the engine — 2026-09-10
+
+`463,295` is treated throughout this project as the fingerprint of the engine's
+behaviour: `test-bench` fails on any change that moves it, gates quote it, and
+this file's own history is a list of the values it has held. It is not quite
+that. It is the fingerprint of the engine **and the standard library it was
+built against**.
+
+Both ordering sorts compare on the score alone:
+
+```cpp
+std::sort(scored, scored + count,
+          [](const ScoredMove& a, const ScoredMove& b) { return a.score > b.score; });
+```
+
+Most quiet moves score exactly equal, because an untouched history entry is
+zero, so at nearly every node this asks `std::sort` to order a pile of ties. The
+C++ standard specifies the result only for unequal elements. Where they are
+equal, the order is whatever libstdc++'s introsort happens to leave, which is
+deterministic on one toolchain and guaranteed by nothing across toolchains.
+
+So a GCC upgrade can move the bench number with no change to this repository.
+**That is not a regression, and `make bench-regen` is the correct response** —
+which is exactly the situation this file exists to stop someone losing a day to.
+
+### Why it is not fixed
+
+Stockfish has the same ties and the same score-only comparison; its
+`partial_insertion_sort` even documents the order of ties as unspecified. The
+difference is that the sort is *their code*, so the order is fixed by the
+algorithm rather than by the library, which is what lets them require a bench
+number in every commit message and run CI checking search reproducibility across
+compilers.
+
+Doing the same here is one toggle, `SearchOptions::deterministicSort`, which
+replaces `std::sort` with a selection sort. It is built and off. It is off
+because the cost was unclear for most of a day, and the way it became clear is
+worth recording.
+
+### The instrument was the problem, twice over
+
+`tests/bench` said the change cost 5.16% of the tree at depth 8. It also said
+−2.08% at depth 5, +0.12% at 6, −2.85% at 7 and +12.08% at 9. A statistic that
+swings from three percent better to twelve percent worse over five depths is not
+measuring the feature.
+
+This is the same failure as 18 and the same one that nearly sank `improving`:
+twelve positions summed into one total, where a single position swinging 700k
+nodes swamps the aggregate. Five deterministic orderings were measured against
+the accident before anyone noticed the yardstick was the problem, and all five
+looked expensive, from +6.6% to +17.2%.
+
+`tools/treecost` measures the same thing properly: 300 positions rather than 12,
+each searched both ways, and the statistic is the distribution of per-position
+ratios rather than the ratio of two totals. At depth 8:
+
+```
+  ratio of totals      +3.37%   (the tests/bench statistic)
+  median ratio         +1.31%
+  quartiles            -8.64% .. +13.77%
+  bigger tree on       159 positions
+  smaller tree on      138 positions
+  sign test            +1.2 sd from even  -> consistent with no systematic effect
+```
+
+The quartiles are the finding. Individual positions move by ten percent in both
+directions, the split is 159 against 138, and the sign test cannot distinguish
+it from a coin. **There is no systematic tree cost.** The 5.16% at depth 8 was
+one or two positions shouting, and every one of the five "expensive" orderings
+deserves re-measuring on this instrument before being believed.
+
+So determinism is available for around one percent of the tree at worst, and
+possibly for nothing. That is a good trade for a reproducible signature, and the
+reason the toggle is still off is only that a change to move ordering should be
+gated rather than argued — noting that a one percent tree effect is about one
+Elo, which is an order of magnitude below what a gate here can resolve
+(`GATES.md`: ±8 to ±10 on 3 360 games).
+
+### The rule this leaves behind
+
+**Do not read a tree effect below about ten percent off `tests/bench`.** It has
+now been wrong about exactly that three times. Use `./tools/treecost <depth>
+<positions> <option>` and read the median and the sign test, not the totals.
+
 ## Things that look like bugs and are not
 
 - **Two games against `ficheallrs` show `Termination "Abandoned"` after
