@@ -157,7 +157,64 @@ confirms the diagnosis: we were charging for undefended proximity.
 It is still only about 3.0% of total error mass, against 2.8% without it, so it
 is not enough on its own to expect the gauntlet result to flip.
 
+## The missing terms, now built, and they do not help either
+
+Weak squares, safe checks, defenders and the no-enemy-queen condition are all
+implemented, behind compile-time flags that default to zero. Measured against
+the same corpus:
+
+| config (scale 500) | comp | ctl | comp flips |
+|---|---|---|---|
+| baseline, term off | 543.7 | 181.9 | 210 |
+| proximity only | 504.5 | 189.3 | 178 |
+| + defenders | 509.5 | 186.0 | 187 |
+| + weak squares | 501.1 | 210.8 | 177 |
+| + safe checks | 493.9 | 226.3 | 179 |
+| + both | 494.3 | **269.0** | 170 |
+
+The new terms improve `comp` slightly and wreck `ctl`, because our danger is
+squared and adding contributions to a raw count amplifies quadratically in every
+position. Ethereal avoids that with `SafetyAdjustment = -74` and `MAX(0, mg)`,
+so ordinary positions charge nothing *before* the quadratic. Applying an offset
+over the full set:
+
+| offset | comp | ctl |
+|---|---|---|
+| 0 | 493.3 | 256.8 |
+| 25 | 532.7 | 199.3 |
+| 35 | 539.6 | 189.0 |
+| 50 | 542.9 | 183.9 |
+
+**The same one-dimensional trade, and worse than the crude version.** At matched
+`ctl` damage of 189, proximity-only gives `comp` 504.5 while the full
+Ethereal-shaped term gives 539.6.
+
+## Why, and what the blocker actually is now
+
+Eight configurations were tried: scale sweep, attacker-count threshold, danger
+offset, defenders, weak squares, safe checks, no-enemy-queen, and the offset
+over the full set. Every one produces the same curve and none beats the crude
+version.
+
+The likely cause is not the design but the **weights**. The term now has six
+interacting parameters and all of them are hand-guessed. Ethereal's are not
+guesses: `S(48,41)`, `S(24,35)`, `S(42,41)`, `S(112,117)`, `S(-74,-26)` are
+fitted together against a large position set, and each is a *pair* because that
+evaluation is tapered throughout. Six interacting constants will not land near
+an optimum by inspection.
+
+**So the blocker has moved.** It is no longer "we lack the terms"; the terms
+exist. It is "we cannot set six interacting weights by hand", which is a tuning
+problem, and `tools/tune` already does coordinate descent of exactly this kind.
+
+That is also a warning. `BUGS.md` 20 closed hand-crafted evaluation tuning after
+three attempts that each produced a more accurate evaluation and were each
+cancelled by node cost. Tuning these six would be a fourth, on the term with
+seven prior rejections.
+
 ## What is left to build
+
+
 
 **Safe checks** and **weak squares**, which are the two largest missing terms.
 Both need a per-side attack map with counts. One already exists in

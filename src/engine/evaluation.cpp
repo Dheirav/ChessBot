@@ -270,13 +270,16 @@ static bool isCenter(int idx) {
 // ran a geometry test on every ordered pair of squares, and two full
 // isSquareAttacked() ray-scans per piece (~52 scans per evaluation).
 template <typename F>
-static inline void forEachAttackedSquare(const Board& board, int from, F fn) {
+static inline void forEachAttackedSquareAs(const Board& board, int from,
+                                           PieceType type, PieceColor color, F fn) {
     static const int KNIGHT_D[8][2] = { {1,2},{2,1},{2,-1},{1,-2},{-1,-2},{-2,1},{-2,-1},{-1,2} };
     static const int KING_D[8][2]   = { {1,1},{1,0},{1,-1},{0,1},{0,-1},{-1,1},{-1,0},{-1,-1} };
     static const int ROOK_D[4][2]   = { {0,1},{1,0},{0,-1},{-1,0} };
     static const int BISHOP_D[4][2] = { {1,1},{1,-1},{-1,-1},{-1,1} };
 
-    const Piece& a = board.squares[from];
+    const struct { PieceType t; PieceColor c;
+                   PieceType type() const { return t; }
+                   PieceColor color() const { return c; } } a{type, color};
     const int x = from % 8, y = from / 8;
 
     switch (a.type()) {
@@ -319,6 +322,13 @@ static inline void forEachAttackedSquare(const Board& board, int from, F fn) {
         }
         default: break;
     }
+}
+
+// The ordinary form: ask what the piece actually standing on `from` attacks.
+template <typename F>
+static inline void forEachAttackedSquare(const Board& board, int from, F fn) {
+    const Piece& a = board.squares[from];
+    forEachAttackedSquareAs(board, from, a.type(), a.color(), fn);
 }
 
 // Mobility is counted over pseudo-legal moves rather than legal ones.
@@ -411,6 +421,43 @@ static const int KING_DANGER_OFFSET = KING_DANGER_OFFSET_N;
 #define KING_DANGER_DEFENDER_W_N 0
 #endif
 static const int KING_DANGER_DEFENDER_W = KING_DANGER_DEFENDER_W_N;
+#ifndef KING_DANGER_WEAK_W_N
+#define KING_DANGER_WEAK_W_N 0
+#endif
+static const int KING_DANGER_WEAK_W = KING_DANGER_WEAK_W_N;
+#ifndef KING_DANGER_CHECK_W_N
+#define KING_DANGER_CHECK_W_N 0
+#endif
+static const int KING_DANGER_CHECK_W = KING_DANGER_CHECK_W_N;
+#ifndef KING_DANGER_NO_QUEEN_CUT_N
+#define KING_DANGER_NO_QUEEN_CUT_N 0
+#endif
+static const int KING_DANGER_NO_QUEEN_CUT = KING_DANGER_NO_QUEEN_CUT_N;
+
+// Attack information needed by king safety, and by nothing else.
+//
+// Built once per evaluation and **only when the term is live**, because it walks
+// every piece's attack set a second time. With KING_DANGER_SCALE at 0 the
+// shipped engine never constructs it, which is why bench is unchanged.
+struct KingSafetyAttacks {
+    uint8_t  count[3][64] = {};   // how many times each colour attacks each square
+    uint64_t byType[3][7] = {};   // squares attacked, per colour per piece type
+    uint64_t any[3]       = {};   // squares attacked at all, per colour
+};
+
+static void buildKingSafetyAttacks(const Board& board, KingSafetyAttacks& a) {
+    for (int i = 0; i < 64; ++i) {
+        const Piece& p = board.squares[i];
+        if (p.type() == NONE) continue;
+        const int col = (int)p.color();
+        const int t   = (int)p.type();
+        forEachAttackedSquare(board, i, [&](int sq) {
+            if (a.count[col][sq] < 255) ++a.count[col][sq];
+            a.byType[col][t] |= 1ULL << sq;
+            a.any[col]       |= 1ULL << sq;
+        });
+    }
+}
 
 // Friendly pawns and minor pieces standing in the king's own zone.
 //
@@ -436,7 +483,8 @@ static int kingDefenders(const Board& board, int kingSq, PieceColor defender) {
     return n;
 }
 
-static int kingDanger(const Board& board, int kingSq, PieceColor attacker) {
+static int kingDanger(const Board& board, int kingSq, PieceColor attacker,
+                      const KingSafetyAttacks& atk) {
     if (KING_DANGER_SCALE == 0 || kingSq < 0) return 0;
     uint64_t zone = 0;
     const int kf = kingSq % 8, kr = kingSq / 8;
@@ -485,9 +533,59 @@ static int kingDanger(const Board& board, int kingSq, PieceColor attacker) {
     // one. A threshold on attacker *count* is the wrong axis and was measured
     // as such: raising it moved comp and ctl error back toward baseline
     // together instead of separating them.
-    // Subtract what is guarding the king before charging for what is attacking
-    // it. The defending side is whoever is not the attacker.
     const PieceColor defender = (attacker == COLOR_WHITE) ? COLOR_BLACK : COLOR_WHITE;
+    const int att = (int)attacker, def = (int)defender;
+
+    // Weak squares: in the king's own zone, attacked by the enemy and defended
+    // at most once by us. Ethereal charges SafetyWeakSquares = S(42, 41) per
+    // one. A square the defender covers twice is not a hole; a square covered
+    // once or not at all is where an attack actually lands.
+    if (KING_DANGER_WEAK_W) {
+        int weak = 0;
+        for (int sq = 0; sq < 64; ++sq) {
+            if (!((zone >> sq) & 1ULL)) continue;
+            if (atk.count[att][sq] > 0 && atk.count[def][sq] <= 1) ++weak;
+        }
+        danger += KING_DANGER_WEAK_W * weak;
+    }
+
+    // Safe checks: squares from which an enemy piece could check this king, that
+    // the enemy can actually reach, and that we do not defend.
+    //
+    // "Where could a knight check from" is knight-attacks-*from the king square*,
+    // which is why forEachAttackedSquareAs takes an explicit type: it is asked
+    // about a hypothetical piece standing where the king stands. For sliders it
+    // respects occupancy, so a blocked line yields no check square.
+    //
+    // This is Ethereal's dominant term -- SafetySafeKnightCheck = 112 against
+    // SafetyAttackValue = 45, so one unanswerable check outweighs two attacked
+    // squares -- and the thing our version had no concept of at all.
+    if (KING_DANGER_CHECK_W) {
+        int checks = 0;
+        const PieceType kinds[4] = { KNIGHT, BISHOP, ROOK, QUEEN };
+        for (int k = 0; k < 4; ++k) {
+            uint64_t from = 0;
+            forEachAttackedSquareAs(board, kingSq, kinds[k], defender,
+                                    [&](int sq) { from |= 1ULL << sq; });
+            const uint64_t safe = from & atk.byType[att][(int)kinds[k]] & ~atk.any[def];
+            checks += __builtin_popcountll(safe);
+        }
+        danger += KING_DANGER_CHECK_W * checks;
+    }
+
+    // Without a queen an attack rarely converts. Ethereal charges
+    // SafetyNoEnemyQueens = S(-237, -259), which effectively switches the term
+    // off; a flat reduction is the same idea at this granularity.
+    if (KING_DANGER_NO_QUEEN_CUT) {
+        bool hasQueen = false;
+        for (int i = 0; i < 64 && !hasQueen; ++i) {
+            const Piece& p = board.squares[i];
+            if (p.type() == QUEEN && p.color() == attacker) hasQueen = true;
+        }
+        if (!hasQueen) danger -= KING_DANGER_NO_QUEEN_CUT;
+    }
+
+    // Subtract what is guarding the king before charging for what attacks it.
     danger -= KING_DANGER_DEFENDER_W * kingDefenders(board, kingSq, defender);
 
     danger -= KING_DANGER_OFFSET;
@@ -838,8 +936,13 @@ EvalDetails evaluate_details(const Board& board) {
     if (whiteKingFile != -1 && blackKingFile != -1) {
         const int wKingSq = Board::get1DIndex(whiteKingFile, whiteKingRank);
         const int bKingSq = Board::get1DIndex(blackKingFile, blackKingRank);
-        kingSafetyScore -= (int)((kingDanger(board, wKingSq, COLOR_BLACK)
-                                  - kingDanger(board, bKingSq, COLOR_WHITE))
+        // Built here rather than at file scope because it walks every attack set
+        // a second time. At KING_DANGER_SCALE 0 this block never runs, so the
+        // shipped engine pays nothing for a term it does not use.
+        KingSafetyAttacks ksAtk;
+        if (KING_DANGER_SCALE != 0) buildKingSafetyAttacks(board, ksAtk);
+        kingSafetyScore -= (int)((kingDanger(board, wKingSq, COLOR_BLACK, ksAtk)
+                                  - kingDanger(board, bKingSq, COLOR_WHITE, ksAtk))
                                  * gamePhaseFactor);
     }
     kingSafetyScore -= (int)((kingExposure(whiteKingFile, whiteKingRank, 7,
