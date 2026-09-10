@@ -44,6 +44,8 @@ tools/review
 tools/tune
 tools/gendata
 tools/evaldump
+tools/bbspeed
+tools/treecost
 # Generated Texel corpora. Regenerate with tools/texel-corpus.py --split; they
 # are derived from the game archive, which lives outside this repo, so a
 # committed copy would be a snapshot claiming to be the corpus.
