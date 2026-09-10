@@ -485,6 +485,43 @@ struct SearchOptions {
     // as inconclusive by construction rather than as a result.
     bool lmrTable = true;
 
+    // Move-level futility: skip a quiet move whose position is so far below alpha
+    // that this move plausibly cannot rescue it.
+    //
+    // The counterpart to `revFutility`, which asks the same question about the
+    // *node* ("so far above beta that cutting is safe"). This asks it about each
+    // *move*, and that is a different and finer decision: reverse futility
+    // either abandons the whole node or keeps all of it, while this drops
+    // individual quiet moves and keeps the rest.
+    //
+    // The margin is sized against this evaluation's own error, not textbook
+    // values, for the same reason the razoring and reverse futility comments
+    // give: the evaluation differs from Stockfish at depth 16 by a median of
+    // 125cp and a 90th percentile of 407cp, and PLAN 3.1 lost 50 Elo betting
+    // inside that noise. So the base is 300 rather than the usual 100 to 150.
+    //
+    // Never on captures, promotions or checks, and never when a mate score is
+    // in play: those are exactly the moves whose value the static evaluation
+    // cannot see.
+    // **Built and not gated: the measured effect is too small to be worth one.**
+    // -1.9% tree at depth 11 with **zero** best moves changed across twelve
+    // positions, which is about 0.03 plies. Eight of twelve shrink, so the
+    // direction is right and the magnitude is not.
+    //
+    // The margin is why. 300 + 150*depth is 900cp at depth 4, so a quiet move is
+    // almost never far enough below alpha to prune, and it is 300 rather than
+    // the textbook 100-150 because this evaluation's error has a p90 of 407.
+    // Tightening does not rescue it: at 100 + 100*depth the tree grew **+4.2%**
+    // and four best moves changed, which is over-pruning paid back in
+    // re-searches. `razortight` hit the same wall at -1.0.
+    //
+    // Third feature in a row capped by the same thing: `improving` compares two
+    // noisy evals and gated -10.6, `histReduction` cannot work at all, and this
+    // needs a margin so wide it barely fires. The one recent large win, the LMR
+    // table at +26.4, is the technique that never reads the evaluation.
+    // `docs/RESEARCH-SPEED-AND-SEARCH.md`.
+    bool moveFutility = false;
+
     // Scale the late move reduction by how well this quiet move has done before.
     //
     // The history table is already built and already maintained; until now it

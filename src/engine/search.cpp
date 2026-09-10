@@ -323,6 +323,7 @@ const SearchOptionEntry SEARCH_OPTIONS[] = {
     {"lmrtable",    "lmrtable", "LmrTable",    &SearchOptions::lmrTable},
     {"improving",   "improving","Improving",   &SearchOptions::improving},
     {"histreduction","histred", "HistReduction",&SearchOptions::histReduction},
+    {"movefutility","movefut",  "MoveFutility", &SearchOptions::moveFutility},
 };
 const size_t SEARCH_OPTION_COUNT = sizeof(SEARCH_OPTIONS) / sizeof(SEARCH_OPTIONS[0]);
 
@@ -799,6 +800,12 @@ static int minimaxWithTT(SearchContext& ctx,
     const int RAZOR_MARGIN = g_searchOptions.razorTight ? 350 : 500;
     static const int RAZOR_MAX_DEPTH = 2;
 
+    // Move-level futility. Base plus per-ply, both sized against the same
+    // measured error as the two margins above rather than against convention.
+    static const int MOVE_FUTILITY_BASE  = 300;
+    static const int MOVE_FUTILITY_SLOPE = 150;
+    static const int MOVE_FUTILITY_MAX_DEPTH = 4;
+
     // A null-window search (beta - alpha == 1) is a scout, not a principal
     // variation. Pruning inside the PV would change the move actually chosen
     // rather than only how fast it is found.
@@ -813,6 +820,7 @@ static int minimaxWithTT(SearchContext& ctx,
     bool haveStatic = false;
     const bool wantStatic =
         !inCheck && (g_searchOptions.improving
+                     || g_searchOptions.moveFutility
                      || g_searchOptions.corrHist
                      || (!isPV && !nearMate
                          && (g_searchOptions.revFutility || g_searchOptions.razoring)));
@@ -1021,6 +1029,27 @@ static int minimaxWithTT(SearchContext& ctx,
         // search, the more a late move can still turn out to matter. 3 + d*d
         // is the conventional shape: 4 moves at depth 1, 7 at 2, 12 at 3.
         const bool isPv = (beta - alpha > 1);
+
+        // Move-level futility. Conditions mirror the LMP guard below, for the
+        // same reasons it lists: never in a PV node, never in check, never on a
+        // move that is not a plain quiet one, and never once a mate score is in
+        // play, because a mate is not a centipawn quantity and the margin
+        // arithmetic is meaningless against it.
+        //
+        // moveIndex > 0 keeps the first move, which is the TT move or the best
+        // the ordering could offer. Pruning that on a static estimate would
+        // discard the one move the node has real evidence for.
+        if (g_searchOptions.moveFutility && !isPv && !inCheck && haveStatic &&
+            depth <= MOVE_FUTILITY_MAX_DEPTH &&
+            move.flag == NORMAL &&
+            moveIndex > 0 &&
+            bestEval > -MATE_SCORE + 1000 &&
+            std::abs(alpha) < MATE_SCORE - 1000 &&
+            hasNonPawnMaterial(board, side) &&
+            staticEval + MOVE_FUTILITY_BASE + MOVE_FUTILITY_SLOPE * depth <= alpha) {
+            continue;
+        }
+
         if (g_searchOptions.lateMovePruning && !isPv && !inCheck &&
             // A ladder, shallowest first: lmpDepth1 wins over lmpShallow,
             // which wins over the original 3. Ordered this way so a gate can
