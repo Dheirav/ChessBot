@@ -95,14 +95,31 @@ void MoveOrderer::orderMoves(MoveList& moves, const Board& board, int depth,
         int score;
         Move move;
     };
+    const bool tie = g_searchOptions.orderTieBreak;
     ScoredMove scored[MAX_ORDERED_MOVES];
     for (size_t i = 0; i < count; ++i) {
         scored[i] = ScoredMove{getMoveScore(moves[i], board, depth, ttMove, prevMove),
                                moves[i]};
     }
 
-    std::sort(scored, scored + count,
-              [](const ScoredMove& a, const ScoredMove& b) { return a.score > b.score; });
+    if (g_searchOptions.deterministicSort) {
+        // Selection sort: each pass takes the *first* maximum, so ties resolve
+        // by position in a way this code decides rather than the standard
+        // library. O(n^2), which costs nothing at these lengths -- it measured
+        // slightly faster per node than std::sort at depth 6.
+        for (size_t i = 0; i < count; ++i) {
+            size_t best = i;
+            for (size_t j = i + 1; j < count; ++j)
+                if (scored[j].score > scored[best].score) best = j;
+            if (best != i) std::swap(scored[i], scored[best]);
+        }
+    } else {
+        std::sort(scored, scored + count,
+                  [tie](const ScoredMove& a, const ScoredMove& b) {
+                      if (a.score != b.score) return a.score > b.score;
+                      return tie && tieKey(a.move) < tieKey(b.move);
+                  });
+    }
 
     for (size_t i = 0; i < count; ++i) {
         moves[i] = scored[i].move;
@@ -163,6 +180,29 @@ void MoveOrderer::updateHistory(const Move& move, int depth, const Move* prevMov
         if (idx >= 0) {
             int& entry = contHistory[(size_t)idx];
             entry += bonus - (entry * bonus) / HISTORY_MAX;
+        }
+    }
+}
+
+void MoveOrderer::penaliseHistory(const Move& move, int depth, const Move* prevMove) {
+    if (!g_searchOptions.histMalus) return;
+    if (move.from >= 64 || move.to >= 64 || depth <= 0) return;
+    if (move.capturedPiece.type() != NONE) return;
+
+    // Same magnitude as the bonus and the same gravity, so a move that cuts as
+    // often as it fails settles near zero rather than drifting. Gravity also
+    // bounds the table from below without a separate clamp: the decrement
+    // shrinks as the entry falls, so it approaches -HISTORY_MAX and never
+    // passes it.
+    const int malus = depth * depth;
+    int& e = historyTable[move.from][move.to];
+    e -= malus - (e * malus) / HISTORY_MAX;
+
+    if (g_searchOptions.contHist && prevMove != nullptr) {
+        const long idx = contIndex(*prevMove, move);
+        if (idx >= 0) {
+            int& ce = contHistory[(size_t)idx];
+            ce -= malus - (ce * malus) / HISTORY_MAX;
         }
     }
 }

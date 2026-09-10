@@ -36,6 +36,25 @@ public:
     // at 16 384 and 4 096.
     static constexpr int CAPT_HIST_SHIFT = 2;
 
+    // A move as a single comparable integer, used only to break ties in the
+    // ordering sorts.
+    //
+    // Without it the sorts key on the score alone, so two moves the ordering
+    // rates identically -- which is most quiet moves, since an untouched
+    // history entry is zero -- come out in whatever order std::sort's introsort
+    // happens to leave them. That makes the node count a function of the input
+    // order and of the standard library, rather than of the position, and it is
+    // why the same engine cannot be expected to reproduce a bench signature
+    // across libstdc++ versions.
+    //
+    // With it the comparator is a total order, the sorted sequence is unique,
+    // and the node count depends on nothing but the moves and their scores.
+    // That is what lets a second implementation with a different generation
+    // order be checked against this one node for node.
+    static int tieKey(const Move& m) {
+        return (m.from << 9) | (m.to << 3) | (int)m.promotionPiece.type();
+    }
+
     // Upper bound on moves ordered in one call. No legal chess position has
     // more than 218 legal moves; the buffer is stack-allocated, so this caps
     // it rather than allocating per node.
@@ -57,6 +76,15 @@ public:
     
     // Update history heuristic when a move causes a cutoff
     void updateHistory(const Move& move, int depth, const Move* prevMove = nullptr);
+
+    // Penalise a quiet move that was searched and did *not* cause the cutoff.
+    //
+    // Without this the table only ever records "this move has caused cutoffs"
+    // and never "this move was tried and did nothing", so every entry is zero
+    // or positive. That is why a history-driven reduction could only ever
+    // reduce a good move *less*, never a bad move *more*, and why every divisor
+    // grew the tree (`SearchOptions::histReduction`).
+    void penaliseHistory(const Move& move, int depth, const Move* prevMove = nullptr);
 
     // Update capture history when a capture causes a cutoff. Separate from
     // updateHistory because that one deliberately ignores captures.

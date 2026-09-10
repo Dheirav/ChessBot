@@ -544,6 +544,72 @@ struct SearchOptions {
     // `docs/RESEARCH-SPEED-AND-SEARCH.md`.
     bool moveFutility = false;
 
+    // Skip constructing quiet moves at the source during quiescence generation,
+    // instead of constructing and then discarding them.
+    //
+    // `stagedGen` already filters quiets out, but only after each has been built
+    // as a six-field Move. The 2026-08-15 profile counted 116 million Move
+    // constructions as material, so the construction is the cost worth removing.
+    // Slider rays are still walked to their blocker, since that is how the
+    // capture at the end is found.
+    //
+    // Output is identical by construction, so node counts must not move: that is
+    // the invariant, and only wall time should change.
+    bool maskedGen = false;
+
+    // Break ordering ties on the move itself rather than leaving them to
+    // std::sort.
+    //
+    // Off, the two ordering sorts key on the score alone, so moves the ordering
+    // rates identically -- most quiet moves, since an untouched history entry
+    // is zero -- come out in whatever order introsort leaves them. That order is
+    // deterministic for a given input but is not specified by anything, and the
+    // bench signature depends on it: making the sort stable instead, which is
+    // the least surprising alternative, costs 11.7% more nodes at depth 6, and
+    // ordering ties by (from, to) costs 17.2%. The engine has been living on an
+    // arbitrary permutation that happens to be good.
+    //
+    // On, the comparator is a total order and the sorted sequence is unique.
+    // That is what lets the bitboard core, whose generator emits in a different
+    // order, be checked against this one node for node -- see
+    // docs/BITBOARD-REPLACEMENT.md. It is a real ordering change with a real
+    // cost, so it is a toggle to be gated on its own rather than something the
+    // replacement smuggles in.
+    bool orderTieBreak = false;
+
+    // Sort the move list with our own routine instead of std::sort.
+    //
+    // std::sort specifies its result only for unequal elements, and most quiet
+    // moves score equal, so the order the search actually gets is whatever
+    // libstdc++'s introsort leaves behind. That makes the bench signature a
+    // property of the toolchain rather than of this engine, which is why
+    // Stockfish hand-writes its sort: same score-only comparison, same
+    // unspecified tie order, but fixed by their code, so their bench reproduces
+    // across compilers and can be required in every commit message.
+    //
+    // Selection sort is the cheapest replacement measured: 463,870 against
+    // 463,295 at depth 6, but 1,970,496 against 1,873,811 at depth 8, so the
+    // real price is about 5% of the tree, not the 0.1% one depth suggested.
+    // Every other deterministic order measured worse, from 6.6% to 17.2%.
+    // Whether 5% more nodes is 5% less Elo is what the gate is for: it changes
+    // which move is chosen in three of the twelve bench positions.
+    bool deterministicSort = false;
+
+
+    // Penalise quiet moves that were searched and did not cause the cutoff.
+    //
+    // The history table currently only adds, on one call site, so it says "has
+    // caused cutoffs" and never "was tried and did nothing". Every entry is
+    // zero or positive, which is exactly why `histReduction` cannot work at any
+    // setting: a one-sided table can only reduce a good move less, never a bad
+    // move more, and the savings are entirely in the second half.
+    //
+    // This changes what the table contains, so it changes move *ordering* too,
+    // and therefore gets its own gate before anything is built on top of it.
+    // Only moves actually searched are penalised: a move LMP skipped was never
+    // tried and has earned nothing either way.
+    bool histMalus = false;
+
     // Scale the late move reduction by how well this quiet move has done before.
     //
     // The history table is already built and already maintained; until now it
@@ -682,7 +748,6 @@ struct SearchOptionEntry {
 // the same seed back through the `RootSeed` UCI option. `BUGS.md` 6 asks for
 // precisely that: randomness is acceptable only if it is seeded and logged.
 extern uint64_t g_rootSeed;
-
 
 extern const SearchOptionEntry SEARCH_OPTIONS[];
 extern const size_t SEARCH_OPTION_COUNT;
