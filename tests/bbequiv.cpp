@@ -79,27 +79,7 @@ std::string describe(const Move& m) {
     return s;
 }
 
-// A BitboardMove as the mailbox Move that means the same thing, so the two
-// implementations of a function can be handed the same move rather than two
-// moves that are believed to be the same.
-Move toMailboxMove(const Position& pos, const BitboardMove& m) {
-    const PieceColor us = toMailboxColor(pos.sideToMove);
-    const PieceColor them = (us == COLOR_WHITE) ? COLOR_BLACK : COLOR_WHITE;
-    Piece moved(us, toMailboxType(m.moved));
-    Piece captured = (m.captured == BB_NONE) ? Piece()
-                                             : Piece(them, toMailboxType(m.captured));
-    MoveFlag flag = NORMAL;
-    switch (m.flag) {
-        case BBM_CAPTURE:    flag = CAPTURE; break;
-        case BBM_PROMOTION:  flag = PROMOTION; break;
-        case BBM_EN_PASSANT: flag = EN_PASSANT; break;
-        case BBM_CASTLE:     flag = CASTLING; break;
-        default:             flag = NORMAL; break;
-    }
-    Piece promo = (m.flag == BBM_PROMOTION) ? Piece(us, toMailboxType(m.promotionType))
-                                            : Piece();
-    return Move(m.from, m.to, moved, captured, flag, promo);
-}
+// toMailboxMove now lives in bb_position.hpp, where the engine needs it too.
 
 int failures = 0;
 void report(const char* what, int bad, long checked) {

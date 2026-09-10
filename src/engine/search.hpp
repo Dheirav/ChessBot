@@ -607,6 +607,56 @@ struct SearchOptions {
     // Off until that gate rules. docs/BITBOARD-REPLACEMENT.md B7.
     bool bitboardCore = false;
 
+    // --- The three branching-factor items (docs/stockfish-comparison) ---
+    //
+    // What these have in common: their cut grows with depth. A rule that fires
+    // only near the leaves divides the whole tree by a constant and leaves the
+    // ply-to-ply ratio alone, which is measurable and already measured here:
+    // turning LMP off costs 40.7% at depth 5 and 36.7% at depth 8, a flat
+    // discount, while the LMR table cut 2.9% at depth 5 and 56.1% at depth 11.
+    // Only the second kind changes the branching factor, and the LMR table is
+    // the only change that ever moved it.
+
+    // Scale the null-move reduction with depth instead of the fixed R = 2.
+    //
+    // R = 2 has been there since the search was written, and it is the same
+    // defect as `const int R = 1` in LMR, which search.hpp already blames for
+    // the branching factor sitting at 2.3 and which paid +26.4 Elo to fix.
+    // Stockfish 11's *minimum* is 3; master reaches about 11 at depth 12.
+    // Reads nothing from the evaluation.
+    bool nullDepthR = false;
+
+    // Re-search before trusting a null-move cutoff.
+    //
+    // The comment above the null-move block has always described a verification
+    // search; there has never been one. It did not matter much at R = 2, and it
+    // matters a great deal above about R = 4, because the whole null-move
+    // assumption fails in zugzwang and a deeper reduction reaches further into
+    // the endgames where that happens.
+    bool nullVerify = false;
+
+    // Late move pruning at every depth, on a threshold that grows linearly
+    // rather than quadratically.
+    //
+    // These two halves are one toggle because uncapping alone is provably
+    // inert: the shipped threshold is 3 + depth*depth, and with about 35 legal
+    // moves in a typical position 3 + depth*depth exceeds 35 from depth 6
+    // upward, so a raised cap would prune nothing. A linear threshold is what
+    // makes the rule reach the interior nodes where the branching factor is
+    // actually set.
+    bool lmpDeep = false;
+
+    // Principal variation search at interior nodes.
+    //
+    // There is none today: PVS runs at the root and inside the LMR probe and
+    // nowhere else, so every non-reduced interior move is searched on the full
+    // parent window. That has a second consequence beyond the wasted width,
+    // because `isPV` is derived from the window as `beta - alpha > 1`: with no
+    // null-window scouting it reads true across most of the tree, and razoring,
+    // reverse futility, LMP and move futility are all gated on `!isPV`. They
+    // are switched off exactly where the nodes are.
+    bool interiorPvs = false;
+
 
     // Penalise quiet moves that were searched and did not cause the cutoff.
     //

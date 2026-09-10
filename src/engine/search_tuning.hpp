@@ -90,6 +90,21 @@ LMR_TABLE = [] {
 // depth 12 move 30 the table gives 4, so this can return a good move to 2.
 static constexpr int HIST_RED_MAX = 2;
 
+// Null-move reduction when SearchOptions::nullDepthR is on: R = base + depth/div.
+// Deliberately structural, with Stockfish's eval-dependent bonus term left out
+// of the first version, because every eval-reading heuristic gated here has
+// failed and the depth term reads nothing.
+static constexpr int NULL_R_BASE = 2;
+static constexpr int NULL_R_DIV  = 4;
+
+// Late move pruning under SearchOptions::lmpDeep: keep base + slope*depth quiet
+// moves, at any depth up to the cap. Linear rather than the shipped quadratic,
+// because 3 + depth*depth passes the number of legal moves in a typical
+// position by depth 6 and stops pruning anything at all.
+static constexpr int LMP_DEEP_MAX_DEPTH = 10;
+static constexpr int LMP_DEEP_BASE      = 3;
+static constexpr int LMP_DEEP_SLOPE     = 3;
+
 static inline int lmrReduction(int depth, int moveIndex, bool improving, int history) {
     // Without the table the reduction is the old fixed ply, still nudged by
     // improving so the two toggles compose rather than one silencing the other.

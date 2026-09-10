@@ -169,6 +169,10 @@ const SearchOptionEntry SEARCH_OPTIONS[] = {
     {"ordertiebreak","ordertiebreak","OrderTieBreak",&SearchOptions::orderTieBreak},
     {"detsort",      "detsort",  "DetSort",      &SearchOptions::deterministicSort},
     {"bbcore",       "bbcore",   "BitboardCore", &SearchOptions::bitboardCore},
+    {"interiorpvs",  "interiorpvs","InteriorPvs", &SearchOptions::interiorPvs},
+    {"lmpdeep",      "lmpdeep",  "LmpDeep",      &SearchOptions::lmpDeep},
+    {"nullverify",   "nullverify","NullVerify",   &SearchOptions::nullVerify},
+    {"nulldepthr",   "nulldepthr","NullDepthR",   &SearchOptions::nullDepthR},
 };
 const size_t SEARCH_OPTION_COUNT = sizeof(SEARCH_OPTIONS) / sizeof(SEARCH_OPTIONS[0]);
 
@@ -729,13 +733,28 @@ static int minimaxWithTT(SearchContext& ctx,
     // (passing while in check is meaningless); and the side to move still has a
     // piece, since the "passing cannot help" assumption fails in zugzwang.
     if (g_searchOptions.nullMove && depth >= 3 && !inCheck && hasNonPawnMaterial(board, side)) {
-        const int R = 2;
+        int R = 2;
+        if (g_searchOptions.nullDepthR) {
+            R = NULL_R_BASE + depth / NULL_R_DIV;
+            // Leave at least one real ply below the null move, or the reduced
+            // search is a static evaluation wearing a search's name.
+            if (R > depth - 2) R = depth - 2;
+            if (R < 1) R = 1;
+        }
         NullUndo nu = board.makeNullMove();
         // No previous move below a null move: there is no reply to key on.
         int nullScore = -minimaxWithTT(ctx, board, depth - 1 - R, ply + 1, -beta, -beta + 1,
                                        shouldStop, tt, pathHashes, nullptr);
         board.unmakeNullMove(nu);
-        if (!searchAborted(ctx, shouldStop) && nullScore >= beta) return beta;
+        if (!searchAborted(ctx, shouldStop) && nullScore >= beta) {
+            // Verification: search the position for real at reduced depth, with
+            // the same null window. Passing is only evidence that the position
+            // is winning if actually moving is too, and in zugzwang it is not.
+            if (!g_searchOptions.nullVerify) return beta;
+            const int verified = minimaxWithTT(ctx, board, depth - R, ply, beta - 1, beta,
+                                               shouldStop, tt, pathHashes, prevMove);
+            if (searchAborted(ctx, shouldStop) || verified >= beta) return beta;
+        }
     }
 
     MoveList moves = generateLegalMoves(board, side);
@@ -915,13 +934,16 @@ static int minimaxWithTT(SearchContext& ctx,
             // which wins over the original 3. Ordered this way so a gate can
             // turn on the rung it is testing and leave the shipped setting
             // alone on both sides.
-            depth <= (g_searchOptions.lmpDepth1  ? 1
+            depth <= (g_searchOptions.lmpDeep    ? LMP_DEEP_MAX_DEPTH
+                    : g_searchOptions.lmpDepth1  ? 1
                     : g_searchOptions.lmpShallow ? LMP_MAX_DEPTH_SHALLOW
                                                  : LMP_MAX_DEPTH) &&
             move.flag == NORMAL &&
             bestEval > -MATE_SCORE + 1000 &&
             hasNonPawnMaterial(board, side) &&
-            moveIndex > 3 + depth * depth) {
+            moveIndex > (g_searchOptions.lmpDeep
+                             ? LMP_DEEP_BASE + LMP_DEEP_SLOPE * depth
+                             : 3 + depth * depth)) {
             continue;
         }
 
@@ -955,6 +977,21 @@ static int minimaxWithTT(SearchContext& ctx,
                                   shouldStop, tt, pathHashes, &move);
             if (!searchAborted(ctx, shouldStop) && eval > alpha) {
                 eval = -minimaxWithTT(ctx, board, depth - 1, ply + 1, -beta, -alpha,
+                                      shouldStop, tt, pathHashes, &move);
+            }
+        } else if (g_searchOptions.interiorPvs && moveIndex > 1) {
+            // Principal variation search. Once one move has raised alpha, the
+            // rest only have to be shown *not* to beat it, and a null window
+            // proves that far sooner than a full one. Only a move that does
+            // beat alpha is re-searched properly.
+            //
+            // moveIndex is 1 for the first move, which is the TT move or the
+            // best the ordering could offer, and it keeps the full window
+            // because it is the one the node has real evidence for.
+            eval = -minimaxWithTT(ctx, board, depth - 1 + ext, ply + 1, -alpha - 1, -alpha,
+                                  shouldStop, tt, pathHashes, &move);
+            if (!searchAborted(ctx, shouldStop) && eval > alpha && eval < beta) {
+                eval = -minimaxWithTT(ctx, board, depth - 1 + ext, ply + 1, -beta, -alpha,
                                       shouldStop, tt, pathHashes, &move);
             }
         } else {
