@@ -104,6 +104,13 @@ tests/see_test: tests/see_test.o $(ENGINE_OBJ)
 tests/bitboard_test: tests/bitboard_test.o $(ENGINE_OBJ)
 	$(CXX) $^ -o $@ $(LDFLAGS)
 
+# bbequiv holds the layer-by-layer equivalence checks for the bitboard
+# replacement (docs/BITBOARD-REPLACEMENT.md). It is not a unit test of the
+# bitboard module -- bitboard_test is that -- it is the thing that decides
+# whether the replacement is allowed to be connected.
+tests/bbequiv: tests/bbequiv.o $(ENGINE_OBJ)
+	$(CXX) $^ -o $@ $(LDFLAGS)
+
 # guiinput drives the board input state machine headlessly: click-to-move,
 # drag-and-drop, and the promotion dialog's hitboxes. The dialog's hitboxes and
 # its drawing were computed separately once, and drifted apart the moment the
@@ -202,6 +209,11 @@ test-see: tests/see_test
 test-bitboard: tests/bitboard_test
 	./tests/bitboard_test
 
+# Layer-by-layer equivalence of the bitboard replacement against the mailbox
+# engine. Gates the switch-over.
+test-bbequiv: tests/bbequiv
+	./tests/bbequiv
+
 # Check the board input: selecting, click-to-move, dragging, promotion clicks.
 test-guiinput: tests/guiinput
 	./tests/guiinput
@@ -239,6 +251,19 @@ tools/evaldump: tools/evaldump.o $(ENGINE_OBJ)
 	$(CXX) $^ -o $@ $(LDFLAGS)
 
 evaldump: tools/evaldump
+
+# Mailbox against bitboard, generation and evaluation side by side. The other
+# half of the switch-over decision; tests/bbequiv is the correctness half.
+tools/bbspeed: tools/bbspeed.o $(ENGINE_OBJ)
+	$(CXX) $^ -o $@ $(LDFLAGS)
+
+# Paired per-position node-count comparison of one toggle, for effects the
+# twelve-position bench cannot resolve.
+tools/treecost: tools/treecost.o $(ENGINE_OBJ)
+	$(CXX) $^ -o $@ $(LDFLAGS)
+
+bbspeed: tools/bbspeed
+	./tools/bbspeed
 
 # Texel tuning (tools/tune.cpp). It needs a *different* evaluation.o -- one
 # built with -DEVAL_TUNING so the EvalWeights constants become mutable globals
@@ -320,4 +345,4 @@ remake:
 	$(MAKE) all
 
 # Mark these targets as not actual files
-.PHONY: all clean remake lichess profile review tests test-perft test-match test-gamestate test-evalref evalref-regen test-evalerror evalerror-baseline evalerror-corpus bench test-bench bench-regen test-timecontrol test-see test-bitboard test-guiinput test-pgn test-uci
+.PHONY: all clean remake lichess profile review tests test-perft test-match test-gamestate test-evalref evalref-regen test-evalerror evalerror-baseline evalerror-corpus bench test-bench bench-regen test-timecontrol test-see test-bitboard test-bbequiv test-guiinput test-pgn test-uci
