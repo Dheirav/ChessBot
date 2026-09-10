@@ -64,6 +64,14 @@ public:
     
     // Reduce history scores periodically to prevent overflow
     void ageHistory();
+
+    // The butterfly history score for a quiet move, 0..HISTORY_MAX.
+    //
+    // Public because the *search* now reads it, not just the ordering. A move
+    // this table has never rewarded is one whose subtree is worth less, which
+    // is a reduction decision rather than an ordering one -- and reductions are
+    // what move the branching factor. See SearchOptions::histReduction.
+    int quietHistory(const Move& move) const { return getHistoryScore(move); }
     
 private:
     // Killer moves: moves that caused beta cutoffs at each depth

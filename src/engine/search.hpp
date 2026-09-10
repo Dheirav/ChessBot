@@ -485,6 +485,70 @@ struct SearchOptions {
     // as inconclusive by construction rather than as a result.
     bool lmrTable = true;
 
+    // Scale the late move reduction by how well this quiet move has done before.
+    //
+    // The history table is already built and already maintained; until now it
+    // was read only to *order* moves. Reading it to decide *how far to reduce*
+    // one is a different consumer of the same data, and it is the consumer that
+    // moves the branching factor.
+    //
+    // That distinction is the reason to try this after `conthist` and
+    // `capthist` both gated null. Those measured history as an ordering device
+    // and found nothing; strong engines get most of their value from it as a
+    // reduction input. `docs/RESEARCH-SPEED-AND-SEARCH.md` has the measurement
+    // that motivates it: our branching factor is 2.0 against Stockfish's ~1.4
+    // on the same position, which is 400x the nodes at depth 12, while our nps
+    // is 80% of theirs. The tree is the whole problem.
+    //
+    // One-sided by construction: our history holds only positive bonuses, so a
+    // well-rewarded move is reduced less and a never-rewarded one is simply not
+    // reduced further. Nothing is punished for lack of evidence.
+    // **Not gated: it cannot work as built, and the reason is structural.**
+    //
+    // `updateHistory` is called from one site, the beta cutoff, and only ever
+    // *adds*. The table records "this move has caused cutoffs" and never "this
+    // move was searched and did nothing", so every entry is zero or positive.
+    // A reduction reading it can therefore only ever reduce a good move *less*;
+    // it can never reduce a bad move *more*, which is where the node savings
+    // are. Measured across four divisors at depth 11: +7.0%, +1.6%, +17.8%,
+    // +26.6% -- every setting grows the tree, and more sensitivity grows it
+    // faster. There is no constant that fixes this.
+    //
+    // The missing piece is a **history malus**: decreasing the score of quiet
+    // moves that were searched before the move that actually cut. That gives
+    // the table real range and makes the reduction two-sided. It also changes
+    // move ordering, so it needs its own gate before anything is built on it.
+    // `docs/RESEARCH-SPEED-AND-SEARCH.md`.
+    bool histReduction = false;
+
+    // Is the side to move better off than it was on its own previous turn?
+    //
+    // Compare this node's static score against the one two plies back, which is
+    // the same side's last turn. Both are side-to-move relative, so they are
+    // directly comparable. A side whose position is deteriorating is one whose
+    // late quiet moves are mostly not working, so those moves are worth less
+    // search: this reduces them one ply further.
+    //
+    // Used in the LMR reduction and **nowhere else**, deliberately. The standard
+    // heuristic also feeds late move pruning and reverse futility, and each of
+    // those is a separate question with its own answer. corrhist v2 bundled two
+    // changes and cost an extra gate to attribute which one did the damage; this
+    // is one mechanism so its gate means one thing.
+    // **Gated 2026-09-10: -10.6 [-31.9, +10.7] over 560 games at `-N 1000000`.
+    // Null with a negative point estimate. Stays off.** Pentanomial
+    // `25-62-123-45-25`, properly spread, so it measured something real.
+    //
+    // Not extended to a second run, unlike the LMR table: that had a strongly
+    // positive estimate *and* an unambiguous mechanism (-56% tree at depth 11).
+    // This has neither. Chasing a negative estimate with more games is how the
+    // history family spent five gates and 10 080 games.
+    //
+    // Narrow verdict, deliberately: only the LMR use was tested. The heuristic's
+    // other two standard consumers, late move pruning and reverse futility,
+    // remain untried, and this is plausibly the weakest of the three places to
+    // put it. `GATES.md`.
+    bool improving = false;
+
     // --- Decorrelation (`BUGS.md` 6), added 2026-09-04 ---
     //
     // A few centipawns of seeded noise on the static score, so that two games
@@ -658,6 +722,16 @@ struct SearchContext {
     // Sized 2 x 16384 ints = 128KB per thread. The toggle is off; the family is
     // closed.
     int corrHist[2][16384] = {};
+
+    // Static evaluation at each ply of the current path, for the `improving`
+    // heuristic. -1 means "not recorded here", which happens in check, where a
+    // static score is meaningless.
+    //
+    // Per thread rather than global for the obvious reason: each thread walks
+    // its own path and ply 7 means a different position in each of them.
+    static constexpr int EVAL_STACK_PLIES = 256;
+    static constexpr int NO_EVAL = -32001;
+    int evalStack[EVAL_STACK_PLIES];
 
     // A second stop flag, for helper threads. The main thread sets it when it
     // has its answer, so helpers stop populating a table nobody will read.

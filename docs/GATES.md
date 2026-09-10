@@ -97,6 +97,70 @@ Re-pool any of these with `./tests/pool-shards.sh <dir>/`.
 | `shard-20260909-194121/` | `lmrtable` at `-N 1000000`, run 1 | +21.1 [−1.5, +43.9] |
 | `shard-20260909-233453/` | the same, run 2, base 20260909 | +31.7 [+9.0, +54.7] |
 | `shard-pooled-lmrtable/` | **both pooled, 1 120 games** | **+26.4 [+10.4, +42.6]** — **accepted, ON** |
+| `shard-20260910-104041/` | **`improving`** — one extra ply of LMR when the side to move is worse off than two plies ago | **−10.6 [−31.9, +10.7]** — null, stays off |
+
+### `improving` null, and history reductions that cannot work — 2026-09-10
+
+**`improving`: −10.6 [−31.9, +10.7]** over 560 games at `-N 1000000`,
+pentanomial `25-62-123-45-25`. Off.
+
+Not extended to a second run, and the contrast with the LMR table is the reason.
+That had a strongly positive estimate *and* an unambiguous mechanism, a 56% tree
+cut at depth 11. This has a negative estimate and a mechanism the tree could not
+demonstrate. Doubling the sample to chase a negative estimate is how the history
+family spent five gates and 10 080 games.
+
+**Narrow verdict.** Only the LMR use was tested. The heuristic's other standard
+consumers, late move pruning and reverse futility, are untried, and feeding only
+the reduction is plausibly the weakest of the three.
+
+### The bench aggregate cannot resolve a 5% effect
+
+Worth recording separately, because it nearly produced the wrong decision. The
+two-depth rule from the LMR entry said `improving` grew the tree at depth 11
+(+1.7%) and should not be gated. Per position:
+
+    startpos   -22.8%    midgame-2  +28.2%
+    pawn-endg  -29.4%    open-sicil +32.9%
+    midgame-1  -11.3%    promo-race  +4.3%
+    kiwipete    -5.4%
+    rook-endg   -9.8%    ... 8 of 12 smaller
+
+**Eight of twelve got smaller.** The aggregate read +1.7% because `midgame-2`
+alone added 754 000 nodes against a total change of 244 000. Remove that one
+position and the aggregate is −4.5%.
+
+So the two-depth rule needs a sharper reading than the LMR entry gave it. It
+catches a feature that does **nothing** at gate depth, like the LMR table's
+−2.9% at depth 5. It does **not** license reading a small or wrong-signed
+aggregate as evidence against a feature, because at 5% the aggregate is whichever
+position happened to change its move.
+
+### History-based reductions cannot work here, and it is not a tuning problem
+
+Built, measured, **not gated**, because the tree check showed it could not help
+at any setting.
+
+`updateHistory` is called from exactly one site, the beta cutoff, and only ever
+*adds*. The table records "this move has caused cutoffs" and never "this move was
+searched and did nothing", so every entry is zero or positive. A reduction
+reading it can only reduce a good move *less* and never a bad move *more*, which
+is where the savings are. Across four divisors at depth 11:
+
+| divisor | tree |
+|---|---|
+| 16 384 | +7.0% |
+| 4 096 | +1.6% |
+| 1 024 | +17.8% |
+| 256 | +26.6% |
+
+Every setting grows the tree and more sensitivity grows it faster. **A one-sided
+history reduction can only add work.**
+
+The missing piece is a **history malus**, decreasing the score of quiet moves
+searched before the one that actually cut. That gives the table range and makes
+the reduction two-sided. It also changes move ordering, so it needs its own gate
+rather than being bundled underneath a reduction change.
 
 ### The LMR reduction table, +26.4, and a gate that measured nothing — 2026-09-10
 

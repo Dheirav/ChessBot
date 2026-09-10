@@ -80,11 +80,27 @@ LMR_TABLE = [] {
 // The reduction this node should apply. Clamped so the reduced search keeps at
 // least one ply: dropping to depth 0 hands the move straight to quiescence,
 // which is a different and much more aggressive decision than reducing it.
-static inline int lmrReduction(int depth, int moveIndex) {
-    if (!g_searchOptions.lmrTable) return 1;
+// How much of the reduction a fully-rewarded quiet move gets back. Two plies,
+// chosen to be the same order as the table's own spread rather than tuned: at
+// depth 12 move 30 the table gives 4, so this can return a good move to 2.
+static constexpr int HIST_RED_MAX = 2;
+
+static inline int lmrReduction(int depth, int moveIndex, bool improving, int history) {
+    // Without the table the reduction is the old fixed ply, still nudged by
+    // improving so the two toggles compose rather than one silencing the other.
+    if (!g_searchOptions.lmrTable) return improving ? 1 : 2;
     const int d = depth     < LMR_MAX_DEPTH_IDX ? depth     : LMR_MAX_DEPTH_IDX - 1;
     const int m = moveIndex < LMR_MAX_MOVE_IDX  ? moveIndex : LMR_MAX_MOVE_IDX  - 1;
     int r = LMR_TABLE[d][m];
+    // One ply more when the side to move is drifting. Its late quiet moves are
+    // demonstrably not turning the position around, so they are worth less.
+    if (!improving) ++r;
+    // A move this history table has rewarded is one the search has found useful
+    // before, so take some of the reduction back. Scaled against HISTORY_MAX so
+    // the adjustment tracks the table's own range as it ages.
+    if (g_searchOptions.histReduction && history > 0) {
+        r -= (history * HIST_RED_MAX) / MoveOrderer::HISTORY_MAX;
+    }
     if (r < 1) r = 1;
     if (r > depth - 2) r = depth - 2;   // leave >= 1 ply of real search
     return r < 1 ? 1 : r;
@@ -305,6 +321,8 @@ const SearchOptionEntry SEARCH_OPTIONS[] = {
     {"corrhistq",   "corrhistq","CorrHistQ",   &SearchOptions::corrHistQ},
     {"evalnoise",   "evalnoise","EvalNoise",   &SearchOptions::evalNoise},
     {"lmrtable",    "lmrtable", "LmrTable",    &SearchOptions::lmrTable},
+    {"improving",   "improving","Improving",   &SearchOptions::improving},
+    {"histreduction","histred", "HistReduction",&SearchOptions::histReduction},
 };
 const size_t SEARCH_OPTION_COUNT = sizeof(SEARCH_OPTIONS) / sizeof(SEARCH_OPTIONS[0]);
 
@@ -794,12 +812,28 @@ static int minimaxWithTT(SearchContext& ctx,
     int  staticEval = 0;
     bool haveStatic = false;
     const bool wantStatic =
-        !inCheck && (g_searchOptions.corrHist
+        !inCheck && (g_searchOptions.improving
+                     || g_searchOptions.corrHist
                      || (!isPV && !nearMate
                          && (g_searchOptions.revFutility || g_searchOptions.razoring)));
     if (wantStatic) {
         staticEval = correctedEval(ctx, board);
         haveStatic = true;
+    }
+
+    // Record this ply's static score, and decide whether the side to move is
+    // better off than on its own previous turn. Default true when there is
+    // nothing to compare against -- at the first two plies, or when either node
+    // was in check -- because "assume improving" is the conservative choice: it
+    // reduces less rather than more.
+    bool improving = true;
+    if (g_searchOptions.improving) {
+        if (ply >= 0 && ply < SearchContext::EVAL_STACK_PLIES)
+            ctx.evalStack[ply] = haveStatic ? staticEval : SearchContext::NO_EVAL;
+        if (haveStatic && ply >= 2 && ply < SearchContext::EVAL_STACK_PLIES
+            && ctx.evalStack[ply - 2] != SearchContext::NO_EVAL) {
+            improving = staticEval > ctx.evalStack[ply - 2];
+        }
     }
 
     if (!isPV && !inCheck && !nearMate
@@ -1020,7 +1054,9 @@ static int minimaxWithTT(SearchContext& ctx,
 
         int eval;
         if (reduce) {
-            const int R = lmrReduction(depth, moveIndex);
+            const int R = lmrReduction(depth, moveIndex, improving,
+                                       g_searchOptions.histReduction
+                                           ? ctx.orderer.quietHistory(move) : 0);
             eval = -minimaxWithTT(ctx, board, depth - 1 - R, ply + 1, -alpha - 1, -alpha,
                                   shouldStop, tt, pathHashes, &move);
             if (!searchAborted(ctx, shouldStop) && eval > alpha) {
