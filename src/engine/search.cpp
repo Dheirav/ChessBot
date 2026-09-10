@@ -324,6 +324,7 @@ const SearchOptionEntry SEARCH_OPTIONS[] = {
     {"improving",   "improving","Improving",   &SearchOptions::improving},
     {"histreduction","histred", "HistReduction",&SearchOptions::histReduction},
     {"movefutility","movefut",  "MoveFutility", &SearchOptions::moveFutility},
+    {"stagedgen",   "stagedgen","StagedGen",    &SearchOptions::stagedGen},
 };
 const size_t SEARCH_OPTION_COUNT = sizeof(SEARCH_OPTIONS) / sizeof(SEARCH_OPTIONS[0]);
 
@@ -480,6 +481,11 @@ static bool hasNonPawnMaterial(const Board& board, PieceColor side) {
 // search. Takes a mutable board so the legality filter runs in place rather
 // than on a copy — this runs at every quiescence node.
 static MoveList generateCaptures(Board& board, PieceColor side) {
+    if (g_searchOptions.stagedGen) {
+        MoveList tactical;
+        generateLegalCaptures(board, side, tactical);
+        return tactical;
+    }
     MoveList all = generateLegalMoves(board, side);
     MoveList tactical;
     tactical.reserve(all.size());

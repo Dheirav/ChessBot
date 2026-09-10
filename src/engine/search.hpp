@@ -485,6 +485,28 @@ struct SearchOptions {
     // as inconclusive by construction rather than as a result.
     bool lmrTable = true;
 
+    // Generate only tactical moves in quiescence, instead of generating every
+    // legal move and discarding the quiet ones.
+    //
+    // Pure speed, and the first change in a while that is not capped by the
+    // evaluation. `docs/RESEARCH-SPEED-AND-SEARCH.md` measured our depth-1 tree
+    // at 791 nodes against Stockfish's 185, and depth 1 is almost entirely
+    // quiescence, so the base of every search is about 4.3x too large.
+    //
+    // **The output is identical by construction**, so node counts must not move
+    // at all. That is the invariant to check: if bench changes by a single node,
+    // the filter is wrong, not faster. Only wall time should differ, which means
+    // this cannot be gated for *strength* at all.
+    //
+    // **ON without a gate, deliberately, and this is the one case where that is
+    // right.** The output is identical, so there is no strength question to
+    // measure: node counts match at depths 6, 8 and 11, meaning the search sees
+    // the same moves in the same order. The only effect is wall time, measured
+    // at about -4.7% over five interleaved runs at depth 8, faster in all five.
+    // A gate could not resolve it either: 5% is roughly 0.07 plies, three to
+    // five Elo, well inside a 560-game gate's plus or minus 25.
+    bool stagedGen = true;
+
     // Move-level futility: skip a quiet move whose position is so far below alpha
     // that this move plausibly cannot rescue it.
     //

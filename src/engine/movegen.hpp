@@ -27,6 +27,11 @@ int countPseudoLegalMoves(const Board& board, PieceColor sideToMove,
 // board copy is paid per node. On return the position is exactly as it came in.
 void generateLegalMoves(Board& board, PieceColor sideToMove, bool includeCastling,
                         MoveList& out);
+// Legal tactical moves only (captures, en passant, promotions), for quiescence.
+// Skips generating *and* legality-filtering the quiet moves; the result is
+// identical to filtering the full legal list.
+void generateLegalCaptures(Board& board, PieceColor sideToMove, MoveList& out);
+
 MoveList generateLegalMoves(Board& board, PieceColor sideToMove,
                             bool includeCastling = true);
 

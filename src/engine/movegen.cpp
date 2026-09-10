@@ -91,6 +91,30 @@ static bool isSquareAttacked(const Board& board, int sq, PieceColor byColor) {
 // would drift from this one, and mobility would quietly start disagreeing with
 // the moves actually available. This project has already been bitten once by
 // two lists of the same knowledge falling out of step.
+// Keeps only the tactical moves, discarding quiets as they are emitted.
+//
+// Same trick as MoveCounter above and for the same reason: the generator body is
+// shared verbatim rather than copied, so a captures-only generator cannot drift
+// from the full one.
+//
+// What it saves is the legality filter, not the generation. Quiescence used to
+// generate ~35 pseudo-legal moves, run filterLegal over all of them, and then
+// throw away the ~30 quiet ones. Now filterLegal only ever sees the tactical
+// handful. The emitted set and its order are unchanged, because both this and
+// filterLegal preserve candidate order, so the search must see identical moves.
+struct TacticalFilter {
+    MoveList& out;
+    explicit TacticalFilter(MoveList& o) : out(o) {}
+    void clear() { out.clear(); }
+    void reserve(size_t n) { out.reserve(n); }
+    template <typename... Args> void emplace_back(Args&&... args) {
+        Move m(std::forward<Args>(args)...);
+        if (m.flag == CAPTURE || m.flag == EN_PASSANT || m.flag == PROMOTION)
+            out.push_back(m);
+    }
+    size_t size() const { return out.size(); }
+};
+
 struct MoveCounter {
     int n = 0;
     void clear() { n = 0; }
@@ -406,6 +430,17 @@ void generateLegalMoves(Board& board, PieceColor sideToMove, bool includeCastlin
                         MoveList& out) {
     generatePseudoLegalMoves(board, sideToMove, includeCastling, pseudoScratch);
     filterLegal(board, sideToMove, pseudoScratch, out);
+}
+
+static thread_local MoveList tacticalScratch;
+
+// Legal captures, en passant and promotions only, without generating or
+// legality-filtering the quiet moves. Identical output to filtering the full
+// legal list, which is the invariant its gate checks: node counts must not move.
+void generateLegalCaptures(Board& board, PieceColor sideToMove, MoveList& out) {
+    TacticalFilter filter(tacticalScratch);
+    generatePseudoLegalImpl(board, sideToMove, /*includeCastling=*/false, filter);
+    filterLegal(board, sideToMove, tacticalScratch, out);
 }
 
 MoveList generateLegalMoves(Board& board, PieceColor sideToMove, bool includeCastling) {
