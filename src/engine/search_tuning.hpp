@@ -203,4 +203,12 @@ extern bool g_hasDeadline;
 extern std::atomic<bool> g_outOfTime;
 extern std::chrono::steady_clock::time_point g_deadline;
 extern uint64_t g_nodeLimit;
+extern std::chrono::steady_clock::time_point g_softDeadline;
+
+// Whether the budget has enough left to start another iteration. Defined in
+// search.cpp and shared, because it decides nothing about the position and two
+// copies of a deadline rule is how one of them overruns.
+bool budgetSpent(int currentDepth, int maxDepth, uint64_t nodesUsed,
+                 uint64_t depthStartNodes,
+                 std::chrono::steady_clock::time_point depthStart, bool verbose);
 static constexpr uint64_t TIME_CHECK_INTERVAL = 2048;

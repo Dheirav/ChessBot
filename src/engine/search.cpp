@@ -241,7 +241,7 @@ std::chrono::steady_clock::time_point g_deadline;
 //
 // g_softDeadline == g_deadline reproduces the old behaviour exactly, which is
 // what SearchLimits leaves it at unless a caller asks otherwise.
-static std::chrono::steady_clock::time_point g_softDeadline;
+std::chrono::steady_clock::time_point g_softDeadline;
 // Node budget, in the same place and for the same reason. 0 = unlimited, which
 // is the only state tests/bench and tests/perft ever see.
 uint64_t g_nodeLimit = 0;
@@ -1037,6 +1037,74 @@ static int minimaxWithTT(SearchContext& ctx,
 //
 // `board` is taken **by value**: generateLegalMoves mutates the board it is
 // given and restores it, which is fine per thread and catastrophic shared.
+// Whether to start another iteration, given what the budget has left.
+//
+// Extracted from searchWorker because it decides nothing about the position:
+// it reads a node count and a clock, and the bitboard core has to make the
+// same call from its own root. Two copies of this is how one of them ends up
+// overrunning a deadline, which on a real game is a forfeit (BUGS.md 11).
+bool budgetSpent(int currentDepth, int maxDepth, uint64_t nodesUsed,
+                 uint64_t depthStartNodes,
+                 std::chrono::steady_clock::time_point depthStart,
+                 bool verbose) {
+    // How much bigger the next iteration is expected to be than the last.
+    const double BRANCHING = 2.3;
+
+    if (g_nodeLimit && currentDepth < maxDepth) {
+        const uint64_t lastIteration = nodesUsed - depthStartNodes;
+        if (nodesUsed >= g_nodeLimit ||
+            (double)lastIteration * BRANCHING > (double)(g_nodeLimit - nodesUsed)) {
+            if (verbose) {
+                std::cout << "Stopping at depth " << currentDepth << ": next iteration needs ~"
+                          << (uint64_t)((double)lastIteration * BRANCHING) << " nodes, "
+                          << (g_nodeLimit - std::min(nodesUsed, g_nodeLimit)) << " left" << std::endl;
+            }
+            return true;
+        }
+    }
+
+    if (g_hasDeadline && currentDepth < maxDepth) {
+        auto now = std::chrono::steady_clock::now();
+        auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+            g_softDeadline - now).count();
+        auto lastIteration = std::chrono::duration_cast<std::chrono::milliseconds>(
+            now - depthStart).count();
+
+        // Two rules, and which one applies is the whole of BUGS.md 11's second
+        // half.
+        //
+        // The prediction rule refuses to begin an iteration unless the *entire*
+        // predicted iteration fits in what is left. It never wastes time on an
+        // iteration that cannot finish -- and it pays for that by abandoning, on
+        // average, most of a predicted iteration's worth of budget on every
+        // move. Measured: 75% of the allocation used, over five positions at a
+        // 90s+1s clock.
+        //
+        // The elapsed rule begins an iteration whenever the target has not yet
+        // passed, and relies on the hard deadline to end one that runs long. It
+        // spends the budget; the price is that an iteration which does not
+        // finish is discarded, because this search never uses a partial result.
+        //
+        // Which trade is better is not decidable from here -- unused time and
+        // wasted time are both losses and only a game says which costs more.
+        // That is what the `--tc` gate is for, and until it rules, the
+        // prediction rule is what ships.
+        const bool stop = g_searchOptions.softTime
+                              ? (remaining <= 0)
+                              : (remaining <= 0 ||
+                                 (double)lastIteration * BRANCHING > (double)remaining);
+        if (stop) {
+            if (verbose) {
+                std::cout << "Stopping at depth " << currentDepth << ": next iteration needs ~"
+                          << (long)((double)lastIteration * BRANCHING) << "ms, "
+                          << remaining << "ms left" << std::endl;
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
 static Move searchWorker(int threadIndex, Board board, const SearchLimits& limits,
                          const std::atomic<bool>& shouldStop,
                          TranspositionTable& tt,
@@ -1344,61 +1412,9 @@ static Move searchWorker(int threadIndex, Board board, const SearchLimits& limit
         // share of the budget is spent on results that are thrown away — and
         // that share is spent differently by the two sides of an A/B, which is
         // exactly the sort of difference a gate must not invent.
-        if (g_nodeLimit && currentDepth < maxDepth) {
-            const uint64_t used = ctx.nodes;
-            const uint64_t lastIteration = used - depthStartNodes;
-            const double BRANCHING = 2.3;
-            if (used >= g_nodeLimit ||
-                (double)lastIteration * BRANCHING > (double)(g_nodeLimit - used)) {
-                if (verbose) {
-                    std::cout << "Stopping at depth " << currentDepth << ": next iteration needs ~"
-                              << (uint64_t)((double)lastIteration * BRANCHING) << " nodes, "
-                              << (g_nodeLimit - std::min(used, g_nodeLimit)) << " left" << std::endl;
-                }
-                break;
-            }
-        }
-
-        if (g_hasDeadline && currentDepth < maxDepth) {
-            auto now = std::chrono::steady_clock::now();
-            auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
-                g_softDeadline - now).count();
-            auto lastIteration = std::chrono::duration_cast<std::chrono::milliseconds>(
-                now - depthStart).count();
-            const double BRANCHING = 2.3;
-
-            // Two rules, and which one applies is the whole of BUGS.md 11's
-            // second half.
-            //
-            // The prediction rule refuses to begin an iteration unless the
-            // *entire* predicted iteration fits in what is left. It never
-            // wastes time on an iteration that cannot finish — and it pays for
-            // that by abandoning, on average, most of a predicted iteration's
-            // worth of budget on every move. Measured: 75% of the allocation
-            // used, over five positions at a 90s+1s clock.
-            //
-            // The elapsed rule begins an iteration whenever the target has not
-            // yet passed, and relies on the hard deadline to end one that runs
-            // long. It spends the budget; the price is that an iteration which
-            // does not finish is discarded, because this search never uses a
-            // partial result.
-            //
-            // Which trade is better is not decidable from here — unused time
-            // and wasted time are both losses and only a game says which costs
-            // more. That is what the `--tc` gate is for, and until it rules,
-            // the prediction rule is what ships.
-            const bool stop = g_searchOptions.softTime
-                                  ? (remaining <= 0)
-                                  : (remaining <= 0 ||
-                                     (double)lastIteration * BRANCHING > (double)remaining);
-            if (stop) {
-                if (verbose) {
-                    std::cout << "Stopping at depth " << currentDepth << ": next iteration needs ~"
-                              << (long)((double)lastIteration * BRANCHING) << "ms, "
-                              << remaining << "ms left" << std::endl;
-                }
-                break;
-            }
+        if (budgetSpent(currentDepth, maxDepth, ctx.nodes, depthStartNodes,
+                        depthStart, verbose)) {
+            break;
         }
 
         // Optional: Check for mate scores and stop early if mate is found
