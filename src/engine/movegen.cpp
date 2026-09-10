@@ -1,4 +1,5 @@
 #include "movegen.hpp"
+#include "search.hpp"
 #include "move_lookup.hpp"
 #include "piece.hpp"
 #include "legal_move_validator.hpp"
@@ -124,7 +125,16 @@ struct MoveCounter {
 };
 
 template <typename Out>
-static void generatePseudoLegalImpl(const Board& board, PieceColor sideToMove, bool includeCastling, Out& moves) {
+// `tacticalOnly` suppresses quiet moves *at the source*.
+//
+// TacticalFilter already discards them, but it discards them after constructing
+// a Move: six fields, and the 2026-08-15 profile counted 116 million Move
+// constructions as material. Skipping the construction is the part worth having.
+// Slider rays are still walked to their blocker, because that is how the capture
+// at the end of the ray is found; only the emission is skipped.
+static void generatePseudoLegalImpl(const Board& board, PieceColor sideToMove,
+                                    bool includeCastling, Out& moves,
+                                    bool tacticalOnly = false) {
     moves.clear();
     int enPassantIdx = getEnPassantIdx(board);
 
@@ -187,7 +197,7 @@ static void generatePseudoLegalImpl(const Board& board, PieceColor sideToMove, b
                     }
                     // Quiet move
                     else if (!isDiagonal && board.squares[to].type() == NONE) {
-                        moves.emplace_back(sq, to, piece);
+                        if (!tacticalOnly) moves.emplace_back(sq, to, piece);
                     }
                 }
                 break;
@@ -195,7 +205,12 @@ static void generatePseudoLegalImpl(const Board& board, PieceColor sideToMove, b
             case KNIGHT: {
                 for (int to : knightMovesFrom[sq]) {
                     if (board.squares[to].type() == NONE || board.squares[to].color() != sideToMove)
-                        moves.emplace_back(sq, to, piece, board.squares[to], board.squares[to].type() != NONE ? CAPTURE : NORMAL);
+                        {
+                            const bool isCap = board.squares[to].type() != NONE;
+                            if (isCap || !tacticalOnly)
+                                moves.emplace_back(sq, to, piece, board.squares[to],
+                                                   isCap ? CAPTURE : NORMAL);
+                        }
                 }
                 break;
             }
@@ -209,7 +224,7 @@ static void generatePseudoLegalImpl(const Board& board, PieceColor sideToMove, b
                     while (nx >= 0 && nx < 8 && ny >= 0 && ny < 8) {
                         int to = ny * 8 + nx;
                         if (board.squares[to].type() == NONE) {
-                            moves.emplace_back(sq, to, piece);
+                            if (!tacticalOnly) moves.emplace_back(sq, to, piece);
                         } else {
                             if (board.squares[to].color() != sideToMove)
                                 moves.emplace_back(sq, to, piece, board.squares[to], CAPTURE);
@@ -231,7 +246,7 @@ static void generatePseudoLegalImpl(const Board& board, PieceColor sideToMove, b
                     while (nx >= 0 && nx < 8 && ny >= 0 && ny < 8) {
                         int to = ny * 8 + nx;
                         if (board.squares[to].type() == NONE) {
-                            moves.emplace_back(sq, to, piece);
+                            if (!tacticalOnly) moves.emplace_back(sq, to, piece);
                         } else {
                             if (board.squares[to].color() != sideToMove)
                                 moves.emplace_back(sq, to, piece, board.squares[to], CAPTURE);
@@ -253,7 +268,7 @@ static void generatePseudoLegalImpl(const Board& board, PieceColor sideToMove, b
                     while (nx >= 0 && nx < 8 && ny >= 0 && ny < 8) {
                         int to = ny * 8 + nx;
                         if (board.squares[to].type() == NONE) {
-                            moves.emplace_back(sq, to, piece);
+                            if (!tacticalOnly) moves.emplace_back(sq, to, piece);
                         } else {
                             if (board.squares[to].color() != sideToMove)
                                 moves.emplace_back(sq, to, piece, board.squares[to], CAPTURE);
@@ -273,7 +288,7 @@ static void generatePseudoLegalImpl(const Board& board, PieceColor sideToMove, b
                         if (board.squares[to].type() != NONE && board.squares[to].color() != sideToMove) {
                             moves.emplace_back(sq, to, piece, board.squares[to], CAPTURE);
                         } else {
-                            moves.emplace_back(sq, to, piece); // No capture
+                            if (!tacticalOnly) moves.emplace_back(sq, to, piece); // No capture
                         }
                     }
                 }
@@ -293,7 +308,7 @@ static void generatePseudoLegalImpl(const Board& board, PieceColor sideToMove, b
                                 if (!isSquareAttacked(board, Board::get1DIndex(4, rank), oppColor) &&
                                     !isSquareAttacked(board, Board::get1DIndex(5, rank), oppColor) &&
                                     !isSquareAttacked(board, Board::get1DIndex(6, rank), oppColor)) {
-                                    moves.emplace_back(sq, Board::get1DIndex(6, rank), piece, Piece(), CASTLING);
+                                    if (!tacticalOnly) moves.emplace_back(sq, Board::get1DIndex(6, rank), piece, Piece(), CASTLING);
                                 }
                             }
                         }
@@ -311,7 +326,7 @@ static void generatePseudoLegalImpl(const Board& board, PieceColor sideToMove, b
                                 if (!isSquareAttacked(board, Board::get1DIndex(4, rank), oppColor) &&
                                     !isSquareAttacked(board, Board::get1DIndex(3, rank), oppColor) &&
                                     !isSquareAttacked(board, Board::get1DIndex(2, rank), oppColor)) {
-                                    moves.emplace_back(sq, Board::get1DIndex(2, rank), piece, Piece(), CASTLING);
+                                    if (!tacticalOnly) moves.emplace_back(sq, Board::get1DIndex(2, rank), piece, Piece(), CASTLING);
                                 }
                             }
                         }
@@ -439,7 +454,8 @@ static thread_local MoveList tacticalScratch;
 // legal list, which is the invariant its gate checks: node counts must not move.
 void generateLegalCaptures(Board& board, PieceColor sideToMove, MoveList& out) {
     TacticalFilter filter(tacticalScratch);
-    generatePseudoLegalImpl(board, sideToMove, /*includeCastling=*/false, filter);
+    generatePseudoLegalImpl(board, sideToMove, /*includeCastling=*/false, filter,
+                            /*tacticalOnly=*/g_searchOptions.maskedGen);
     filterLegal(board, sideToMove, tacticalScratch, out);
 }
 
