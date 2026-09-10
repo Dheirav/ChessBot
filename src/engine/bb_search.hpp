@@ -39,6 +39,15 @@ struct BBSearchResult {
     uint64_t nodes = 0;
 };
 
+// One search thread on the bitboard core. Same signature shape as search.cpp's
+// searchWorker, so findBestMoveIterativeDeepening's thread pool and node
+// accounting serve either core without knowing which it spawned.
+BitboardMove bbSearchWorker(int threadIndex, Position pos, const SearchLimits& limits,
+                            const std::atomic<bool>& shouldStop,
+                            TranspositionTable& tt,
+                            const std::atomic<bool>* extraStop,
+                            uint64_t* nodesOut);
+
 BBSearchResult bbSearchRoot(Position& pos, int depth, TranspositionTable& tt,
                             const std::atomic<bool>& shouldStop,
                             std::vector<uint64_t>& pathHashes);

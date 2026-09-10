@@ -595,6 +595,18 @@ struct SearchOptions {
     // which move is chosen in three of the twelve bench positions.
     bool deterministicSort = false;
 
+    // Run the search on the bitboard core instead of the mailbox one.
+    //
+    // The two are proven to search identical trees -- same nodes, same move, on
+    // every bench position -- but only with orderTieBreak on, because their
+    // generators emit in different orders and ties are settled by std::sort.
+    // Shipped with that off they differ among equally scored moves, so this is
+    // an Elo event and gets gated like any other, at 1.62x the speed on
+    // identical work (tools/bbspeed).
+    //
+    // Off until that gate rules. docs/BITBOARD-REPLACEMENT.md B7.
+    bool bitboardCore = false;
+
 
     // Penalise quiet moves that were searched and did not cause the cutoff.
     //

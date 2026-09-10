@@ -6,6 +6,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <chrono>
+#include <iostream>
+#include <memory>
 
 // The bitboard search.
 //
@@ -934,6 +937,198 @@ static int minimaxWithTT(BBSearchContext& ctx,
 // The threading stagger, the time management, the soft-time cutoff and the
 // root tiebreak all sit above this and are representation-independent; they
 // stay in search.cpp and get pointed at this core at B7.
+// One search thread on the bitboard core.
+//
+// Deliberately the same shape as search.cpp's searchWorker, because the thread
+// pool, the time setup and the node accounting above it are representation-
+// independent and are shared rather than duplicated: findBestMoveIterativeDeepening
+// spawns whichever of the two this session is configured for, and everything
+// outside the worker is the same code either way.
+//
+// What is not here, and why: the root random tiebreak (off by default, and it
+// exists to vary openings rather than to play better) and the aspiration
+// volatility tracker behind aspAdaptive (also off). Both are recorded in
+// docs/BITBOARD-REPLACEMENT.md as unported rather than dropped.
+BitboardMove bbSearchWorker(int threadIndex, Position pos, const SearchLimits& limits,
+                            const std::atomic<bool>& shouldStop,
+                            TranspositionTable& tt,
+                            const std::atomic<bool>* extraStop,
+                            uint64_t* nodesOut) {
+    const bool isMain = (threadIndex == 0);
+    const bool verbose = isMain && !g_searchOptions.quiet;
+    const int maxDepth = limits.maxDepth;
+
+    // Heap-allocated for the same reason the mailbox one is: the orderer
+    // carries a 2.4MB continuation-history table and a thread stack is not the
+    // place for it.
+    auto ctxHolder = std::make_unique<BBSearchContext>();
+    BBSearchContext& ctx = *ctxHolder;
+    ctx.extraStop = extraStop;
+    ctx.orderer.clear();
+    ctx.nextTimeCheck = TIME_CHECK_INTERVAL;
+
+    // Written on every exit, including the early returns below, so the caller
+    // can sum what each thread actually searched.
+    struct PublishNodes {
+        const BBSearchContext& c; uint64_t* out;
+        ~PublishNodes() { if (out) *out = c.nodes; }
+    } publishNodes{ctx, nodesOut};
+
+    BBMoveList moves;
+    bbGenerate(pos, moves);
+    if (moves.empty()) return BitboardMove{};
+    if (searchAborted(ctx, shouldStop)) return moves[0];
+
+    BitboardMove bestMove = moves[0];
+    const bool whiteToMove = (pos.sideToMove == BB_WHITE);
+    int bestScore = -INF;
+    bool haveScore = false;
+
+    const auto searchStart = std::chrono::steady_clock::now();
+    std::vector<uint64_t> pathHashes;
+
+    // Helpers start one ply deeper on odd thread indices. Without some such
+    // stagger every thread walks the same iterations in the same order and
+    // mostly re-derives what the others already stored. Thread 0 is never
+    // offset, so the single-threaded search is unaffected.
+    for (int currentDepth = 1 + (threadIndex % 2); currentDepth <= maxDepth; ++currentDepth) {
+        if (searchAborted(ctx, shouldStop)) break;
+
+        const auto depthStart = std::chrono::steady_clock::now();
+        const uint64_t depthStartNodes = ctx.nodes;
+
+        const uint64_t hash = pos.hash;
+        BitboardMove ttMove{};
+        uint16_t ttPacked = 0;
+        int ttScore;
+        if (tt.probe(hash, currentDepth, 0, -INF, INF, ttScore, ttPacked)) {
+            ttMove = unpackBB(ttPacked);
+            auto it = std::find_if(moves.begin(), moves.end(),
+                                   [&](const BitboardMove& m) { return sameMove(m, ttMove); });
+            if (it != moves.end()) std::swap(*moves.begin(), *it);
+        }
+        ctx.orderer.orderMoves(moves, pos, currentDepth, ttMove);
+
+        int currentBestScore = -INF;
+        BitboardMove currentBestMove = moves[0];
+        bool completedDepth = true;
+
+        const int INF_LO = -INF;
+        const int INF_HI = INF;
+        const bool useAspiration = g_searchOptions.aspiration && currentDepth >= 3 &&
+                                   haveScore && std::abs(bestScore) < 29000;
+        int delta = ASP_BASE_DELTA;
+        int windowLo = useAspiration ? bestScore - delta : INF_LO;
+        int windowHi = useAspiration ? bestScore + delta : INF_HI;
+
+        while (true) {
+            currentBestScore = INF_LO;
+            currentBestMove = moves[0];
+            completedDepth = true;
+            pathHashes.clear();
+            pathHashes.push_back(hash);
+
+            int alpha = windowLo;
+            int beta = windowHi;
+
+            for (int i = 0; i < moves.size(); ++i) {
+                const BitboardMove& move = moves[i];
+                if (searchAborted(ctx, shouldStop)) { completedDepth = false; break; }
+
+                const PositionUndo undo = pos.makeMove(move);
+                int eval;
+                if (i == 0) {
+                    eval = -minimaxWithTT(ctx, pos, currentDepth - 1, 1, -beta, -alpha,
+                                          shouldStop, tt, pathHashes, &move);
+                } else {
+                    // Principal variation search: a cheap null-window probe
+                    // first, and only a move that beats alpha is re-searched.
+                    eval = -minimaxWithTT(ctx, pos, currentDepth - 1, 1, -alpha - 1, -alpha,
+                                          shouldStop, tt, pathHashes, &move);
+                    if (!searchAborted(ctx, shouldStop) && eval > alpha && eval < beta) {
+                        eval = -minimaxWithTT(ctx, pos, currentDepth - 1, 1, -beta, -alpha,
+                                              shouldStop, tt, pathHashes, &move);
+                    }
+                }
+                pos.unmakeMove(undo);
+
+                if (!searchAborted(ctx, shouldStop)) {
+                    if (eval > currentBestScore) {
+                        currentBestScore = eval;
+                        currentBestMove = move;
+                    }
+                    if (eval > alpha) alpha = eval;
+                }
+            }
+
+            if (!completedDepth || searchAborted(ctx, shouldStop) || !useAspiration) break;
+
+            // Outside the window, so this is only a bound. Widen the failing
+            // side and search the depth again.
+            if (currentBestScore <= windowLo) {
+                delta *= 4;
+                windowLo = (bestScore - delta < -29000) ? INF_LO : bestScore - delta;
+                continue;
+            }
+            if (currentBestScore >= windowHi) {
+                delta *= 4;
+                windowHi = (bestScore + delta > 29000) ? INF_HI : bestScore + delta;
+                continue;
+            }
+            break;
+        }
+
+        // Only a completed depth may replace the answer: a partial iteration
+        // has searched some root moves against a window the rest never saw.
+        if (completedDepth && !searchAborted(ctx, shouldStop)) {
+            bestMove = currentBestMove;
+            bestScore = currentBestScore;
+            haveScore = true;
+
+            if (isMain && g_searchInfo) {
+                const auto sinceStart = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - searchStart).count();
+                g_searchInfo(currentDepth, bestScore, ctx.nodes, (long)sinceStart,
+                             toMailboxMove(pos, bestMove));
+            }
+            if (verbose) {
+                const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - depthStart).count();
+                std::cout << "Depth " << currentDepth << " complete in " << ms
+                          << "ms. Best move: " << toMailboxMove(pos, bestMove).toString()
+                          << " (score: " << (whiteToMove ? bestScore : -bestScore) << ")"
+                          << std::endl;
+            }
+        } else if (verbose) {
+            std::cout << "Depth " << currentDepth << " incomplete, using previous result"
+                      << std::endl;
+        }
+
+        if (budgetSpent(currentDepth, maxDepth, ctx.nodes, depthStartNodes,
+                        depthStart, verbose)) {
+            break;
+        }
+
+        // A found mate ends the search: deeper iterations cannot improve on it
+        // and the score is not a centipawn quantity to keep refining. The bound
+        // excludes large material scores, which are not mates.
+        if (std::abs(bestScore) > 29000 && std::abs(bestScore) < 31000) {
+            if (verbose) std::cout << "Mate detected at depth " << currentDepth
+                                   << ", stopping search" << std::endl;
+            break;
+        }
+    }
+
+    if (verbose) {
+        const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - searchStart).count();
+        std::cout << "Iterative deepening search completed in " << ms
+                  << "ms. Final best move: " << toMailboxMove(pos, bestMove).toString()
+                  << " (score: " << (whiteToMove ? bestScore : -bestScore) << ")" << std::endl;
+    }
+    return bestMove;
+}
+
 BBSearchResult bbSearchRoot(Position& pos, int maxDepth, TranspositionTable& tt,
                             const std::atomic<bool>& shouldStop,
                             std::vector<uint64_t>& pathHashes) {

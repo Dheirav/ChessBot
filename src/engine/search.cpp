@@ -4,6 +4,7 @@
 #include "evaluation.hpp"
 #include "transposition_table.hpp"
 #include "move_ordering.hpp"
+#include "bb_search.hpp"
 #include "legal_move_validator.hpp"
 #include "see.hpp"
 #include <limits>
@@ -167,6 +168,7 @@ const SearchOptionEntry SEARCH_OPTIONS[] = {
     {"maskedgen",   "maskedgen","MaskedGen",    &SearchOptions::maskedGen},
     {"ordertiebreak","ordertiebreak","OrderTieBreak",&SearchOptions::orderTieBreak},
     {"detsort",      "detsort",  "DetSort",      &SearchOptions::deterministicSort},
+    {"bbcore",       "bbcore",   "BitboardCore", &SearchOptions::bitboardCore},
 };
 const size_t SEARCH_OPTION_COUNT = sizeof(SEARCH_OPTIONS) / sizeof(SEARCH_OPTIONS[0]);
 
@@ -1468,9 +1470,18 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
 
     const int threads = effectiveThreads(limits);
 
+    // Which core runs is the only thing that differs below: the pool, the
+    // deadline setup above and the node accounting are representation-
+    // independent and serve either one.
+    const bool bb = g_searchOptions.bitboardCore;
+    Position pos;
+    if (bb) pos = toPosition(board);
+
     if (threads <= 1) {
         uint64_t nodes = 0;
-        Move best = searchWorker(0, board, limits, shouldStop, tt, nullptr, &nodes);
+        Move best = bb ? toMailboxMove(pos, bbSearchWorker(0, pos, limits, shouldStop,
+                                                           tt, nullptr, &nodes))
+                       : searchWorker(0, board, limits, shouldStop, tt, nullptr, &nodes);
         g_searchNodes = nodes;
         return best;
     }
@@ -1485,14 +1496,19 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
     for (int i = 1; i < threads; ++i) {
         pool.emplace_back([&, i] {
             // board by value into the worker: each thread needs its own,
-            // because generateLegalMoves mutates the board it is handed.
-            searchWorker(i, board, limits, shouldStop, tt, &helpersStop,
-                         &helperNodes[i]);
+            // because generateLegalMoves mutates the board it is handed. The
+            // bitboard worker takes its Position by value for the same reason.
+            if (bb) bbSearchWorker(i, pos, limits, shouldStop, tt, &helpersStop,
+                                   &helperNodes[i]);
+            else    searchWorker(i, board, limits, shouldStop, tt, &helpersStop,
+                                 &helperNodes[i]);
         });
     }
 
     uint64_t mainNodes = 0;
-    Move best = searchWorker(0, board, limits, shouldStop, tt, nullptr, &mainNodes);
+    Move best = bb ? toMailboxMove(pos, bbSearchWorker(0, pos, limits, shouldStop,
+                                                       tt, nullptr, &mainNodes))
+                   : searchWorker(0, board, limits, shouldStop, tt, nullptr, &mainNodes);
 
     helpersStop.store(true, std::memory_order_relaxed);
     for (auto& t : pool) t.join();

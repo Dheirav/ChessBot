@@ -21,6 +21,7 @@
 #include "bitboard.hpp"
 #include "bitboard_move_gen.hpp"
 #include "board.hpp"
+#include "move.hpp"
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -107,6 +108,14 @@ struct Position : BitboardState {
 
     bool isRepetition(int count = 2) const;
 };
+
+// A BitboardMove as the mailbox Move that means the same thing.
+//
+// The boundary of the bitboard core: everything outside it -- the UCI layer,
+// the GUI, the PGN writer, the game manager -- speaks Move, and converting once
+// per search result is free. `us` comes from the position the move is played
+// from, because BitboardMove carries no colour of its own.
+Move toMailboxMove(const Position& pos, const BitboardMove& m);
 
 // Build a Position from a mailbox Board, for cross-checking during
 // verification. Everything including the keys and clocks comes across, so the

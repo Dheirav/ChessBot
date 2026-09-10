@@ -268,6 +268,25 @@ bool Position::isRepetition(int count) const {
     return false;
 }
 
+Move toMailboxMove(const Position& pos, const BitboardMove& m) {
+    const PieceColor us = toMailboxColor(pos.sideToMove);
+    const PieceColor them = (us == COLOR_WHITE) ? COLOR_BLACK : COLOR_WHITE;
+    const Piece moved(us, toMailboxType(m.moved));
+    const Piece captured = (m.captured == BB_NONE)
+        ? Piece() : Piece(them, toMailboxType(m.captured));
+    MoveFlag flag = NORMAL;
+    switch (m.flag) {
+        case BBM_CAPTURE:    flag = CAPTURE; break;
+        case BBM_PROMOTION:  flag = PROMOTION; break;
+        case BBM_EN_PASSANT: flag = EN_PASSANT; break;
+        case BBM_CASTLE:     flag = CASTLING; break;
+        default:             flag = NORMAL; break;   // BBM_DOUBLE_PUSH has no mailbox flag
+    }
+    const Piece promo = (m.flag == BBM_PROMOTION)
+        ? Piece(us, toMailboxType(m.promotionType)) : Piece();
+    return Move(m.from, m.to, moved, captured, flag, promo);
+}
+
 Position toPosition(const Board& board) {
     Position pos;
     static_cast<BitboardState&>(pos) = toBitboardState(board);
