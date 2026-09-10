@@ -390,7 +390,51 @@ static int countMobility(const Board& board, PieceColor color, int kingSq) {
 //
 // Off by default (KING_DANGER_SCALE = 0), as an unmeasured term must be.
 static const int KING_DANGER_WEIGHT[7] = { 0, 0, 1, 3, 3, 4, 6 };  // by PieceType
-static const int KING_DANGER_SCALE = 0;   // percent; 0 is off, 100 is as written
+// Percent; 0 is off, 100 is as written. Overridable at build time so variants
+// can be compared without editing the file, which matters because an evaluation
+// change cannot be A/B'd inside one process: g_evalCache is keyed on position
+// alone, so both sides of a --optA/--optB match would share cached scores
+// (BUGS.md 8). Comparing this needs two binaries.
+#ifndef KING_DANGER_SCALE_PCT
+#define KING_DANGER_SCALE_PCT 0
+#endif
+static const int KING_DANGER_SCALE = KING_DANGER_SCALE_PCT;
+#ifndef KING_DANGER_MIN_ATTACKERS_N
+#define KING_DANGER_MIN_ATTACKERS_N 2
+#endif
+static const int KING_DANGER_MIN_ATTACKERS = KING_DANGER_MIN_ATTACKERS_N;
+#ifndef KING_DANGER_OFFSET_N
+#define KING_DANGER_OFFSET_N 0
+#endif
+static const int KING_DANGER_OFFSET = KING_DANGER_OFFSET_N;
+#ifndef KING_DANGER_DEFENDER_W_N
+#define KING_DANGER_DEFENDER_W_N 0
+#endif
+static const int KING_DANGER_DEFENDER_W = KING_DANGER_DEFENDER_W_N;
+
+// Friendly pawns and minor pieces standing in the king's own zone.
+//
+// Ethereal subtracts KingDefenders[count] from its safety score, and the
+// absence of any such term is the specific reason ours damages ordinary
+// positions: it charges for enemy pieces being *near* a king without asking
+// whether anything is guarding it. In a normal middlegame a castled king has
+// three pawns and often a minor in its zone, and those should cancel most of
+// the proximity charge.
+static int kingDefenders(const Board& board, int kingSq, PieceColor defender) {
+    if (kingSq < 0) return 0;
+    const int kf = kingSq % 8, kr = kingSq / 8;
+    int n = 0;
+    for (int df = -1; df <= 1; ++df)
+        for (int dr = -1; dr <= 1; ++dr) {
+            const int f = kf + df, r = kr + dr;
+            if (f < 0 || f > 7 || r < 0 || r > 7) continue;
+            const Piece& p = board.squares[r * 8 + f];
+            if (p.color() != defender) continue;
+            const PieceType t = p.type();
+            if (t == PAWN || t == KNIGHT || t == BISHOP) ++n;
+        }
+    return n;
+}
 
 static int kingDanger(const Board& board, int kingSq, PieceColor attacker) {
     if (KING_DANGER_SCALE == 0 || kingSq < 0) return 0;
@@ -404,13 +448,50 @@ static int kingDanger(const Board& board, int kingSq, PieceColor attacker) {
         }
     }
     int danger = 0;
+    int attackers = 0;      // distinct pieces bearing on the zone
     for (int i = 0; i < 64; ++i) {
         const Piece& p = board.squares[i];
         if (p.type() == NONE || p.type() == KING || p.color() != attacker) continue;
         int hits = 0;
         forEachAttackedSquare(board, i, [&](int sq) { if ((zone >> sq) & 1ULL) ++hits; });
-        if (hits > 0) danger += KING_DANGER_WEIGHT[p.type()] * hits;
+        if (hits > 0) { danger += KING_DANGER_WEIGHT[p.type()] * hits; ++attackers; }
     }
+
+    // Nothing below KING_DANGER_MIN_ATTACKERS *distinct pieces*, and this is
+    // the correction that six failed gates were missing.
+    //
+    // The curve above is quadratic in a weighted square count starting from
+    // zero, so it charged something in almost every position: a lone queen with
+    // four squares in the zone cost 160cp at scale 500, a rook touching three
+    // cost 50. Those are ordinary positions. A queen on an open diagonal near a
+    // king is piece activity, not an attack, and taxing it applies at every
+    // node in the tree rather than only where an attack exists.
+    //
+    // The damage is measured, not inferred. At scale 500 the old curve moved
+    // `comp` error 543.7 -> 504.5 while moving `ctl` error 181.9 -> **189.3**,
+    // so it improved the rare case by degrading the common one, and a 1 680
+    // game gauntlet against a fixed external attacker then had it scoring
+    // 62.11% -> 59.79%.
+    //
+    // One attacker is not an attack. ROADMAP 6.4's own candidate charged on a
+    // saturating curve in distinct attacker count ({0,0,50,75,88,94,97,99}%),
+    // which is zero for one attacker; that property is what this restores.
+    if (attackers < KING_DANGER_MIN_ATTACKERS) return 0;
+
+    // Subtract an offset before charging anything, which is the mechanism
+    // Ethereal uses and this term lacked. Its safety score carries
+    // SafetyAdjustment = S(-74, -26) and is then clamped by MAX(0, mg), so
+    // small amounts of attack produce *no* penalty at all rather than a small
+    // one. A threshold on attacker *count* is the wrong axis and was measured
+    // as such: raising it moved comp and ctl error back toward baseline
+    // together instead of separating them.
+    // Subtract what is guarding the king before charging for what is attacking
+    // it. The defending side is whoever is not the attacker.
+    const PieceColor defender = (attacker == COLOR_WHITE) ? COLOR_BLACK : COLOR_WHITE;
+    danger -= KING_DANGER_DEFENDER_W * kingDefenders(board, kingSq, defender);
+
+    danger -= KING_DANGER_OFFSET;
+    if (danger <= 0) return 0;
     // Squared, because two attackers are worth more than twice one — that is
     // the whole reason a count is not enough. The /8 sets the units: a danger
     // of 40, which is roughly a queen and two minor pieces bearing on the
