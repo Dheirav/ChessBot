@@ -8,6 +8,19 @@ TranspositionTable::TranspositionTable(size_t sizeMB) {
 
 bool TranspositionTable::probe(uint64_t hash, int depth, int ply, int alpha, int beta,
                               int& score, Move& bestMove) {
+    uint16_t packed = packMove(bestMove);
+    const bool usable = probe(hash, depth, ply, alpha, beta, score, packed);
+    bestMove = unpackMove(packed);
+    return usable;
+}
+
+void TranspositionTable::store(uint64_t hash, int depth, int ply, int score,
+                              Move bestMove, TTEntry::NodeType nodeType) {
+    store(hash, depth, ply, score, packMove(bestMove), nodeType);
+}
+
+bool TranspositionTable::probe(uint64_t hash, int depth, int ply, int alpha, int beta,
+                              int& score, uint16_t& packedBest) {
     const TTSlot& slot = table[getIndex(hash)];
     // One read of each word. Re-reading to "confirm" would widen the window
     // rather than close it; the checksum already decides.
@@ -23,7 +36,7 @@ bool TranspositionTable::probe(uint64_t hash, int depth, int ply, int alpha, int
     bump(hits);
     // Always return the best move if available
     if (entry.bestMove != 0) {
-        bestMove = unpackMove(entry.bestMove);
+        packedBest = entry.bestMove;
     }
     // Check if we can use the score (bound checks run on the root-relative
     // score, so mate scores are converted before comparing to the window)
@@ -44,8 +57,8 @@ bool TranspositionTable::probe(uint64_t hash, int depth, int ply, int alpha, int
     return false;
 }
 
-void TranspositionTable::store(uint64_t hash, int depth, int ply, int score, Move bestMove,
-                              TTEntry::NodeType nodeType) {
+void TranspositionTable::store(uint64_t hash, int depth, int ply, int score,
+                              uint16_t packedBest, TTEntry::NodeType nodeType) {
     TTSlot& slot = table[getIndex(hash)];
 
     const uint64_t k = slot.key.load(std::memory_order_relaxed);
@@ -57,7 +70,7 @@ void TranspositionTable::store(uint64_t hash, int depth, int ply, int score, Mov
     newEntry.depth = (int8_t)depth;
     newEntry.generation = generation;
     newEntry.score = (int16_t)scoreToTT(score, ply);
-    newEntry.bestMove = packMove(bestMove);
+    newEntry.bestMove = packedBest;
     newEntry.nodeType = nodeType;
 
     if (existingHash != 0 && existingHash != hash) bump(collisions);

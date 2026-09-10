@@ -173,9 +173,22 @@ public:
     bool probe(uint64_t hash, int depth, int ply, int alpha, int beta,
                int& score, Move& bestMove);
 
+    // The same two operations against the packed move, for callers whose moves
+    // are not mailbox Moves.
+    //
+    // The table has always stored a move as sixteen bits; the Move overloads
+    // above pack and unpack around this. Exposing the packed form means the
+    // bitboard search (docs/BITBOARD-REPLACEMENT.md) can share this table
+    // without converting a move into the other representation and straight back
+    // out again twice per node.
+    bool probe(uint64_t hash, int depth, int ply, int alpha, int beta,
+               int& score, uint16_t& packedBest);
+
     // Store a position in the table. `ply` converts root-relative mate
     // scores to node-relative before storing.
     void store(uint64_t hash, int depth, int ply, int score, Move bestMove,
+               TTEntry::NodeType nodeType);
+    void store(uint64_t hash, int depth, int ply, int score, uint16_t packedBest,
                TTEntry::NodeType nodeType);
     
     // Raw entry access, for singular extensions.
