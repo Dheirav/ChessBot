@@ -19,31 +19,11 @@ void BitboardState::clear() {
     sideToMove = BB_WHITE;
 }
 
-int popcount(Bitboard b) {
-    return __builtin_popcountll(b);
-}
 
-int lsb(Bitboard b) {
-    assert(b != 0ULL);
-    return __builtin_ctzll(b);
-}
 
-int msb(Bitboard b) {
-    assert(b != 0ULL);
-    return 63 - __builtin_clzll(b);
-}
 
-void setBit(Bitboard& b, int sq) {
-    b |= (1ULL << sq);
-}
 
-void clearBit(Bitboard& b, int sq) {
-    b &= ~(1ULL << sq);
-}
 
-bool testBit(Bitboard b, int sq) {
-    return (b >> sq) & 1ULL;
-}
 
 void printBitboard(Bitboard b) {
     for (int rank = 0; rank <= 7; ++rank) {   // rank 0 is the eighth rank

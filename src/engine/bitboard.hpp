@@ -70,13 +70,24 @@ struct BitboardState {
     void clear();
 };
 
-// Utility functions
-int popcount(Bitboard b);
-int lsb(Bitboard b); // least significant bit index
-int msb(Bitboard b); // most significant bit index
-void setBit(Bitboard& b, int sq);
-void clearBit(Bitboard& b, int sq);
-bool testBit(Bitboard b, int sq);
+// Utility functions.
+//
+// Inline in the header for the same reason the Piece accessors are (piece.hpp):
+// each is a single instruction, and out of line in bitboard.cpp -- which is
+// where they lived -- every one was a real cross-translation-unit call, because
+// this build has no link-time optimisation to rescue it. The move generator
+// alone calls lsb() once per generated move.
+//
+// The assert that used to guard lsb() and msb() is gone with them. NDEBUG is
+// not set in this build, so it was a live branch on the hottest path in the
+// engine, and the precondition is one every caller already satisfies by testing
+// the bitboard in its loop condition.
+inline int popcount(Bitboard b) { return __builtin_popcountll(b); }
+inline int lsb(Bitboard b) { return __builtin_ctzll(b); }  // caller guarantees b != 0
+inline int msb(Bitboard b) { return 63 - __builtin_clzll(b); }
+inline void setBit(Bitboard& b, int sq) { b |= 1ULL << sq; }
+inline void clearBit(Bitboard& b, int sq) { b &= ~(1ULL << sq); }
+inline bool testBit(Bitboard b, int sq) { return (b >> sq) & 1ULL; }
 
 // FEN parsing for bitboards
 void setBitboardFromFEN(BitboardState& state, const std::string& fen);
