@@ -93,6 +93,61 @@ Re-pool any of these with `./tests/pool-shards.sh <dir>/`.
 | `shard-20260904-214827/` | **`rootrandom`** — seeded tiebreak among near-equal root moves | **−90.7 [−105.0, −76.7]** — rejected; the cost is the root window, not the tiebreak |
 | `shard-20260906-002113/` | **`evalnoise`** — ±5cp seeded perturbation of the static score | **−3.9 [−16.9, +9.0]** — **accepted and ON**, see below: a null is the success case here |
 | *(unsharded, `--tc 10+0.1`)* | **Lazy SMP** — `Threads=8` against `Threads=1`, 600 games | **+162 [+139, +186]** — **accepted**, shipped at `Threads=6`, see below |
+| `shard-20260909-180746/` | `lmrtable` at `-N 100000` | +2.7 [−10.2, +15.6] — **inconclusive by construction**, see below |
+| `shard-20260909-194121/` | `lmrtable` at `-N 1000000`, run 1 | +21.1 [−1.5, +43.9] |
+| `shard-20260909-233453/` | the same, run 2, base 20260909 | +31.7 [+9.0, +54.7] |
+| `shard-pooled-lmrtable/` | **both pooled, 1 120 games** | **+26.4 [+10.4, +42.6]** — **accepted, ON** |
+
+### The LMR reduction table, +26.4, and a gate that measured nothing — 2026-09-10
+
+**+26.4 [+10.4, +42.6]** over 1 120 games, pooled from two runs of 560 at
+`-N 1000000` (+21.1 then +31.7) at a total fixed before either was seen.
+Pentanomial `41-106-220-113-80`. **On by default.**
+
+The change replaces `const int R = 1` with
+`R = 0.77 + ln(depth) * ln(moveCount) / 2.36`. The old constant reduced the
+thirtieth move at depth 12 exactly as much as the fourth at depth 3, and that is
+the main reason the effective branching factor sat at 2.3 where a strong engine
+is 1.7 to 2.0.
+
+**+26.4 is a lower bound, not an estimate.** The tree reduction depends on depth:
+
+| depth | tree vs the fixed R=1 |
+|---|---|
+| 5 | **−2.9%** |
+| 8 | −30.2% |
+| 11 | **−56.1%** |
+
+The gate ran at depth 8, so the instrument saw roughly half the feature. At
+playing depth it should be worth more, and this is the rare case where the
+measured number understates rather than flatters.
+
+### The first gate measured nothing, and that is the lesson
+
+`shard-20260909-180746` ran the same feature at the standing `-N 100000` budget
+and returned **+2.7 [−10.2, +15.6]**. That is **not a null on this feature** and
+must not be read as one. `-N 100000` reaches **depth 5**, where the table and the
+constant differ by 2.9% of the tree: the gate compared the feature against a near
+copy of itself.
+
+The pentanomial was spread rather than piled on the centre, so unlike the void
+`singularext` gate there is no obvious tell in the output. **A confident null is
+what this failure looks like from the outside**, which is what makes it
+dangerous.
+
+**This is the fourth instance of one trap**, and it deserves a name rather than
+another incident report: `singularext` at a budget three plies too shallow, the
+`corrhist` persistence question that bench could not see at all, `probcut` parked
+against the same wall, and now this.
+
+> **Any feature whose magnitude scales with depth cannot be gated at a budget
+> that does not reach playing depth.** Check the tree at two depths before
+> gating: if the effect at gate depth is a small fraction of the effect at
+> playing depth, the gate will answer a question about a feature that does not
+> play.
+
+Two minutes of `./tests/bench 5` against `./tests/bench 11` would have caught
+this before three hours of gate. It was run only after the first gate came back.
 
 ### Lazy SMP, +162 — and the first gate here that could not be sharded — 2026-09-07
 

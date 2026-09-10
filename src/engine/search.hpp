@@ -452,6 +452,39 @@ struct SearchOptions {
     // persistence-only gate at +0.4. Stays off.
     bool corrHistQ = false;
 
+    // --- Late move reductions, depth and move-count scaled (PLAN 3.6) ---
+    //
+    // The shipped reduction is `const int R = 1`: one ply, whatever the depth
+    // and whatever the move number. The thirtieth move at depth 12 is reduced
+    // exactly as much as the fourth at depth 3, and that is the main reason the
+    // effective branching factor sits at **2.3** where a strong engine is 1.7
+    // to 2.0. Measured on kiwipete 2026-09-09: depth 13 costs 52.2M nodes at
+    // x2.33 per ply.
+    //
+    // The arithmetic that makes this the priority over anything else: at a
+    // branching factor of 2.3 a *doubling of speed* buys 0.8 plies, while
+    // taking 2.3 down to 1.9 buys about 4. Tree shape is worth roughly five
+    // times what raw speed is.
+    //
+    // `PLAN.md` 3.6 has always listed this and `TODO.md` deferred it
+    // "deliberately last, against a search that has stopped changing shape".
+    // With Lazy SMP shipped and the search closed, it has.
+    //
+    // **Gated 2026-09-10: +26.4 Elo [+10.4, +42.6] over 1 120 games. ON.**
+    // Two runs of 560 at `-N 1000000`, +21.1 then +31.7, pooled at a total fixed
+    // before either was seen.
+    //
+    // **Read +26.4 as a lower bound.** The gate ran at depth 8, where the table
+    // cuts the tree 30%; at depth 11, nearer real play, it cuts 56%. The
+    // instrument sees about half the feature.
+    //
+    // The first attempt gated at `-N 100000` and returned +2.7 [-10.2, +15.6],
+    // which is **not** a null on this feature: that budget reaches depth 5,
+    // where the table and the fixed `R = 1` differ by 2.9% of the tree, so it
+    // compared the feature against a near copy of itself. `GATES.md` records it
+    // as inconclusive by construction rather than as a result.
+    bool lmrTable = true;
+
     // --- Decorrelation (`BUGS.md` 6), added 2026-09-04 ---
     //
     // A few centipawns of seeded noise on the static score, so that two games

@@ -422,6 +422,33 @@ returned ±36 Elo, so matching today's ±6.7 would cost weeks to answer a
 
 ---
 
+## 2026-09-10 — the search was not finished after all: LMR retuned, +26.4
+
+`PLAN.md` 3.6 reserved retuning LMR for "a search that has stopped changing
+shape". It had, so it was done, and it is the second largest accepted gain in
+this project after Lazy SMP.
+
+`const int R = 1` becomes `R = 0.77 + ln(depth) * ln(moveCount) / 2.36`. Gated at
+**+26.4 [+10.4, +42.6]** over 1 120 games, and that is a **lower bound**: the
+gate ran at depth 8 where the table cuts the tree 30%, while at depth 11 it cuts
+56%. Bench signature is now **463,295**.
+
+**Read the entry in `GATES.md` before gating anything depth-sensitive.** The
+first attempt used the standing `-N 100000` budget, reached depth 5, and returned
+a confident-looking +2.7 [−10.2, +15.6] while comparing the feature against a
+near copy of itself. That is the fourth instance of the same trap and it now has
+a rule attached: **check the tree at two depths before gating.**
+
+Two things this reopens. The "search is finished" claim below was wrong, and the
+reason it was wrong is worth keeping: it was made from the list of *named*
+techniques rather than from how well the existing ones were tuned. `search.cpp`
+still has no `improving` heuristic, no move-level futility, no SEE pruning in the
+main search, and no history-based reductions, all of which are standard and none
+of which have been tried here. `docs/EVAL-VS-ETHEREAL.md` has the survey and the
+branching-factor arithmetic that ranks them.
+
+---
+
 ## 2026-09-07 — the search is finished
 
 With Lazy SMP shipped and `singularext` closed by cost, **there is no open search

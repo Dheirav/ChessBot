@@ -8,6 +8,8 @@
 #include "see.hpp"
 #include <limits>
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <memory>
 #include <thread>
 #include <cstring>
@@ -42,6 +44,51 @@ static constexpr int LMP_MAX_DEPTH = 3;
 // more of the search's judgement; whether that is worth the nodes it gives back
 // is a gate's question, not a comment's.
 static constexpr int LMP_MAX_DEPTH_SHALLOW = 2;
+
+// Late move reduction table for SearchOptions::lmrTable, indexed by remaining
+// depth and by how many moves have already been tried at this node.
+//
+// R = BASE + ln(depth) * ln(moveCount) / DIVISOR, which is the conventional
+// shape: the reduction grows slowly with depth and slowly with move number, and
+// their product is what makes a late move in a deep node cheap to dismiss.
+// Worked through, against the fixed R = 1 it replaces:
+//     depth  3, move  4 -> 1     (unchanged, where the old constant was right)
+//     depth  8, move 12 -> 2
+//     depth 12, move 30 -> 4
+//
+// The constants are the conventional starting values and are a first guess
+// rather than a tuned result. `BUGS.md` 18 and PLAN 3.1 are the standing
+// warning about that: 3.1 lost 50 Elo by moving a single pruning constant
+// inside the evaluation's own error, so this ships behind a toggle and a gate
+// like everything else rather than on the strength of the formula being
+// standard elsewhere.
+static constexpr double LMR_BASE    = 0.77;
+static constexpr double LMR_DIVISOR = 2.36;
+static constexpr int LMR_MAX_DEPTH_IDX = 64;
+static constexpr int LMR_MAX_MOVE_IDX  = 64;
+
+static const std::array<std::array<uint8_t, LMR_MAX_MOVE_IDX>, LMR_MAX_DEPTH_IDX>
+LMR_TABLE = [] {
+    std::array<std::array<uint8_t, LMR_MAX_MOVE_IDX>, LMR_MAX_DEPTH_IDX> t{};
+    for (int d = 1; d < LMR_MAX_DEPTH_IDX; ++d)
+        for (int m = 1; m < LMR_MAX_MOVE_IDX; ++m)
+            t[d][m] = (uint8_t)(LMR_BASE + std::log((double)d) * std::log((double)m)
+                                           / LMR_DIVISOR);
+    return t;
+}();
+
+// The reduction this node should apply. Clamped so the reduced search keeps at
+// least one ply: dropping to depth 0 hands the move straight to quiescence,
+// which is a different and much more aggressive decision than reducing it.
+static inline int lmrReduction(int depth, int moveIndex) {
+    if (!g_searchOptions.lmrTable) return 1;
+    const int d = depth     < LMR_MAX_DEPTH_IDX ? depth     : LMR_MAX_DEPTH_IDX - 1;
+    const int m = moveIndex < LMR_MAX_MOVE_IDX  ? moveIndex : LMR_MAX_MOVE_IDX  - 1;
+    int r = LMR_TABLE[d][m];
+    if (r < 1) r = 1;
+    if (r > depth - 2) r = depth - 2;   // leave >= 1 ply of real search
+    return r < 1 ? 1 : r;
+}
 
 // Singular extensions. The probe is a search in its own right, so it only runs
 // where a spare ply is worth paying for: deep enough that one more matters, and
@@ -257,6 +304,7 @@ const SearchOptionEntry SEARCH_OPTIONS[] = {
     {"corrhist",    "corrhist", "CorrHist",    &SearchOptions::corrHist},
     {"corrhistq",   "corrhistq","CorrHistQ",   &SearchOptions::corrHistQ},
     {"evalnoise",   "evalnoise","EvalNoise",   &SearchOptions::evalNoise},
+    {"lmrtable",    "lmrtable", "LmrTable",    &SearchOptions::lmrTable},
 };
 const size_t SEARCH_OPTION_COUNT = sizeof(SEARCH_OPTIONS) / sizeof(SEARCH_OPTIONS[0]);
 
@@ -972,7 +1020,7 @@ static int minimaxWithTT(SearchContext& ctx,
 
         int eval;
         if (reduce) {
-            const int R = 1;
+            const int R = lmrReduction(depth, moveIndex);
             eval = -minimaxWithTT(ctx, board, depth - 1 - R, ply + 1, -alpha - 1, -alpha,
                                   shouldStop, tt, pathHashes, &move);
             if (!searchAborted(ctx, shouldStop) && eval > alpha) {
