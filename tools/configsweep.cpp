@@ -39,16 +39,11 @@ struct Config { const char* label; const char* opts; };
 // Each row is one feature set. "" is the configuration that ships today.
 const Config CONFIGS[] = {
     {"shipped",            ""},
-    {"null",               "nulldepthr"},
-    {"null+verify",        "nulldepthr,nullverify"},
-    {"pvs",                "interiorpvs"},
-    {"lmp",                "lmpdeep"},
-    {"qsearch",            "qmovecount,qnounderpromo"},
     {"null+verify+lmp",    "nulldepthr,nullverify,lmpdeep"},
-    {"null+lmp+bb",        "nulldepthr,lmpdeep,bbcore"},
-    {"all five",           "nulldepthr,interiorpvs,lmpdeep,qmovecount,qnounderpromo"},
-    {"all five+bitboard",  "nulldepthr,interiorpvs,lmpdeep,qmovecount,qnounderpromo,bbcore"},
-    {"bitboard only",      "bbcore"},
+    {"q2 bare",            "bbcore,qmovecount,qnounderpromo"},
+    {"q2+check",           "bbcore,qmovecount,qnounderpromo,qcheckexempt"},
+    {"q2+check+capthist",  "bbcore,qmovecount,qnounderpromo,qcheckexempt,capthist,qcapthist"},
+    {"everything",         "bbcore,nulldepthr,nullverify,lmpdeep,interiorpvs,qmovecount,qnounderpromo,qcheckexempt,capthist,qcapthist"},
 };
 const int NUM_CONFIGS = (int)(sizeof(CONFIGS) / sizeof(CONFIGS[0]));
 
@@ -138,6 +133,7 @@ int main(int argc, char** argv) {
     }
     std::printf("\r                              \r");
 
+    std::vector<std::string> disagreements;
     std::printf("  %-20s %7s %9s %s\n", "configuration", "depth", "agree", "differs on");
     for (int c = 0; c < NUM_CONFIGS; ++c) {
         SearchOptions o;
@@ -151,12 +147,28 @@ int main(int argc, char** argv) {
             std::cout.rdbuf(saved);
             totalDepth += r.depth;
             if (r.move == reference[i]) ++agree;
-            else if (differs.size() < 30) differs += std::to_string(i) + " ";
+            else {
+                if (differs.size() < 30) differs += std::to_string(i) + " ";
+                // Recorded so an outside engine can say which of the two is
+                // right. The reference is only this engine's own deeper
+                // opinion, so a disagreement is not automatically a mistake.
+                disagreements.push_back(std::string(CONFIGS[c].label) + "\t" + fens[i]
+                                        + "\t" + reference[i] + "\t" + r.move);
+            }
         }
         std::printf("  %-20s %7.2f %6d/%zu  %s\n", CONFIGS[c].label,
                     (double)totalDepth / (double)fens.size(), agree, fens.size(),
                     differs.c_str());
         std::fflush(stdout);
+    }
+
+    // Written for tools/adjudicate.py, which asks Stockfish which move was
+    // actually better rather than which matched.
+    if (FILE* f = std::fopen("/tmp/disagreements.tsv", "w")) {
+        for (const std::string& d : disagreements) std::fprintf(f, "%s\n", d.c_str());
+        std::fclose(f);
+        std::printf("\n  %zu disagreements written to /tmp/disagreements.tsv\n",
+                    disagreements.size());
     }
     return 0;
 }

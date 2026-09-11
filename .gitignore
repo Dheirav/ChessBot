@@ -1,62 +1,56 @@
-# Local agent instructions. Deliberately untracked: HANDOFF.md and the READMEs
-# are the shared, reviewable docs, and this one is a per-machine convenience
-# that would otherwise drift from them without anyone reviewing it.
-CLAUDE.md
 
-# Build artifacts
-*.o
-*.d
-chessbot
-
-# Test binaries (built by `make tests`). Listed as a pattern rather than by
-# name: the by-name version silently failed to cover four binaries added later,
-# and `git add -A` committed them. Sources and fixtures are re-included below.
-tests/*
 !tests/*.cpp
 !tests/*.hpp
+!tests/*.md
 !tests/*.py
 !tests/*.sh
-!tests/*.md
 !tests/data/
-
-# Move lookup tables are cached next to whichever binary generated them
-lookup_data/
-tests/src/
-
-# Profiling and logs
-gmon.out
-evaluation_log_*.txt
-
+# Build artifacts
+# Games saved from the GUI with Ctrl+S
+# Gauntlet logs from tests/gauntlet.sh, same reasoning -- missed when that
+# Generated Texel corpora. Regenerate with tools/texel-corpus.py --split; they
+# Local agent instructions. Deliberately untracked: HANDOFF.md and the READMEs
 # Match gate logs (tee output, often still being written)
+# Move lookup tables are cached next to whichever binary generated them
+# Per-shard logs from tests/shard-gate.sh
+# Profiling and logs
+# Public Texel corpus (zurichess, BSD-3-Clause) and its splits. Fetched, not
+# Test binaries (built by `make tests`). Listed as a pattern rather than by
+# and `git add -A` committed them. Sources and fixtures are re-included below.
+# are derived from the game archive, which lives outside this repo, so a
+# are the shared, reviewable docs, and this one is a per-machine convenience
+# committed copy would be a snapshot claiming to be the corpus.
+# name: the by-name version silently failed to cover four binaries added later,
+# ours, and 40MB: regenerate the splits with awk, refetch the corpus itself.
+# script landed on 2026-08-21, which is why two of them sat untracked for days.
+# that would otherwise drift from them without anyone reviewing it.
+*.d
+*.o
+CLAUDE.md
+chessbot
+evaluation_log_*.txt
+games/
 gate-*.log
 gates-all.log
-# Gauntlet logs from tests/gauntlet.sh, same reasoning -- missed when that
-# script landed on 2026-08-21, which is why two of them sat untracked for days.
 gauntlet-*.log
-# Per-shard logs from tests/shard-gate.sh
+gmon.out
+lookup_data/
 shard-*/
-
-# Games saved from the GUI with Ctrl+S
-games/
-tools/*.o
-tools/*.d
-tools/review
-tools/tune
-tools/gendata
-tools/evaldump
-tools/bbspeed
-tools/treecost
-# Generated Texel corpora. Regenerate with tools/texel-corpus.py --split; they
-# are derived from the game archive, which lives outside this repo, so a
-# committed copy would be a snapshot claiming to be the corpus.
-tests/data/texel.epd
-tests/data/texel.test.epd
-tests/data/texel.sf.epd
-tests/data/texel.test.sf.epd
-
-# Public Texel corpus (zurichess, BSD-3-Clause) and its splits. Fetched, not
-# ours, and 40MB: regenerate the splits with awk, refetch the corpus itself.
-tests/data/quiet-labeled.epd
-tests/data/ql.*.epd
+tests/*
 tests/data/own-archive.epd
+tests/data/ql.*.epd
+tests/data/quiet-labeled.epd
+tests/data/texel.epd
+tests/data/texel.sf.epd
+tests/data/texel.test.epd
+tests/data/texel.test.sf.epd
+tests/src/
+tools/*.d
+tools/*.o
+tools/bbspeed
 tools/configsweep
+tools/evaldump
+tools/gendata
+tools/review
+tools/treecost
+tools/tune
