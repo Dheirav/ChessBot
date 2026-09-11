@@ -1,4 +1,43 @@
-# Handoff — 2026-08-27
+# Handoff — 2026-09-11
+
+## The bot runs the bitboard core
+
+`lichess/config.yml` sets ten UCI options: the bitboard core plus the
+branching-factor and quiescence work. The engine's own defaults are unchanged,
+so bench is still 463,295 and every test binary passes, and reverting is
+deleting one block from that file with no rebuild.
+
+Measured over 24 middlegame positions at 5 s on one thread, with every
+disagreement adjudicated by Stockfish at depth 18 rather than against this
+engine's own deeper opinion:
+
+| | depth in 5 s | moves actually wrong |
+|---------|--------------|----------------------|
+| shipped | 11.75 | 2 of 24 |
+| this | **14.04** | **1 of 24** |
+
+Branching factor went from 2.03 to about 1.85, and the depth-10 tree from
+7,874,754 nodes to 3,683,574.
+
+**Not gated, deliberately rather than by oversight.** The one gate that ran
+tested the bitboard core alone at `--tc 10+0.1`, a control reaching depth 7,
+where that core needs 1.28x the nodes against 1.08x by depth 9. It returned
++3 [-17, +24] on a regime the bot does not play. Instead of nine more hours,
+the three things position measurements cannot see were checked directly:
+Threads=6 reaches depth 16, the clock is respected at 60+1, 8+0.1 and 2+0, and
+endgames including a forced mate are answered correctly.
+
+**If results drop, delete the block in `lichess/config.yml` first.** It is ten
+changes at once and none is individually gated. Lichess is the gate now.
+
+`docs/stockfish-comparison/MEASURED.md` carries the numbers, the two changes
+that were built wrong and caught by measurement, the two that measured null
+(`histmalus`, `conthist`), and the two methodology failures that nearly buried
+the result: `tests/bench` cannot resolve a tree effect under about ten percent,
+and scoring move quality against this engine's own deeper search is biased
+against any configuration that searches deeper than it does.
+
+---
 
 Current state, what is in flight, and what to pick up. This is the file to read
 first; it is meant to be rewritten as state changes, unlike `BACKLOG.md`, which

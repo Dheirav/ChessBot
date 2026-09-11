@@ -138,6 +138,44 @@ engine:                            # Engine settings.
                                    # so no Syzygy, no Move Overhead (see
                                    # move_overhead below).
     Hash: 256                      # Transposition table, megabytes.
+
+    # --- The bitboard core and the branching-factor work, 2026-09-11 ---
+    #
+    # Set here rather than as engine defaults so the shipped defaults, the bench
+    # signature and every test stay exactly as they were, and so reverting is
+    # one edit with no rebuild.
+    #
+    # Measured over 24 middlegame positions at 5 s, one thread, with every
+    # disagreement adjudicated by Stockfish at depth 18 rather than against this
+    # engine's own opinion:
+    #
+    #     shipped      11.75 plies, 2 moves actually wrong
+    #     all of this  14.04 plies, 1 move actually wrong
+    #
+    # Deeper by 2.3 plies with fewer real errors, and every genuine miss in the
+    # sample was in a position already decided by three pawns or more, while the
+    # improvements were in live positions. docs/stockfish-comparison/MEASURED.md
+    # has the numbers and the two methodology failures that nearly buried them.
+    #
+    # NOT gated. The one gate that ran tested the bitboard core alone at
+    # --tc 10+0.1, which reaches depth 7, where that core's node penalty is
+    # 1.28x against 1.08x by depth 9: it returned +3 [-17, +24] on the wrong
+    # regime. What was checked before shipping instead: Threads=6 reaches depth
+    # 16, the clock is respected at 60+1, 8+0.1 and 2+0, and endgames including
+    # a forced mate are answered correctly.
+    #
+    # If the bot's results drop, delete this block first: it is ten changes at
+    # once and nothing here is individually gated.
+    BitboardCore: true             # 1.63x on identical trees
+    NullDepthR: true               # R = 2 + depth/4; median -21.4% tree at depth 10
+    NullVerify: true               # the verification search the comment claimed
+    LmpDeep: true                  # late move pruning at every depth, linear
+    InteriorPvs: true              # null-window scouting, with an explicit PV flag
+    QMoveCount: true               # quiescence stops after 2 tactical moves
+    QNoUnderpromo: true            # one promotion per pawn, not four
+    QCheckExempt: true             # ... unless the move gives check
+    CaptHist: true                 # capture history in the main search
+    QCaptHist: true                # and in quiescence, which had no learned input
     Threads: 6                     # Lazy SMP, gated 2026-09-07 at +162 Elo
                                    # [+139, +186] over 600 games -- but that gate
                                    # ran Threads=8. Six is shipped instead, and
