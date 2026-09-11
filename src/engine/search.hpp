@@ -687,6 +687,31 @@ struct SearchOptions {
     // strict subset of what is searched now.
     bool qNoUnderpromo = false;
 
+    // Let quiescence order its captures by capture history as well as by victim
+    // value. Requires captHist, which maintains the table.
+    //
+    // Stockfish scores a capture as 7 * PieceValue[captured] + captureHistory,
+    // in quiescence as well as in the main search. Ours scores it as
+    // 10 * victim - attacker and nothing else, so "the third capture in the
+    // list" carries far less information here than there. That difference is
+    // the real reason their move-count limit of 2 is safe and ours is not:
+    // a move-count limit is a bet that the ordering already put the good move
+    // in front, and the bet is only as good as the ordering.
+    //
+    // Scaled to stay inside the SEE band, as in the main search: MVV-LVA tops
+    // out near 9 000 and the shifted history at 4 096, against a band of
+    // 100 000, so history reorders captures within a SEE class and can never
+    // lift a losing capture above a sound one.
+    bool qCaptHist = false;
+
+    // Exempt checking moves from quiescence move-count pruning.
+    //
+    // The exemption Stockfish has and this engine did not, which is the whole
+    // reason its limit is 2 and ours had to sit at 3 or 4: without it a tight
+    // limit prunes forcing checks, which are exactly the moves that decide a
+    // position. Bitboard core only, because that is where gives_check lives.
+    bool qCheckExempt = false;
+
 
     // Penalise quiet moves that were searched and did not cause the cutoff.
     //

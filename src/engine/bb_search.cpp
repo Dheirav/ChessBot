@@ -2,6 +2,7 @@
 #include "bb_evaluation.hpp"
 #include "bb_movegen.hpp"
 #include "bb_see.hpp"
+#include "bb_check.hpp"
 #include "search_tuning.hpp"
 #include <algorithm>
 #include <cmath>
@@ -325,6 +326,11 @@ static int quiescence(BBSearchContext& ctx,
             int attacker = QS_PIECE_VALUES[movedType(m)];
             key = 10 * victim - attacker;
         }
+        // See the note in search.cpp: quiescence has never used capture
+        // history, and it is where most of the nodes are.
+        if (g_searchOptions.qCaptHist)
+            key += ctx.orderer.captureHistoryScore(m, pos.sideToMove);
+
 
         // SEE separates the winning captures from the losing ones; MVV-LVA
         // still orders within each group.
@@ -348,17 +354,26 @@ static int quiescence(BBSearchContext& ctx,
                   return tie && BBMoveOrderer::tieKey(a.move) < BBMoveOrderer::tieKey(b.move);
               });
 
+    // One setup per node, not per move: the squares from which each piece type
+    // would check, plus our pieces that block one of our own sliders.
+    const bool needCheckInfo = g_searchOptions.qMoveCount && g_searchOptions.qCheckExempt;
+    const CheckInfo ci = needCheckInfo ? bbCheckInfo(pos) : CheckInfo{};
+
     int searched = 0;
     for (size_t i = 0; i < count; ++i) {
         const BitboardMove& move = scored[i].move;
 
         // Move-count pruning: see the note in search.cpp. Exempts a recapture
-        // on the previous move's destination, promotions, and mate scores.
+        // on the previous move's destination, promotions, mate scores, and --
+        // once qCheckExempt is on -- checking moves, which is the exemption
+        // Stockfish has and whose absence is why this limit has to sit above
+        // the knee.
         if (g_searchOptions.qMoveCount && !inCheck &&
             searched >= QS_MOVE_COUNT_LIMIT &&
             move.flag != BBM_PROMOTION &&
             (int)move.to != prevTo &&
-            std::abs(alpha) < MATE_SCORE - 1000) {
+            std::abs(alpha) < MATE_SCORE - 1000 &&
+            !(needCheckInfo && bbGivesCheck(pos, ci, move))) {
             continue;
         }
 
@@ -450,7 +465,8 @@ static int minimaxWithTT(BBSearchContext& ctx,
                         const std::atomic<bool>& shouldStop, TranspositionTable& tt,
                         std::vector<uint64_t>& pathHashes,
                         const BitboardMove* prevMove = nullptr,
-                        const BitboardMove* excluded = nullptr) {
+                        const BitboardMove* excluded = nullptr,
+                        bool onPvLine = true) {
     ++ctx.nodes;
     // Check if we should stop searching
     if (searchAborted(ctx, shouldStop)) {
@@ -577,7 +593,18 @@ static int minimaxWithTT(BBSearchContext& ctx,
     // A null-window search (beta - alpha == 1) is a scout, not a principal
     // variation. Pruning inside the PV would change the move actually chosen
     // rather than only how fast it is found.
-    const bool isPV = (beta - alpha > 1);
+    // Whether this node is on the principal variation.
+    //
+    // Derived from the window as `beta - alpha > 1` when interiorPvs is off,
+    // which is correct only while every non-reduced move is searched on the
+    // full window. Turn scouting on without this and the window stops meaning
+    // "PV": isPV reads false almost everywhere, which does not merely disable
+    // the PV exemption, it *enables* razoring, reverse futility and late move
+    // pruning inside the principal variation. Measured: the scouting itself is
+    // worth +1.8% nodes, and the whole -14.1% of interiorPvs came from firing
+    // those three rules where they had never fired. They are the eval-margin
+    // rules, and this evaluation's margins are 500 centipawns wide.
+    const bool isPV = g_searchOptions.interiorPvs ? onPvLine : (beta - alpha > 1);
     const bool nearMate = (std::abs(alpha) >= MATE_SCORE - 1000)
                        || (std::abs(beta) >= MATE_SCORE - 1000);
 
@@ -654,7 +681,7 @@ static int minimaxWithTT(BBSearchContext& ctx,
         Position::NullUndo nu = pos.makeNullMove();
         // No previous move below a null move: there is no reply to key on.
         int nullScore = -minimaxWithTT(ctx, pos, depth - 1 - R, ply + 1, -beta, -beta + 1,
-                                       shouldStop, tt, pathHashes, nullptr);
+                                       shouldStop, tt, pathHashes, nullptr, nullptr, false);
         pos.unmakeNullMove(nu);
         if (!searchAborted(ctx, shouldStop) && nullScore >= beta) {
             // Verification: search the position for real at reduced depth, with
@@ -662,7 +689,8 @@ static int minimaxWithTT(BBSearchContext& ctx,
             // is winning if actually moving is too, and in zugzwang it is not.
             if (!g_searchOptions.nullVerify) return beta;
             const int verified = minimaxWithTT(ctx, pos, depth - R, ply, beta - 1, beta,
-                                               shouldStop, tt, pathHashes, prevMove);
+                                               shouldStop, tt, pathHashes, prevMove,
+                                               nullptr, false);
             if (searchAborted(ctx, shouldStop) || verified >= beta) return beta;
         }
     }
@@ -821,7 +849,11 @@ static int minimaxWithTT(BBSearchContext& ctx,
         // The threshold grows with depth because the deeper the remaining
         // search, the more a late move can still turn out to matter. 3 + d*d
         // is the conventional shape: 4 moves at depth 1, 7 at 2, 12 at 3.
-        const bool isPv = (beta - alpha > 1);
+        // Recomputed inside the loop on purpose when interiorPvs is off: alpha
+        // rises as moves are searched, and once it reaches beta - 1 this node
+        // stops being a PV node for the remaining moves. Collapsing it into the
+        // node-entry isPV changes the shipped tree, which bench catches at once.
+        const bool isPv = g_searchOptions.interiorPvs ? isPV : (beta - alpha > 1);
 
         // Move-level futility. Conditions mirror the LMP guard below, for the
         // same reasons it lists: never in a PV node, never in check, never on a
@@ -888,24 +920,24 @@ static int minimaxWithTT(BBSearchContext& ctx,
                                        g_searchOptions.histReduction
                                            ? ctx.orderer.quietHistory(move) : 0);
             eval = -minimaxWithTT(ctx, pos, depth - 1 - R, ply + 1, -alpha - 1, -alpha,
-                                  shouldStop, tt, pathHashes, &move);
+                                  shouldStop, tt, pathHashes, &move, nullptr, false);
             if (!searchAborted(ctx, shouldStop) && eval > alpha) {
                 eval = -minimaxWithTT(ctx, pos, depth - 1, ply + 1, -beta, -alpha,
-                                      shouldStop, tt, pathHashes, &move);
+                                      shouldStop, tt, pathHashes, &move, nullptr, isPV);
             }
         } else if (g_searchOptions.interiorPvs && moveIndex > 1) {
             // Principal variation search. Once one move has raised alpha, the
             // rest only have to be shown *not* to beat it, and a null window
             // proves that far sooner than a full one.
             eval = -minimaxWithTT(ctx, pos, depth - 1 + ext, ply + 1, -alpha - 1, -alpha,
-                                  shouldStop, tt, pathHashes, &move);
+                                  shouldStop, tt, pathHashes, &move, nullptr, false);
             if (!searchAborted(ctx, shouldStop) && eval > alpha && eval < beta) {
                 eval = -minimaxWithTT(ctx, pos, depth - 1 + ext, ply + 1, -beta, -alpha,
-                                      shouldStop, tt, pathHashes, &move);
+                                      shouldStop, tt, pathHashes, &move, nullptr, isPV);
             }
         } else {
             eval = -minimaxWithTT(ctx, pos, depth - 1 + ext, ply + 1, -beta, -alpha,
-                                  shouldStop, tt, pathHashes, &move);
+                                  shouldStop, tt, pathHashes, &move, nullptr, isPV);
         }
         pos.unmakeMove(undo);
 

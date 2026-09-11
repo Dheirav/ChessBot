@@ -60,6 +60,11 @@ public:
 
     int quietHistory(const BitboardMove& move) const;
 
+    // See the note on MoveOrderer::captureHistoryScore.
+    int captureHistoryScore(const BitboardMove& move, BitboardColor us) const {
+        return getCaptHistScore(move, us);
+    }
+
     // Mirrors MoveOrderer::tieKey exactly, including the field widths, so the
     // two sorts agree on which of two equally scored moves comes first.
     static int tieKey(const BitboardMove& m) {

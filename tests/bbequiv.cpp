@@ -12,6 +12,7 @@
 #include "../src/engine/bb_position.hpp"
 #include "../src/engine/bb_movegen.hpp"
 #include "../src/engine/bb_see.hpp"
+#include "../src/engine/bb_check.hpp"
 #include "../src/engine/bb_evaluation.hpp"
 #include "../src/engine/bb_move_ordering.hpp"
 #include "../src/engine/bb_search.hpp"
@@ -389,6 +390,46 @@ int main() {
         report("agrees with see.cpp on every capture", badSee, seeChecked);
     }
 
+
+
+    // ---------------------------------------------------------------- B3b
+    // gives_check, against the only thing that settles it: play the move and
+    // look. A predicate that is merely usually right is worse than none,
+    // because every consumer is a pruning exemption -- a false negative prunes
+    // a forcing move, and a false positive exempts a quiet one and grows the
+    // tree for nothing.
+    std::printf("\nB3b Check detection\n");
+    {
+        int wrong = 0;
+        long checked = 0;
+        int falsePos = 0, falseNeg = 0;
+        for (const std::string& fen : corpus) {
+            Position pos;
+            pos.setFromFEN(fen);
+            const CheckInfo ci = bbCheckInfo(pos);
+            BBMoveList moves;
+            bbGenerate(pos, moves);
+            for (const BitboardMove& m : moves) {
+                const bool predicted = bbGivesCheck(pos, ci, m);
+                const PositionUndo u = pos.makeMove(m);
+                const bool actual = bbInCheck(pos);   // side to move is now the opponent
+                pos.unmakeMove(u);
+                ++checked;
+                if (predicted != actual) {
+                    if (wrong < 6)
+                        std::printf("    %s %s: predicted %d actual %d\n    %s\n",
+                                    describe(m).c_str(),
+                                    predicted ? "(said check)" : "(said no check)",
+                                    (int)predicted, (int)actual, fen.c_str());
+                    if (predicted) ++falsePos; else ++falseNeg;
+                    ++wrong;
+                }
+            }
+        }
+        if (wrong)
+            std::printf("    %d false positives, %d false negatives\n", falsePos, falseNeg);
+        report("gives_check matches make-and-test", wrong, checked);
+    }
 
     // ---------------------------------------------------------------- B4
     std::printf("\nB4  Evaluation\n");

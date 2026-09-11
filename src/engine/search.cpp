@@ -172,6 +172,8 @@ const SearchOptionEntry SEARCH_OPTIONS[] = {
     {"interiorpvs",  "interiorpvs","InteriorPvs", &SearchOptions::interiorPvs},
     {"qmovecount",   "qmovecount","QMoveCount",   &SearchOptions::qMoveCount},
     {"qnounderpromo","qnounderpromo","QNoUnderpromo",&SearchOptions::qNoUnderpromo},
+    {"qcapthist",    "qcapthist","QCaptHist",    &SearchOptions::qCaptHist},
+    {"qcheckexempt", "qcheckexempt","QCheckExempt",&SearchOptions::qCheckExempt},
     {"lmpdeep",      "lmpdeep",  "LmpDeep",      &SearchOptions::lmpDeep},
     {"nullverify",   "nullverify","NullVerify",   &SearchOptions::nullVerify},
     {"nulldepthr",   "nulldepthr","NullDepthR",   &SearchOptions::nullDepthR},
@@ -437,6 +439,11 @@ static int quiescence(SearchContext& ctx,
             key = 10 * victim - attacker;
         }
 
+        // Capture history inside whichever SEE class the move falls in. The
+        // main search has ordered captures this way since captHist landed;
+        // quiescence never has, and quiescence is where most of the nodes are.
+        if (g_searchOptions.qCaptHist) key += ctx.orderer.captureHistoryScore(m);
+
         // SEE separates the winning captures from the losing ones; MVV-LVA
         // still orders within each group.
         //
@@ -567,7 +574,8 @@ static int minimaxWithTT(SearchContext& ctx,
                         const std::atomic<bool>& shouldStop, TranspositionTable& tt,
                         std::vector<uint64_t>& pathHashes,
                         const Move* prevMove = nullptr,
-                        const Move* excluded = nullptr) {
+                        const Move* excluded = nullptr,
+                        bool onPvLine = true) {
     ++ctx.nodes;
     // Check if we should stop searching
     if (searchAborted(ctx, shouldStop)) {
@@ -691,7 +699,18 @@ static int minimaxWithTT(SearchContext& ctx,
     // A null-window search (beta - alpha == 1) is a scout, not a principal
     // variation. Pruning inside the PV would change the move actually chosen
     // rather than only how fast it is found.
-    const bool isPV = (beta - alpha > 1);
+    // Whether this node is on the principal variation.
+    //
+    // Derived from the window as `beta - alpha > 1` when interiorPvs is off,
+    // which is correct only while every non-reduced move is searched on the
+    // full window. Turn scouting on without this and the window stops meaning
+    // "PV": isPV reads false almost everywhere, which does not merely disable
+    // the PV exemption, it *enables* razoring, reverse futility and late move
+    // pruning inside the principal variation. Measured: the scouting itself is
+    // worth +1.8% nodes, and the whole -14.1% of interiorPvs came from firing
+    // those three rules where they had never fired. They are the eval-margin
+    // rules, and this evaluation's margins are 500 centipawns wide.
+    const bool isPV = g_searchOptions.interiorPvs ? onPvLine : (beta - alpha > 1);
     const bool nearMate = (std::abs(alpha) >= MATE_SCORE - 1000)
                        || (std::abs(beta) >= MATE_SCORE - 1000);
 
@@ -768,7 +787,7 @@ static int minimaxWithTT(SearchContext& ctx,
         NullUndo nu = board.makeNullMove();
         // No previous move below a null move: there is no reply to key on.
         int nullScore = -minimaxWithTT(ctx, board, depth - 1 - R, ply + 1, -beta, -beta + 1,
-                                       shouldStop, tt, pathHashes, nullptr);
+                                       shouldStop, tt, pathHashes, nullptr, nullptr, false);
         board.unmakeNullMove(nu);
         if (!searchAborted(ctx, shouldStop) && nullScore >= beta) {
             // Verification: search the position for real at reduced depth, with
@@ -776,7 +795,8 @@ static int minimaxWithTT(SearchContext& ctx,
             // is winning if actually moving is too, and in zugzwang it is not.
             if (!g_searchOptions.nullVerify) return beta;
             const int verified = minimaxWithTT(ctx, board, depth - R, ply, beta - 1, beta,
-                                               shouldStop, tt, pathHashes, prevMove);
+                                               shouldStop, tt, pathHashes, prevMove,
+                                               nullptr, false);
             if (searchAborted(ctx, shouldStop) || verified >= beta) return beta;
         }
     }
@@ -931,7 +951,11 @@ static int minimaxWithTT(SearchContext& ctx,
         // The threshold grows with depth because the deeper the remaining
         // search, the more a late move can still turn out to matter. 3 + d*d
         // is the conventional shape: 4 moves at depth 1, 7 at 2, 12 at 3.
-        const bool isPv = (beta - alpha > 1);
+        // Recomputed inside the loop on purpose when interiorPvs is off: alpha
+        // rises as moves are searched, and once it reaches beta - 1 this node
+        // stops being a PV node for the remaining moves. Collapsing it into the
+        // node-entry isPV changes the shipped tree, which bench catches at once.
+        const bool isPv = g_searchOptions.interiorPvs ? isPV : (beta - alpha > 1);
 
         // Move-level futility. Conditions mirror the LMP guard below, for the
         // same reasons it lists: never in a PV node, never in check, never on a
@@ -998,10 +1022,10 @@ static int minimaxWithTT(SearchContext& ctx,
                                        g_searchOptions.histReduction
                                            ? ctx.orderer.quietHistory(move) : 0);
             eval = -minimaxWithTT(ctx, board, depth - 1 - R, ply + 1, -alpha - 1, -alpha,
-                                  shouldStop, tt, pathHashes, &move);
+                                  shouldStop, tt, pathHashes, &move, nullptr, false);
             if (!searchAborted(ctx, shouldStop) && eval > alpha) {
                 eval = -minimaxWithTT(ctx, board, depth - 1, ply + 1, -beta, -alpha,
-                                      shouldStop, tt, pathHashes, &move);
+                                      shouldStop, tt, pathHashes, &move, nullptr, isPV);
             }
         } else if (g_searchOptions.interiorPvs && moveIndex > 1) {
             // Principal variation search. Once one move has raised alpha, the
@@ -1013,14 +1037,14 @@ static int minimaxWithTT(SearchContext& ctx,
             // best the ordering could offer, and it keeps the full window
             // because it is the one the node has real evidence for.
             eval = -minimaxWithTT(ctx, board, depth - 1 + ext, ply + 1, -alpha - 1, -alpha,
-                                  shouldStop, tt, pathHashes, &move);
+                                  shouldStop, tt, pathHashes, &move, nullptr, false);
             if (!searchAborted(ctx, shouldStop) && eval > alpha && eval < beta) {
                 eval = -minimaxWithTT(ctx, board, depth - 1 + ext, ply + 1, -beta, -alpha,
-                                      shouldStop, tt, pathHashes, &move);
+                                      shouldStop, tt, pathHashes, &move, nullptr, isPV);
             }
         } else {
             eval = -minimaxWithTT(ctx, board, depth - 1 + ext, ply + 1, -beta, -alpha,
-                                  shouldStop, tt, pathHashes, &move);
+                                  shouldStop, tt, pathHashes, &move, nullptr, isPV);
         }
         board.unmakeMove(undo);
 

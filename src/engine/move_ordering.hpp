@@ -93,6 +93,16 @@ public:
     // Reduce history scores periodically to prevent overflow
     void ageHistory();
 
+    // Capture history, for callers outside the ordering itself.
+    //
+    // Quiescence does not use MoveOrderer at all: it has its own inline sort
+    // keyed on victim value and a SEE band, with no learned input of any kind.
+    // That is most of the engine's nodes ordered on less information than the
+    // main search uses, and it is why a tight quiescence move-count limit is a
+    // weaker bet here than in an engine whose captures are sorted by what has
+    // actually been producing cutoffs.
+    int captureHistoryScore(const Move& move) const { return getCaptHistScore(move); }
+
     // The butterfly history score for a quiet move, 0..HISTORY_MAX.
     //
     // Public because the *search* now reads it, not just the ordering. A move
