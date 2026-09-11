@@ -1188,10 +1188,16 @@ BitboardMove bbSearchWorker(int threadIndex, Position pos, const SearchLimits& l
         // A found mate ends the search: deeper iterations cannot improve on it
         // and the score is not a centipawn quantity to keep refining. The bound
         // excludes large material scores, which are not mates.
+        // See searchWorker: a mate score at depth 1 is a table claim, not a
+        // verified mate, and stopping on it is how game rs8QkvCm was drawn from
+        // mate in 9. Only stop once the search depth covers the mate.
         if (std::abs(bestScore) > 29000 && std::abs(bestScore) < 31000) {
-            if (verbose) std::cout << "Mate detected at depth " << currentDepth
-                                   << ", stopping search" << std::endl;
-            break;
+            const int matePlies = MATE_SCORE - std::abs(bestScore);
+            if (currentDepth >= matePlies) {
+                if (verbose) std::cout << "Mate in " << matePlies << " plies verified at depth "
+                                       << currentDepth << ", stopping search" << std::endl;
+                break;
+            }
         }
     }
 
@@ -1316,7 +1322,8 @@ BBSearchResult bbSearchRoot(Position& pos, int maxDepth, TranspositionTable& tt,
         // A found mate ends the search: deeper iterations cannot improve on it
         // and the score is not a centipawn quantity to keep refining. The bound
         // excludes large material scores, which are not mates.
-        if (std::abs(bestScore) > 29000 && std::abs(bestScore) < 31000) break;
+        if (std::abs(bestScore) > 29000 && std::abs(bestScore) < 31000 &&
+            currentDepth >= MATE_SCORE - std::abs(bestScore)) break;
     }
 
     result.best = bestMove;

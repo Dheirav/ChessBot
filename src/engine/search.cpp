@@ -1525,9 +1525,26 @@ static Move searchWorker(int threadIndex, Board board, const SearchLimits& limit
         // Optional: Check for mate scores and stop early if mate is found
         // Only stop if we detect an actual mate score (near ±MATE_SCORE which is around ±30000)
         // Do NOT stop for large evaluation scores from material imbalances
+        // Stop on a mate only once this search has actually reached it.
+        //
+        // A mate score at depth 1 is not something this search found. It is a
+        // transposition-table entry from an earlier search -- usually the
+        // ponder -- and stopping on it plays the table's move without ever
+        // searching deep enough to shorten the mate. The next move does the
+        // same with whatever the table holds for the new position, which was
+        // stored at a different time and carries a different distance, so the
+        // distance wanders instead of falling. Game rs8QkvCm, 2026-09-11: mate
+        // in 9 at move 49, then twenty-five moves of "mate in 14 to 19" at
+        // depth 1 on 30 to 100 nodes each, the king walking a6-b6-a6-b6, and a
+        // draw against a 1942. Requiring depth >= plies-to-mate means the mate
+        // has been verified by this search before it is trusted.
         if (abs(bestScore) > 29000 && abs(bestScore) < 31000) {
-            if (verbose) std::cout << "Mate detected at depth " << currentDepth << ", stopping search" << std::endl;
-            break;
+            const int matePlies = MATE_SCORE - abs(bestScore);
+            if (currentDepth >= matePlies) {
+                if (verbose) std::cout << "Mate in " << matePlies << " plies verified at depth "
+                                       << currentDepth << ", stopping search" << std::endl;
+                break;
+            }
         }
     }
     
