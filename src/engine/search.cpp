@@ -20,6 +20,21 @@
 
 #include "search_tuning.hpp"
 
+#ifdef ORDERING_STATS
+#include <atomic>
+// Which move produced each beta cutoff, bucketed by its position in the ordered
+// list; bucket 0 is the first move tried. Compiled out unless the build asks
+// for it, because this sits on the hottest line in the engine.
+//
+// The number it produced is the reason several features here are off. If the
+// first move already causes the cutoff nine times in ten, then everything that
+// reorders the moves *below* the first is competing for the remaining tenth,
+// and continuation history, history malus and capture history in quiescence all
+// measured null for exactly that reason. Measure this before proposing another
+// ordering refinement.
+std::atomic<uint64_t> g_cutoffAt[64];
+#endif
+
 uint64_t g_rootSeed = 0;
 
 static uint64_t rootRand(uint64_t& state) {
@@ -1054,6 +1069,9 @@ static int minimaxWithTT(SearchContext& ctx,
         }
         if (bestEval > alpha) alpha = bestEval;
         if (alpha >= beta) {
+#ifdef ORDERING_STATS
+            g_cutoffAt[moveIndex < 64 ? moveIndex - 1 : 63].fetch_add(1, std::memory_order_relaxed);
+#endif
             // Beta cutoff - update move ordering
             ctx.orderer.updateKillerMove(move, depth);
             ctx.orderer.updateHistory(move, depth, prevMove);

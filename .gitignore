@@ -51,6 +51,7 @@ tools/bbspeed
 tools/configsweep
 tools/evaldump
 tools/gendata
+tools/ordering-stats
 tools/review
 tools/treecost
 tools/tune

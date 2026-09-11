@@ -265,6 +265,14 @@ tools/treecost: tools/treecost.o $(ENGINE_OBJ)
 tools/configsweep: tools/configsweep.o $(ENGINE_OBJ)
 	$(CXX) $^ -o $@ $(LDFLAGS)
 
+# Cutoff distribution. Built from sources rather than the shared objects because
+# it needs -DORDERING_STATS, which the normal build deliberately omits: the
+# counter sits on the hottest line in the search.
+ordering-stats:
+	$(CXX) -std=c++17 -O2 -DORDERING_STATS -I./src -o tools/ordering-stats \
+	  tools/ordering-stats.cpp $(ENGINE_SRC) -pthread
+	./tools/ordering-stats
+
 # Everything that can go stale: the engine, every test binary, every tool.
 #
 # `make` builds ./chessbot alone, which is the right default and is also a trap:
@@ -368,4 +376,4 @@ remake:
 	$(MAKE) all
 
 # Mark these targets as not actual files
-.PHONY: everything gate-check all clean remake lichess profile review tests test-perft test-match test-gamestate test-evalref evalref-regen test-evalerror evalerror-baseline evalerror-corpus bench test-bench bench-regen test-timecontrol test-see test-bitboard test-bbequiv test-guiinput test-pgn test-uci
+.PHONY: ordering-stats everything gate-check all clean remake lichess profile review tests test-perft test-match test-gamestate test-evalref evalref-regen test-evalerror evalerror-baseline evalerror-corpus bench test-bench bench-regen test-timecontrol test-see test-bitboard test-bbequiv test-guiinput test-pgn test-uci
