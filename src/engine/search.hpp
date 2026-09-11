@@ -657,6 +657,36 @@ struct SearchOptions {
     // are switched off exactly where the nodes are.
     bool interiorPvs = false;
 
+    // --- Quiescence, which is a multiplier on the whole tree ---
+
+    // Search only the first few tactical moves at a quiescence node.
+    //
+    // Quiescence currently walks the entire sorted tactical list at every leaf,
+    // and it runs at every leaf, so whatever it costs multiplies the tree.
+    // Stockfish stops after two moves. This is a different bet from the eval
+    // margin ones that failed here: it reads the evaluation only through the
+    // mate guards, where `deltaPruning` at a 200cp margin cost 50 Elo and
+    // closed at +0.9 precisely because it priced moves against a static score
+    // this evaluation cannot supply accurately.
+    //
+    // Three exemptions, each load-bearing. A promotion changes the material on
+    // the board rather than trading it, so move count says nothing about it. A
+    // recapture on the square the previous move landed on is the whole reason
+    // quiescence exists. And a mate score in play is not a centipawn quantity.
+    //
+    // Missing, and the reason to start loose rather than at 2: Stockfish also
+    // exempts checking moves, which this engine cannot yet compute.
+    bool qMoveCount = false;
+
+    // Keep only the queen promotion in the tactical set unless the promotion is
+    // also a capture.
+    //
+    // Stockfish's make_promotions puts underpromotions in QUIETS, so its
+    // quiescence sees one move per quiet promotion push where this engine sees
+    // four. Narrow, because it needs a pawn on the seventh, and free: it is a
+    // strict subset of what is searched now.
+    bool qNoUnderpromo = false;
+
 
     // Penalise quiet moves that were searched and did not cause the cutoff.
     //

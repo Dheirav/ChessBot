@@ -1,5 +1,6 @@
 #include "bb_movegen.hpp"
 #include "bitboard_attacks.hpp"
+#include "search.hpp"
 #include "board.hpp"   // CastlingRight
 
 namespace {
@@ -41,7 +42,19 @@ inline void add(BBMoveList& out, int from, int to, BitboardMoveFlag flag,
 // Order matters and is not cosmetic: it has to match the pseudo-legal
 // generator's, because move ordering breaks ties by generation order and the
 // acceptance test is an exact node count.
-void addPromotions(BBMoveList& out, int from, int to, BitboardPieceType captured) {
+// `tacticalOnly` says this is the quiescence set rather than the full move list.
+// Under qNoUnderpromo a quiet promotion then contributes only the queen,
+// matching Stockfish's make_promotions, which files rook, bishop and knight
+// promotions under QUIETS unless the promotion also captures. It must NOT apply
+// to the full list: those are legal moves and dropping them loses them from the
+// main search, which is what tests/bbequiv caught when this was written into
+// the generator instead.
+void addPromotions(BBMoveList& out, int from, int to, BitboardPieceType captured,
+                   bool tacticalOnly) {
+    if (tacticalOnly && g_searchOptions.qNoUnderpromo && captured == BB_NONE) {
+        add(out, from, to, BBM_PROMOTION, BB_PAWN, captured, BB_QUEEN);
+        return;
+    }
     for (BitboardPieceType p : {BB_QUEEN, BB_ROOK, BB_BISHOP, BB_KNIGHT})
         add(out, from, to, BBM_PROMOTION, BB_PAWN, captured, p);
 }
@@ -107,7 +120,7 @@ void generatePawns(const Position& pos, BitboardColor us, BBMoveList& out,
     // emitted in the capture set rather than with the quiet pushes.
     if (wantCaps) {
         Bitboard promo = single & promoRank & checkMask & pinRay;
-        while (promo) { const int to = popLsb(promo); addPromotions(out, to - fwd, to, BB_NONE); }
+        while (promo) { const int to = popLsb(promo); addPromotions(out, to - fwd, to, BB_NONE, type == BB_GEN_CAPTURES); }
     }
 
     if (wantCaps) {
@@ -123,7 +136,8 @@ void generatePawns(const Position& pos, BitboardColor us, BBMoveList& out,
                 const int to = popLsb(caps);
                 const int from = to - delta;
                 const BitboardPieceType victim = victimAt(pos, them, to);
-                if ((1ULL << to) & promoRank) addPromotions(out, from, to, victim);
+                if ((1ULL << to) & promoRank)
+                    addPromotions(out, from, to, victim, type == BB_GEN_CAPTURES);
                 else add(out, from, to, BBM_CAPTURE, BB_PAWN, victim);
             }
         }

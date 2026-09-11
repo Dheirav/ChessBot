@@ -59,3 +59,4 @@ tests/data/texel.test.sf.epd
 tests/data/quiet-labeled.epd
 tests/data/ql.*.epd
 tests/data/own-archive.epd
+tools/configsweep

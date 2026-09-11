@@ -110,6 +110,14 @@ struct TacticalFilter {
     void reserve(size_t n) { out.reserve(n); }
     template <typename... Args> void emplace_back(Args&&... args) {
         Move m(std::forward<Args>(args)...);
+        // Under qNoUnderpromo a quiet promotion contributes only the queen,
+        // matching Stockfish's make_promotions, which files rook, bishop and
+        // knight promotions under QUIETS unless the promotion also captures.
+        // Quiescence therefore sees one move per promoting pawn here where it
+        // used to see four.
+        if (m.flag == PROMOTION && g_searchOptions.qNoUnderpromo &&
+            m.capturedPiece.type() == NONE && m.promotionPiece.type() != QUEEN)
+            return;
         if (m.flag == CAPTURE || m.flag == EN_PASSANT || m.flag == PROMOTION)
             out.push_back(m);
     }

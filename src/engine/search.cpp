@@ -170,6 +170,8 @@ const SearchOptionEntry SEARCH_OPTIONS[] = {
     {"detsort",      "detsort",  "DetSort",      &SearchOptions::deterministicSort},
     {"bbcore",       "bbcore",   "BitboardCore", &SearchOptions::bitboardCore},
     {"interiorpvs",  "interiorpvs","InteriorPvs", &SearchOptions::interiorPvs},
+    {"qmovecount",   "qmovecount","QMoveCount",   &SearchOptions::qMoveCount},
+    {"qnounderpromo","qnounderpromo","QNoUnderpromo",&SearchOptions::qNoUnderpromo},
     {"lmpdeep",      "lmpdeep",  "LmpDeep",      &SearchOptions::lmpDeep},
     {"nullverify",   "nullverify","NullVerify",   &SearchOptions::nullVerify},
     {"nulldepthr",   "nulldepthr","NullDepthR",   &SearchOptions::nullDepthR},
@@ -351,9 +353,12 @@ static MoveList generateCaptures(Board& board, PieceColor side) {
 // only how deep *this* quiescence descent has gone, which is what the bound
 // below applies to — the two differ because quiescence starts at whatever ply
 // the main search stopped at.
+// `prevTo` is the square the move that led here landed on, or -1 at the top of
+// a quiescence descent. Move-count pruning needs it: a recapture on that square
+// is the whole reason quiescence exists and must never be pruned by move count.
 static int quiescence(SearchContext& ctx,
                       Board& board, int ply, int qDepth, int alpha, int beta,
-                      const std::atomic<bool>& shouldStop) {
+                      const std::atomic<bool>& shouldStop, int prevTo = -1) {
     ++ctx.nodes;
     if (searchAborted(ctx, shouldStop)) {
         return 0;
@@ -454,8 +459,25 @@ static int quiescence(SearchContext& ctx,
                   return tie && MoveOrderer::tieKey(a.move) < MoveOrderer::tieKey(b.move);
               });
 
+    int searched = 0;
     for (size_t i = 0; i < count; ++i) {
         const Move& move = scored[i].move;
+
+        // --- Move-count pruning ---
+        // The list is ordered, so a tactical move this far down is unlikely to
+        // change the node's score, and quiescence multiplies through the whole
+        // tree. Exempt a recapture on the square the previous move landed on,
+        // which is the exchange quiescence exists to resolve; exempt
+        // promotions, which add material rather than trade it; and never prune
+        // while in check, where the list is evasions and skipping one loses the
+        // only escape.
+        if (g_searchOptions.qMoveCount && !inCheck &&
+            searched >= QS_MOVE_COUNT_LIMIT &&
+            move.flag != PROMOTION &&
+            move.to != prevTo &&
+            std::abs(alpha) < MATE_SCORE - 1000) {
+            continue;
+        }
 
         // Skip captures that lose material outright. Quiescence exists to
         // resolve tactics, and a capture the opponent simply recaptures for
@@ -491,8 +513,10 @@ static int quiescence(SearchContext& ctx,
             break;
         }
 
+        ++searched;
         UndoInfo undo = board.makeMove(move);
-        int score = -quiescence(ctx, board, ply + 1, qDepth + 1, -beta, -alpha, shouldStop);
+        int score = -quiescence(ctx, board, ply + 1, qDepth + 1, -beta, -alpha,
+                                shouldStop, move.to);
         board.unmakeMove(undo);
 
         if (searchAborted(ctx, shouldStop)) {

@@ -262,6 +262,29 @@ tools/bbspeed: tools/bbspeed.o $(ENGINE_OBJ)
 tools/treecost: tools/treecost.o $(ENGINE_OBJ)
 	$(CXX) $^ -o $@ $(LDFLAGS)
 
+tools/configsweep: tools/configsweep.o $(ENGINE_OBJ)
+	$(CXX) $^ -o $@ $(LDFLAGS)
+
+# Everything that can go stale: the engine, every test binary, every tool.
+#
+# `make` builds ./chessbot alone, which is the right default and is also a trap:
+# a source change followed by `make` and then `./tests/bench` reads a binary
+# built from the *previous* code and reports that nothing changed. That has
+# produced four false "no functional change" readings in one session, and it is
+# the same trap CLAUDE.md already warns about for `make tests` under a gate.
+# Use this before trusting any measurement.
+# Refuses while a match is running, because relinking tests/match under a live
+# gate is the one build action in this repo that can destroy hours of work.
+# CLAUDE.md says to check by hand; this checks instead.
+gate-check:
+	@if pgrep -x match >/dev/null 2>&1; then \
+	  echo "REFUSING: a match is running (pgrep -x match). Rebuilding tests/match"; \
+	  echo "would break it. Wait for the gate, or build a specific target."; \
+	  exit 1; \
+	fi
+
+everything: gate-check chessbot tools/configsweep tests/bbequiv tests/bench tests/bitboard_test tests/engine tests/evalerror tests/evalref tests/evaltrace tests/gamestate tests/guiinput tests/match tests/perft tests/pgn tests/see_test tests/timecontrol tools/bbspeed tools/evaldump tools/gendata tools/review tools/treecost
+
 bbspeed: tools/bbspeed
 	./tools/bbspeed
 
@@ -345,4 +368,4 @@ remake:
 	$(MAKE) all
 
 # Mark these targets as not actual files
-.PHONY: all clean remake lichess profile review tests test-perft test-match test-gamestate test-evalref evalref-regen test-evalerror evalerror-baseline evalerror-corpus bench test-bench bench-regen test-timecontrol test-see test-bitboard test-bbequiv test-guiinput test-pgn test-uci
+.PHONY: everything gate-check all clean remake lichess profile review tests test-perft test-match test-gamestate test-evalref evalref-regen test-evalerror evalerror-baseline evalerror-corpus bench test-bench bench-regen test-timecontrol test-see test-bitboard test-bbequiv test-guiinput test-pgn test-uci

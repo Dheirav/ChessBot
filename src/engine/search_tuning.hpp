@@ -105,6 +105,12 @@ static constexpr int LMP_DEEP_MAX_DEPTH = 10;
 static constexpr int LMP_DEEP_BASE      = 3;
 static constexpr int LMP_DEEP_SLOPE     = 3;
 
+// Tactical moves searched per quiescence node under SearchOptions::qMoveCount,
+// before the exemptions. Stockfish uses 2; this starts at 4 because it cannot
+// yet exempt checking moves and a prune that guesses wrong loses the move
+// rather than costing a re-search.
+static constexpr int QS_MOVE_COUNT_LIMIT = 4;
+
 static inline int lmrReduction(int depth, int moveIndex, bool improving, int history) {
     // Without the table the reduction is the old fixed ply, still nudged by
     // improving so the two toggles compose rather than one silencing the other.

@@ -241,9 +241,12 @@ static void generateCaptures(const Position& pos, BBMoveList& out) {
 // only how deep *this* quiescence descent has gone, which is what the bound
 // below applies to — the two differ because quiescence starts at whatever ply
 // the main search stopped at.
+// `prevTo` is the square the move that led here landed on, or -1 at the top of
+// a quiescence descent. Move-count pruning needs it: a recapture on that square
+// is the whole reason quiescence exists and must never be pruned by move count.
 static int quiescence(BBSearchContext& ctx,
                       Position& pos, int ply, int qDepth, int alpha, int beta,
-                      const std::atomic<bool>& shouldStop) {
+                      const std::atomic<bool>& shouldStop, int prevTo = -1) {
     ++ctx.nodes;
     if (searchAborted(ctx, shouldStop)) {
         return 0;
@@ -345,8 +348,19 @@ static int quiescence(BBSearchContext& ctx,
                   return tie && BBMoveOrderer::tieKey(a.move) < BBMoveOrderer::tieKey(b.move);
               });
 
+    int searched = 0;
     for (size_t i = 0; i < count; ++i) {
         const BitboardMove& move = scored[i].move;
+
+        // Move-count pruning: see the note in search.cpp. Exempts a recapture
+        // on the previous move's destination, promotions, and mate scores.
+        if (g_searchOptions.qMoveCount && !inCheck &&
+            searched >= QS_MOVE_COUNT_LIMIT &&
+            move.flag != BBM_PROMOTION &&
+            (int)move.to != prevTo &&
+            std::abs(alpha) < MATE_SCORE - 1000) {
+            continue;
+        }
 
         // Skip captures that lose material outright. Quiescence exists to
         // resolve tactics, and a capture the opponent simply recaptures for
@@ -382,8 +396,10 @@ static int quiescence(BBSearchContext& ctx,
             break;
         }
 
+        ++searched;
         PositionUndo undo = pos.makeMove(move);
-        int score = -quiescence(ctx, pos, ply + 1, qDepth + 1, -beta, -alpha, shouldStop);
+        int score = -quiescence(ctx, pos, ply + 1, qDepth + 1, -beta, -alpha,
+                                shouldStop, (int)move.to);
         pos.unmakeMove(undo);
 
         if (searchAborted(ctx, shouldStop)) {
