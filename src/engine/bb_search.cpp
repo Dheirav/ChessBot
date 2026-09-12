@@ -547,7 +547,12 @@ static int minimaxWithTT(BBSearchContext& ctx,
         ttMove = unpackBB(ttPacked);
     }
 
-    if (depth == 0) {
+    // <= 0 rather than == 0. Nothing produced a negative depth while the
+    // null-move reduction was clamped to depth - 2, but an unclamped reduction
+    // does, and a node function that only recognises exactly zero would carry
+    // a negative depth straight into move generation and recurse downward
+    // until the stack ran out. Stockfish drops into quiescence the same way.
+    if (depth <= 0) {
         int score = quiescence(ctx, pos, ply, 0, alpha, beta, shouldStop);
         // Quiescence is fail-hard: a result clipped to the window is only a
         // bound, not an exact score. Never store anything from a stopped
@@ -675,7 +680,7 @@ static int minimaxWithTT(BBSearchContext& ctx,
             R = NULL_R_BASE + depth / NULL_R_DIV;
             // Leave at least one real ply below the null move, or the reduced
             // search is a static evaluation wearing a search's name.
-            if (R > depth - 2) R = depth - 2;
+            if (NULL_R_CLAMP && R > depth - 2) R = depth - 2;
             if (R < 1) R = 1;
         }
         Position::NullUndo nu = pos.makeNullMove();

@@ -94,8 +94,20 @@ static constexpr int HIST_RED_MAX = 2;
 // Deliberately structural, with Stockfish's eval-dependent bonus term left out
 // of the first version, because every eval-reading heuristic gated here has
 // failed and the depth term reads nothing.
-static constexpr int NULL_R_BASE = 2;
-static constexpr int NULL_R_DIV  = 4;
+#ifndef NULL_R_BASE_N
+#define NULL_R_BASE_N 5
+#endif
+#ifndef NULL_R_DIV_N
+#define NULL_R_DIV_N 3
+#endif
+// Whether R is held to depth - 2. Stockfish does not clamp: its null-move
+// search may land below zero and drops straight into quiescence.
+#ifndef NULL_R_CLAMP_N
+#define NULL_R_CLAMP_N 0
+#endif
+static constexpr int NULL_R_BASE  = NULL_R_BASE_N;
+static constexpr int NULL_R_DIV   = NULL_R_DIV_N;
+static constexpr bool NULL_R_CLAMP = NULL_R_CLAMP_N != 0;
 
 // Late move pruning under SearchOptions::lmpDeep: keep base + slope*depth quiet
 // moves, at any depth up to the cap. Linear rather than the shipped quadratic,

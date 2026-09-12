@@ -13,8 +13,9 @@
 // ratio is not, and the quartiles say whether the effect is consistent or just
 // one position shouting.
 //
-//   ./tools/treecost <depth> <positions> <option>
+//   ./tools/treecost <depth> <positions> <option> [held-options]
 //   ./tools/treecost 8 200 detsort
+//   ./tools/treecost 9 200 nulldepthr nullverify,lmpdeep
 //
 #include "engine/board.hpp"
 #include "engine/move_lookup.hpp"
@@ -28,6 +29,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <sstream>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -74,9 +76,21 @@ int main(int argc, char** argv) {
     const int depth = std::atoi(argv[1]);
     const int want = std::atoi(argv[2]);
     const char* opt = argv[3];
+    // Options held on for BOTH sides, so a toggle can be measured in the
+    // configuration it actually ships in rather than against bare defaults.
+    const char* held = (argc > 4) ? argv[4] : "";
 
     initMoveLookupTables();
     g_searchOptions.quiet = true;
+    {
+        std::string h(held), one;
+        std::stringstream ss(h);
+        while (std::getline(ss, one, ','))
+            if (!one.empty() && !setSearchOption(g_searchOptions, one, true)) {
+                std::printf("unknown held option '%s'\n", one.c_str());
+                return 1;
+            }
+    }
     if (!setSearchOption(g_searchOptions, opt, false)) {
         std::printf("unknown search option '%s'\n", opt);
         return 1;
