@@ -208,81 +208,9 @@ SearchLimits parseGo(std::istringstream& is, bool& isPonder) {
     } else if (movetime > 0) {
         limits.moveTimeMs = movetime;
     } else if (wtime > 0 || btime > 0) {
-        bool white = (g_board.activeColor == COLOR_WHITE);
-        long remaining = white ? wtime : btime;
-        long increment = white ? winc : binc;
-
-        // Spend against the clock that will actually exist when the move
-        // lands, not the one quoted at the start of thinking.
-        remaining -= g_moveOverheadMs;
-        if (remaining < 1) remaining = 1;
-        // How many more moves to plan for.
-        //
-        // A constant divisor treats move 3 and move 53 alike, and since
-        // `remaining` shrinks the allocation decays geometrically — the clock
-        // gets spent where it matters least. The first 900+10 game after the
-        // soft/hard split spent 44 s a move over its first ten moves and 4.3 s
-        // over its last twenty, and drew an endgame it played at one second a
-        // move.
-        //
-        // timeAlloc counts down instead: plan for a game of about eighty moves,
-        // never assuming fewer than thirty left. The floor is what stops the
-        // allocation collapsing in a long game — with an increment there is
-        // always another move, so "moves remaining" must never reach zero.
-        //
-        // The increment is income, not savings. Spending it in full holds the
-        // clock level; halving it gives away half of that for nothing.
-        int moves;
-        if (g_searchOptions.timeAlloc) {
-            moves = (movestogo > 0) ? movestogo
-                                    : std::max(80 - g_pliesPlayed / 2, 30);
-        } else {
-            moves = (movestogo > 0) ? movestogo : 30;
-        }
-        long budget = g_searchOptions.timeAlloc
-                          ? remaining / moves + increment
-                          : remaining / moves + increment / 2;
-        // Never commit more than a fraction of what is left: an overrun here is
-        // a forfeit, and losing on time beats any depth gained.
-        long cap = remaining / 4;
-        if (budget > cap) budget = cap;
-        if (budget < 10) budget = 10;
-        limits.moveTimeMs = budget;
-
-        // Spend the budget instead of merely allocating it (BUGS.md 11).
-        //
-        // `budget` is a target, not a boundary: the cost of passing it slightly
-        // is a few seconds off a clock with hundreds on it, while the cost of
-        // stopping short of it is a whole iteration's worth of depth, thrown
-        // away every move. Only overrunning the *clock* is fatal, and that is
-        // what `cap` guards.
-        //
-        // So the search is given room to finish an iteration it has started —
-        // three times the target — bounded by the same quarter-of-the-clock cap
-        // the target itself respects. It rarely uses it: the soft limit still
-        // governs whether an iteration begins, and this only decides what
-        // happens to one already running.
-        if (g_searchOptions.softTime) {
-            // Bounded absolutely as well as proportionally, which is the
-            // repair for the forfeit on 2026-08-17.
-            //
-            // `budget * 3` alone is a *ratio*, and a ratio means different
-            // things at different clocks: 2 seconds of overshoot at
-            // --tc 30+0.33, where it was gated, and seventy at 900+10, where
-            // the engine took them and lost on time. One increment is the
-            // bound that does travel -- overshooting by it is self-financing,
-            // because the increment arrives on the next move, so a move that
-            // runs one increment long costs the clock nothing over the game.
-            //
-            // The multiple is kept as well, for the case an increment is zero
-            // or tiny: with no increment the bound would otherwise be the
-            // budget itself and the soft/hard split would do nothing at all.
-            long hard = budget + increment;
-            if (hard > budget * 3) hard = budget * 3;
-            if (hard > cap) hard = cap;
-            if (hard < budget) hard = budget;
-            limits.hardTimeMs = hard;
-        }
+        const bool white = (g_board.activeColor == COLOR_WHITE);
+        allocateMoveTime(white ? wtime : btime, white ? winc : binc, movestogo,
+                         g_pliesPlayed, g_moveOverheadMs, limits);
     }
     // Nothing specified: fall back to a depth-limited search rather than
     // thinking forever. A node budget counts as something specified.

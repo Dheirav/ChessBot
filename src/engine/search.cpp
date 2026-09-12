@@ -1142,6 +1142,97 @@ static int minimaxWithTT(SearchContext& ctx,
 //
 // `board` is taken **by value**: generateLegalMoves mutates the board it is
 // given and restores it, which is fine per thread and catastrophic shared.
+
+// How much of a clock to spend on one move.
+//
+// One rule, used by the UCI `go` handler and by the GUI's timed games, so a
+// budget decision made in one place cannot drift from the other. Every number
+// in here was paid for: the divisor, the cap, and the soft/hard split each have
+// a forfeit or a drawn endgame behind them, recorded in BUGS.md 11 and in the
+// comments below.
+//
+// `clockMs` is the mover's remaining time, `incrementMs` what arrives after the
+// move, `movesToGo` the moves until the next time control or 0 if none,
+// `pliesPlayed` how far into the game this is, and `overheadMs` the latency
+// between the engine deciding and the clock seeing it.
+void allocateMoveTime(long clockMs, long incrementMs, int movesToGo, int pliesPlayed,
+                      int overheadMs, SearchLimits& out) {
+    long remaining = clockMs;
+    long increment = incrementMs;
+
+    // Spend against the clock that will actually exist when the move
+    // lands, not the one quoted at the start of thinking.
+    remaining -= overheadMs;
+    if (remaining < 1) remaining = 1;
+    // How many more moves to plan for.
+    //
+    // A constant divisor treats move 3 and move 53 alike, and since
+    // `remaining` shrinks the allocation decays geometrically — the clock
+    // gets spent where it matters least. The first 900+10 game after the
+    // soft/hard split spent 44 s a move over its first ten moves and 4.3 s
+    // over its last twenty, and drew an endgame it played at one second a
+    // move.
+    //
+    // timeAlloc counts down instead: plan for a game of about eighty moves,
+    // never assuming fewer than thirty left. The floor is what stops the
+    // allocation collapsing in a long game — with an increment there is
+    // always another move, so "moves remaining" must never reach zero.
+    //
+    // The increment is income, not savings. Spending it in full holds the
+    // clock level; halving it gives away half of that for nothing.
+    int moves;
+    if (g_searchOptions.timeAlloc) {
+        moves = (movesToGo > 0) ? movesToGo
+                                : std::max(80 - pliesPlayed / 2, 30);
+    } else {
+        moves = (movesToGo > 0) ? movesToGo : 30;
+    }
+    long budget = g_searchOptions.timeAlloc
+                      ? remaining / moves + increment
+                      : remaining / moves + increment / 2;
+    // Never commit more than a fraction of what is left: an overrun here is
+    // a forfeit, and losing on time beats any depth gained.
+    long cap = remaining / 4;
+    if (budget > cap) budget = cap;
+    if (budget < 10) budget = 10;
+    out.moveTimeMs = budget;
+
+    // Spend the budget instead of merely allocating it (BUGS.md 11).
+    //
+    // `budget` is a target, not a boundary: the cost of passing it slightly
+    // is a few seconds off a clock with hundreds on it, while the cost of
+    // stopping short of it is a whole iteration's worth of depth, thrown
+    // away every move. Only overrunning the *clock* is fatal, and that is
+    // what `cap` guards.
+    //
+    // So the search is given room to finish an iteration it has started —
+    // three times the target — bounded by the same quarter-of-the-clock cap
+    // the target itself respects. It rarely uses it: the soft limit still
+    // governs whether an iteration begins, and this only decides what
+    // happens to one already running.
+    if (g_searchOptions.softTime) {
+        // Bounded absolutely as well as proportionally, which is the
+        // repair for the forfeit on 2026-08-17.
+        //
+        // `budget * 3` alone is a *ratio*, and a ratio means different
+        // things at different clocks: 2 seconds of overshoot at
+        // --tc 30+0.33, where it was gated, and seventy at 900+10, where
+        // the engine took them and lost on time. One increment is the
+        // bound that does travel -- overshooting by it is self-financing,
+        // because the increment arrives on the next move, so a move that
+        // runs one increment long costs the clock nothing over the game.
+        //
+        // The multiple is kept as well, for the case an increment is zero
+        // or tiny: with no increment the bound would otherwise be the
+        // budget itself and the soft/hard split would do nothing at all.
+        long hard = budget + increment;
+        if (hard > budget * 3) hard = budget * 3;
+        if (hard > cap) hard = cap;
+        if (hard < budget) hard = budget;
+        out.hardTimeMs = hard;
+    }
+}
+
 // Whether to start another iteration, given what the budget has left.
 //
 // Extracted from searchWorker because it decides nothing about the position:

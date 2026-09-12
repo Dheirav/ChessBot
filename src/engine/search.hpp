@@ -1063,6 +1063,11 @@ Move findBestMoveIterativeDeepening(Board& board, const SearchLimits& limits,
                                    const std::vector<uint64_t>& gameHistory = {});
 
 // Depth-only convenience overload, for tests and for callers with no clock.
+// One time-allocation rule for every caller with a clock. Fills moveTimeMs
+// and hardTimeMs; see the definition for what each number is protecting.
+void allocateMoveTime(long clockMs, long incrementMs, int movesToGo, int pliesPlayed,
+                      int overheadMs, SearchLimits& out);
+
 Move findBestMoveIterativeDeepening(Board& board, int maxDepth,
                                    const std::atomic<bool>& shouldStop,
                                    TranspositionTable& tt,
