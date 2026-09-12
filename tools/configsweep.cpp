@@ -22,6 +22,7 @@
 #include "engine/movegen.hpp"
 #include "engine/search.hpp"
 #include "engine/transposition_table.hpp"
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdio>
@@ -39,11 +40,8 @@ struct Config { const char* label; const char* opts; };
 // Each row is one feature set. "" is the configuration that ships today.
 const Config CONFIGS[] = {
     {"shipped",            ""},
-    {"null+verify+lmp",    "nulldepthr,nullverify,lmpdeep"},
-    {"q2 bare",            "bbcore,qmovecount,qnounderpromo"},
-    {"q2+check",           "bbcore,qmovecount,qnounderpromo,qcheckexempt"},
-    {"q2+check+capthist",  "bbcore,qmovecount,qnounderpromo,qcheckexempt,capthist,qcapthist"},
-    {"everything",         "bbcore,nulldepthr,nullverify,lmpdeep,interiorpvs,qmovecount,qnounderpromo,qcheckexempt,capthist,qcapthist"},
+    {"bot config",
+        "bbcore,nulldepthr,nullverify,lmpdeep,interiorpvs,qmovecount,qnounderpromo,qcheckexempt,capthist,qcapthist"},
 };
 const int NUM_CONFIGS = (int)(sizeof(CONFIGS) / sizeof(CONFIGS[0]));
 
@@ -134,11 +132,12 @@ int main(int argc, char** argv) {
     std::printf("\r                              \r");
 
     std::vector<std::string> disagreements;
-    std::printf("  %-20s %7s %9s %s\n", "configuration", "depth", "agree", "differs on");
+    std::printf("  %-20s %7s %6s %9s %s\n", "configuration", "mean", "median", "agree", "differs on");
     for (int c = 0; c < NUM_CONFIGS; ++c) {
         SearchOptions o;
         applyOpts(o, CONFIGS[c].opts);
         long totalDepth = 0;
+        std::vector<int> depths;
         int agree = 0;
         std::string differs;
         for (size_t i = 0; i < fens.size(); ++i) {
@@ -146,6 +145,7 @@ int main(int argc, char** argv) {
             const Result r = search(fens[i], seconds * 1000, o);
             std::cout.rdbuf(saved);
             totalDepth += r.depth;
+            depths.push_back(r.depth);
             if (r.move == reference[i]) ++agree;
             else {
                 if (differs.size() < 30) differs += std::to_string(i) + " ";
@@ -156,19 +156,25 @@ int main(int argc, char** argv) {
                                         + "\t" + reference[i] + "\t" + r.move);
             }
         }
-        std::printf("  %-20s %7.2f %6d/%zu  %s\n", CONFIGS[c].label,
-                    (double)totalDepth / (double)fens.size(), agree, fens.size(),
+        std::sort(depths.begin(), depths.end());
+        const double median = depths.empty() ? 0.0
+            : (depths.size() % 2 ? depths[depths.size() / 2]
+               : (depths[depths.size() / 2 - 1] + depths[depths.size() / 2]) / 2.0);
+        std::printf("  %-20s %7.2f %6.1f %6d/%zu  %s\n", CONFIGS[c].label,
+                    (double)totalDepth / (double)fens.size(), median, agree, fens.size(),
                     differs.c_str());
         std::fflush(stdout);
     }
 
     // Written for tools/adjudicate.py, which asks Stockfish which move was
     // actually better rather than which matched.
-    if (FILE* f = std::fopen("/tmp/disagreements.tsv", "w")) {
+    const char* outPath = std::getenv("DISAGREEMENTS");
+    if (!outPath) outPath = "/tmp/disagreements.tsv";
+    if (FILE* f = std::fopen(outPath, "w")) {
         for (const std::string& d : disagreements) std::fprintf(f, "%s\n", d.c_str());
         std::fclose(f);
-        std::printf("\n  %zu disagreements written to /tmp/disagreements.tsv\n",
-                    disagreements.size());
+        std::printf("\n  %zu disagreements written to %s\n",
+                    disagreements.size(), outPath);
     }
     return 0;
 }
