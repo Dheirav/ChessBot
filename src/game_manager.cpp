@@ -1,4 +1,5 @@
 #include "game_manager.hpp"
+#include "engine/search.hpp"
 #include "engine/movegen.hpp"
 #include "engine/chessbot_engine.hpp"
 #include "engine/pgn.hpp"
@@ -537,7 +538,26 @@ bool GameManager::isGameOver() const {
     return currentState == GameState::GAME_OVER_CHECKMATE ||
            currentState == GameState::GAME_OVER_STALEMATE ||
            currentState == GameState::GAME_OVER_DRAW ||
-           currentState == GameState::GAME_OVER_RESIGNATION;
+           currentState == GameState::GAME_OVER_RESIGNATION ||
+           currentState == GameState::GAME_OVER_TIMEOUT;
+}
+
+void GameManager::flagFall(PieceColor loser) {
+    if (isGameOver()) return;
+    stopEngineAndDiscardPending();
+    currentState = GameState::GAME_OVER_TIMEOUT;
+    gameResult = std::string(loser == COLOR_WHITE ? "White" : "Black") + " lost on time";
+    std::cout << gameResult << std::endl;
+}
+
+void GameManager::setEngineClock(long remainingMs, long incrementMs) {
+    auto* bot = dynamic_cast<ChessBotEngine*>(engine.get());
+    if (!bot) return;
+    SearchLimits limits;
+    // The GUI's clock is the engine's own process, so the overhead between
+    // deciding and the clock seeing it is a frame, not a network round trip.
+    allocateMoveTime(remainingMs, incrementMs, 0, (int)moveHistory.size(), 20, limits);
+    bot->setTimeBudget(limits.moveTimeMs, limits.hardTimeMs);
 }
 
 void GameManager::saveStateForUndo() {
@@ -598,6 +618,10 @@ std::string GameManager::savePgn(const std::string& directory) const {
         case GameState::GAME_OVER_RESIGNATION:
             // resignGame() is always the human resigning.
             tags.result = (humanSide == COLOR_WHITE) ? "0-1" : "1-0";
+            break;
+        case GameState::GAME_OVER_TIMEOUT:
+            // The side to move at the flag is the loser; gameResult names it.
+            tags.result = (gameResult.rfind("White", 0) == 0) ? "0-1" : "1-0";
             break;
         case GameState::GAME_OVER_STALEMATE:
         case GameState::GAME_OVER_DRAW:

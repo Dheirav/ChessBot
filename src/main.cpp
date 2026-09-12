@@ -67,6 +67,10 @@ int main(int argc, char** argv) {
     
     // Connect GUI and game manager
     guiManager.setGameManager(&gameManager);
+    guiManager.setTimeControl(settings.timeControlBaseMs, settings.timeControlIncMs);
+    if (settings.timeControlBaseMs > 0)
+        std::cout << "Time control: " << settings.timeControlBaseMs / 60000.0 << "+"
+                  << settings.timeControlIncMs / 1000.0 << std::endl;
     
     // Ask user for side preference. In play-along the answer only decides which
     // way the board faces and which side the evaluation is signed for: both

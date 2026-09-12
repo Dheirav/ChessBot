@@ -14,6 +14,7 @@
 //   search_depth                = <1..64>
 //   transposition_table_size_mb = <integer>
 //   log_evaluations             = <on|off>
+//   time_control                = <minutes>[+<seconds>] | none
 //
 // Example chessbot.conf:
 //   # Engine settings
@@ -21,6 +22,7 @@
 //   searchDepth = 8
 //   transpositionTableSizeMB = 256
 //   logEvaluations = off
+//   timeControl = 5+3
 struct Settings {
     // Wall-clock budget per move. This, not searchDepth, is what normally ends
     // the engine's search: the same depth costs milliseconds in an endgame and
@@ -33,6 +35,20 @@ struct Settings {
     // old default was discarding almost the whole of the 22x speedup measured
     // in BACKLOG.md section 7.
     int searchDepth = 8;
+
+    // A time control for GUI games, in the notation every chess site uses:
+    // "5+3" is five minutes a side with three seconds added after each move,
+    // "10" is ten minutes and no increment. Both sides get the same clock,
+    // the human's runs while it is their turn, and a flag is a loss.
+    //
+    // Absent or "none": untimed, which is how the GUI has always played, with
+    // the engine spending moveTimeMs per move and the clocks counting up.
+    // With a control set, moveTimeMs is ignored: the engine's budget for each
+    // move comes from its remaining clock through the same allocation rule
+    // the UCI path uses against lichess, so it plays the clock the way the
+    // bot does.
+    long timeControlBaseMs = 0;   // 0 = untimed
+    long timeControlIncMs  = 0;
 
     int transpositionTableSizeMB = 256;
 
@@ -60,6 +76,25 @@ inline bool applyKey(const std::string& key, const std::string& value, Settings&
     if (key == "moveTimeMs" || key == "move_time_ms") {
         int v = std::atoi(value.c_str());
         if (v >= 0) s.moveTimeMs = v;
+        return true;
+    }
+    if (key == "timeControl" || key == "time_control") {
+        // "<minutes>[+<seconds>]", or "none". Fractional minutes allowed
+        // ("0.5+1" is a thirty-second game), because short controls are
+        // useful for testing the clock itself.
+        if (value == "none" || value == "off" || value == "0") {
+            s.timeControlBaseMs = 0;
+            s.timeControlIncMs = 0;
+            return true;
+        }
+        const size_t plus = value.find('+');
+        const double base = std::atof(value.substr(0, plus).c_str());
+        const double inc = (plus == std::string::npos) ? 0.0
+                         : std::atof(value.substr(plus + 1).c_str());
+        if (base > 0) {
+            s.timeControlBaseMs = (long)(base * 60000.0);
+            s.timeControlIncMs = (long)(inc * 1000.0);
+        }
         return true;
     }
     if (key == "searchDepth" || key == "search_depth") {

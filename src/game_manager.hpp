@@ -18,7 +18,8 @@ enum class GameState {
     GAME_OVER_CHECKMATE,
     GAME_OVER_STALEMATE,
     GAME_OVER_DRAW,
-    GAME_OVER_RESIGNATION
+    GAME_OVER_RESIGNATION,
+    GAME_OVER_TIMEOUT       // a flag fell; whoever was on move lost
 };
 
 enum class PlayerType {
@@ -131,6 +132,15 @@ public:
     void undoLastMove();
     void redoLastMove();
     void resignGame();
+
+    // The side to move ran out of clock. Ends the game the way a mate would
+    // for the side that flagged.
+    void flagFall(PieceColor loser);
+
+    // Give the engine its budget for the next move from a real clock, using
+    // the same allocation rule the UCI path uses against lichess. No-op for an
+    // engine that is not ChessBotEngine.
+    void setEngineClock(long remainingMs, long incrementMs);
     
     // Game information
     std::string getGameResult() const { return gameResult; }

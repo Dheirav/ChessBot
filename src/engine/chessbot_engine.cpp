@@ -78,6 +78,12 @@ void ChessBotEngine::setMoveTimeMs(int ms) {
     if (ms >= 0) {
         moveTimeMs = ms;
     }
+    hardTimeMs.store(0);
+}
+
+void ChessBotEngine::setTimeBudget(long softMs, long hardMs) {
+    moveTimeMs.store((int)softMs);
+    hardTimeMs.store((int)hardMs);
 }
 
 int ChessBotEngine::getMoveTimeMs() const {
@@ -113,9 +119,10 @@ void ChessBotEngine::findBestMoveAsync(const Board& board, MoveCallback callback
                 // Hold the TT lock for the whole search so that
                 // clear/resize/stats calls from other threads are serialized.
                 std::lock_guard<std::mutex> ttLock(ttMutex);
+                SearchLimits limits(searchDepth.load(), moveTimeMs.load());
+                limits.hardTimeMs = hardTimeMs.load();
                 bestMove = ::findBestMoveIterativeDeepening(
-                    searchBoard, SearchLimits(searchDepth.load(), moveTimeMs.load()),
-                    stopSearch, *transpositionTable, gameHistory);
+                    searchBoard, limits, stopSearch, *transpositionTable, gameHistory);
             }
             
             // Deliver the result even when interrupted: iterative deepening

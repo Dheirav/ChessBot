@@ -29,7 +29,8 @@ void renderBoard(sf::RenderTarget& window, const Board& board,
 
 // The right-hand panel: status, clocks, live search readout and move list.
 void renderSidePanel(sf::RenderTarget& window, const GameManager& game,
-                     long whiteClockMs, long blackClockMs);
+                     long whiteClockMs, long blackClockMs,
+                     bool timed = false, long tcBaseMs = 0, long tcIncMs = 0);
 
 // The move the engine would play, drawn on the board as an arrow.
 //

@@ -13,9 +13,16 @@
  */
 class GUIManager {
 private:
-    // Cumulative thinking time per side, in milliseconds.
+    // Per-side clocks in milliseconds. Untimed, they count up from zero as
+    // thinking time; under a time control they count down from the base, gain
+    // the increment after each move, and a clock reaching zero is a loss.
     long whiteClockMs = 0;
     long blackClockMs = 0;
+    long tcBaseMs = 0;   // 0 = untimed
+    long tcIncMs = 0;
+    // Whose turn it was on the previous tick, so the increment lands exactly
+    // once, on the side that just moved.
+    PieceColor lastSideToMove = COLOR_WHITE;
     std::chrono::steady_clock::time_point lastTick = std::chrono::steady_clock::now();
     bool wasThinking = false;
 
@@ -40,6 +47,13 @@ public:
     // Initialization
     bool initialize();
     void setGameManager(GameManager* gm);
+
+    // A time control for every game from now on. 0 base means untimed.
+    void setTimeControl(long baseMs, long incMs);
+    bool isTimed() const { return tcBaseMs > 0; }
+
+    // Reset the position and the clocks. Bound to N.
+    void newGame();
     
     // Main loop
     void run();

@@ -23,6 +23,10 @@ private:
     // Wall-clock budget per move, 0 for depth-only. This is normally what ends
     // the search; searchDepth is a ceiling.
     std::atomic<int> moveTimeMs;
+    // The point past which a running iteration is abandoned, as opposed to
+    // moveTimeMs, past which a new one is not begun. 0 means they coincide.
+    // Set per move by a caller with a clock; see setTimeBudget.
+    std::atomic<int> hardTimeMs{0};
     std::atomic<bool> thinking;
     std::atomic<bool> stopSearch;
     std::string engineName;
@@ -55,6 +59,9 @@ public:
     int getSearchDepth() const override;
 
     void setMoveTimeMs(int ms);
+    // Soft and hard budget for the *next* move, from a clock. Both cleared to
+    // the plain moveTimeMs behaviour by setMoveTimeMs.
+    void setTimeBudget(long softMs, long hardMs);
     int getMoveTimeMs() const;
     
     void findBestMoveAsync(const Board& board, MoveCallback callback,

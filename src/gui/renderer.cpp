@@ -252,6 +252,7 @@ std::string stateLabel(const GameManager& game) {
         case GameState::GAME_OVER_STALEMATE:   return "Stalemate";
         case GameState::GAME_OVER_DRAW:        return "Draw";
         case GameState::GAME_OVER_RESIGNATION: return "Resignation";
+        case GameState::GAME_OVER_TIMEOUT: return "Time";
         default: break;
     }
     if (game.isEngineThinking()) return "Engine thinking";
@@ -261,7 +262,8 @@ std::string stateLabel(const GameManager& game) {
 }  // namespace
 
 void renderSidePanel(sf::RenderTarget& window, const GameManager& game,
-                     long whiteClockMs, long blackClockMs) {
+                     long whiteClockMs, long blackClockMs,
+                     bool timed, long tcBaseMs, long tcIncMs) {
     sf::RectangleShape bg(sf::Vector2f((float)PANEL_WIDTH, (float)WINDOW_HEIGHT));
     bg.setPosition(PANEL_X, 0.f);
     bg.setFillColor(PANEL_BG);
@@ -294,9 +296,22 @@ void renderSidePanel(sf::RenderTarget& window, const GameManager& game,
 
         drawText(window, white ? "White" : "Black", left, y, 15,
                  onMove ? ACCENT : TEXT_DIM, onMove);
-        drawText(window, hud::formatClock(white ? whiteClockMs : blackClockMs),
-                 left + 150.f, y, 15, onMove ? TEXT_MAIN : TEXT_DIM, onMove);
+        const long ms = white ? whiteClockMs : blackClockMs;
+        // Under a control, a clock inside its last twenty seconds turns red
+        // before it turns into a loss.
+        const bool low = timed && ms < 20000 && !over;
+        drawText(window, hud::formatClock(ms), left + 150.f, y, 15,
+                 low ? sf::Color(220, 80, 70) : (onMove ? TEXT_MAIN : TEXT_DIM), onMove || low);
         y += 34.f;
+    }
+    if (timed) {
+        char tc[32];
+        std::snprintf(tc, sizeof(tc), "%g+%g", tcBaseMs / 60000.0, tcIncMs / 1000.0);
+        drawText(window, std::string("Time control ") + tc + "   N: new game", left, y, 12, TEXT_DIM, false);
+        y += 22.f;
+    } else {
+        drawText(window, "N: new game", left, y, 12, TEXT_DIM, false);
+        y += 22.f;
     }
     y += 10.f;
 

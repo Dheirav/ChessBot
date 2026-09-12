@@ -106,6 +106,25 @@ void GUIManager::handleEvents() {
 // status in step with the engine. Driven from the frame loop rather than from
 // move events, because a clock that only updates when a move is made is not a
 // clock.
+void GUIManager::setTimeControl(long baseMs, long incMs) {
+    tcBaseMs = baseMs;
+    tcIncMs = incMs;
+    whiteClockMs = blackClockMs = isTimed() ? tcBaseMs : 0;
+    lastSideToMove = COLOR_WHITE;
+}
+
+void GUIManager::newGame() {
+    if (!gameManager) return;
+    gameManager->startNewGame();
+    whiteClockMs = blackClockMs = isTimed() ? tcBaseMs : 0;
+    lastSideToMove = COLOR_WHITE;
+    lastTick = std::chrono::steady_clock::now();
+    resignArmed = false;
+    wasThinking = false;
+    hud::endSearch();
+    setStatus("New game", 3);
+}
+
 void GUIManager::tickClocks() {
     const auto now = std::chrono::steady_clock::now();
     const long dt = (long)std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -113,8 +132,28 @@ void GUIManager::tickClocks() {
     lastTick = now;
 
     if (!gameManager || gameManager->isGameOver()) return;
-    if (gameManager->getCurrentPlayer() == COLOR_WHITE) whiteClockMs += dt;
-    else                                               blackClockMs += dt;
+    const PieceColor side = gameManager->getCurrentPlayer();
+
+    if (!isTimed()) {
+        if (side == COLOR_WHITE) whiteClockMs += dt;
+        else                     blackClockMs += dt;
+    } else {
+        // The side that just moved gets its increment the moment the turn
+        // passes, which is when the move is made, not when it was decided.
+        if (side != lastSideToMove) {
+            if (lastSideToMove == COLOR_WHITE) whiteClockMs += tcIncMs;
+            else                               blackClockMs += tcIncMs;
+            lastSideToMove = side;
+        }
+        long& clock = (side == COLOR_WHITE) ? whiteClockMs : blackClockMs;
+        clock -= dt;
+        if (clock <= 0) {
+            clock = 0;
+            gameManager->flagFall(side);
+            setStatus(std::string(side == COLOR_WHITE ? "White" : "Black") + " lost on time", 8);
+            return;
+        }
+    }
 
     const bool thinking = gameManager->isEngineThinking();
     if (thinking && !wasThinking) hud::beginSearch(gameManager->getEngineMoveTimeMs());
@@ -132,7 +171,8 @@ void GUIManager::update() {
     if (state == GameState::GAME_OVER_CHECKMATE ||
         state == GameState::GAME_OVER_STALEMATE ||
         state == GameState::GAME_OVER_DRAW ||
-        state == GameState::GAME_OVER_RESIGNATION) {
+        state == GameState::GAME_OVER_RESIGNATION ||
+        state == GameState::GAME_OVER_TIMEOUT) {
         
         // Game is over, but keep window open to show final position
         static bool gameOverMessageShown = false;
@@ -147,6 +187,10 @@ void GUIManager::update() {
     
     // Check if it's engine's turn and request move
     if (state == GameState::WAITING_FOR_ENGINE && !gameManager->isEngineThinking()) {
+        if (isTimed()) {
+            const bool white = (gameManager->getCurrentPlayer() == COLOR_WHITE);
+            gameManager->setEngineClock(white ? whiteClockMs : blackClockMs, tcIncMs);
+        }
         gameManager->requestEngineMove();
     }
     
@@ -180,7 +224,7 @@ void GUIManager::render() {
     if (gameManager->isCoachMode())
         renderSuggestionArrow(window, gameManager->getSuggestion(), input.isFlipped());
     input.drawDraggedPiece(window, textures);
-    renderSidePanel(window, *gameManager, whiteClockMs, blackClockMs);
+    renderSidePanel(window, *gameManager, whiteClockMs, blackClockMs, isTimed(), tcBaseMs, tcIncMs);
     renderGameOverBanner(window, *gameManager);
     // The resign question outranks a status line: it is waiting on an answer.
     if (resignArmed && !gameManager->isGameOver()) {
@@ -271,6 +315,11 @@ void GUIManager::handleKeyboardInput(const sf::Event& event) {
             std::cout << "Game saved to " << path << std::endl;
             setStatus("Saved " + path);
         }
+    }
+    // New game with N. Not Ctrl+N, because the promotion dialog is the only
+    // other thing that reads N and it owns the keyboard while open.
+    else if (event.key.code == sf::Keyboard::N && !ctrl) {
+        newGame();
     }
     // Arm resignation with R
     else if (event.key.code == sf::Keyboard::R && !ctrl) {
