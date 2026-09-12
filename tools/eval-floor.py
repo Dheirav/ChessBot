@@ -37,7 +37,27 @@ def start():
 
 
 def evaluate(engine, fen, depth):
-    """Centipawns from White's point of view, matching the corpus labels."""
+    """Centipawns from White's point of view, matching the corpus labels.
+
+    depth 0 uses Stockfish's `eval` command: its static evaluation with no
+    search at all, which is the strict definition of the floor. Any depth
+    above 0 runs a search to that depth, which sees tactics a static term
+    cannot and so reports a lower, flattering floor.
+    """
+    if depth <= 0:
+        engine.stdin.write(f"position fen {fen}\neval\n")
+        engine.stdin.flush()
+        # `eval` prints a table then "Final evaluation +2.24 (white side)"; it
+        # ends with no sentinel, so read until that line.
+        for line in engine.stdout:
+            if line.startswith("Final evaluation"):
+                tok = line.split()
+                try:
+                    v = float(tok[2])
+                except ValueError:
+                    return None
+                return int(round(v * 100))
+        return None
     engine.stdin.write(f"position fen {fen}\ngo depth {depth}\n")
     engine.stdin.flush()
     cp, stm_white = None, fen.split()[1] == "w"
@@ -58,7 +78,7 @@ def evaluate(engine, fen, depth):
 
 def main():
     path = sys.argv[1] if len(sys.argv) > 1 else "tests/data/evalerr.epd"
-    depth = 1
+    depth = 0
     if "--depth" in sys.argv:
         depth = int(sys.argv[sys.argv.index("--depth") + 1])
 
@@ -77,7 +97,7 @@ def main():
         if label is not None and tag:
             rows.append((fen, label, tag))
 
-    print(f"{len(rows)} positions, Stockfish depth {depth} against the depth-16 label\n")
+    print(f"{len(rows)} positions, Stockfish {'static eval' if depth <= 0 else f'depth {depth}'} against the depth-16 label\n")
     engine = start()
     acc = {}
     for i, (fen, label, tag) in enumerate(rows, 1):

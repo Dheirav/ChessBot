@@ -130,9 +130,15 @@ sign flips — a healthy static evaluation — and **544 cp** on `comp` with
 **57.9%** sign flips. That gap is the defect, stated as a number that takes a
 second to recompute.
 
-**The corpus has a floor, and it is high.** Stockfish's own evaluation at
-depth 1 sits **282 cp** from its depth-16 evaluation over these positions,
-against our static evaluation's 572. Roughly half the gap is therefore
+**The corpus has a floor, and it is high.** Stockfish's own static
+evaluation (`eval`, no search at all) sits **291 cp** from its depth-16
+evaluation over the `comp` positions, against our 544, and **142 cp** on
+`ctl` against our 182. Measured 2026-09-12 with `tools/eval-floor.py`; an
+earlier reading of 282 came from a different Stockfish build. The `ctl` floor
+had never been computed before, and it is the number that matters: 40 cp of
+headroom against a world-class neural evaluation is the control positions
+telling you they are already about as good as a static view gets. The 252 cp
+on `comp` is the whole of what evaluation work can win. Roughly half the gap is therefore
 dynamics — what search finds, not what a term can score — and **no evaluation
 change can remove it**. The addressable part is the difference between those
 two numbers: our static view is about twice as far from the truth as a
