@@ -39,7 +39,6 @@ struct Config { const char* label; const char* opts; };
 
 // Each row is one feature set. "" is the configuration that ships today.
 const Config CONFIGS[] = {
-    {"shipped",            ""},
     {"bot config",
         "bbcore,nulldepthr,nullverify,lmpdeep,interiorpvs,qmovecount,qnounderpromo,qcheckexempt,capthist,qcapthist"},
 };
@@ -110,6 +109,9 @@ int main(int argc, char** argv) {
     const int refMult = (argc > 3) ? std::atoi(argv[3]) : 4;
 
     initMoveLookupTables();
+    // THREADS=6 measures the configuration the bot actually runs; the default
+    // of one is what makes the numbers reproducible.
+    if (const char* t = std::getenv("THREADS")) setThreadCount(std::atoi(t));
     std::streambuf* saved = std::cout.rdbuf();
     std::ostringstream swallow;
 
