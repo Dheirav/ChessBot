@@ -179,7 +179,17 @@ static int countMobility(const Board& board, PieceColor color, int kingSq) {
 // what is left.
 //
 // Off by default (KING_DANGER_SCALE = 0), as an unmeasured term must be.
-static const int KING_DANGER_WEIGHT[7] = { 0, 0, 1, 3, 3, 4, 6 };  // by PieceType
+// Under EVAL_TUNING the king-danger parameters are mutable globals so a tuner
+// can drive them without a rebuild per setting; tools/kstune does exactly that.
+// The shipped build keeps them as constants, folded at compile time.
+#ifdef EVAL_TUNING
+  #define KD_WEIGHT
+  #define KD_TABLE
+#else
+  #define KD_WEIGHT static const
+  #define KD_TABLE static const
+#endif
+KD_TABLE int KING_DANGER_WEIGHT[7] = { 0, 0, 1, 3, 3, 4, 6 };  // by PieceType
 // Percent; 0 is off, 100 is as written. Overridable at build time so variants
 // can be compared without editing the file, which matters because an evaluation
 // change cannot be A/B'd inside one process: g_evalCache is keyed on position
@@ -188,31 +198,31 @@ static const int KING_DANGER_WEIGHT[7] = { 0, 0, 1, 3, 3, 4, 6 };  // by PieceTy
 #ifndef KING_DANGER_SCALE_PCT
 #define KING_DANGER_SCALE_PCT 0
 #endif
-static const int KING_DANGER_SCALE = KING_DANGER_SCALE_PCT;
+KD_WEIGHT int KING_DANGER_SCALE = KING_DANGER_SCALE_PCT;
 #ifndef KING_DANGER_MIN_ATTACKERS_N
 #define KING_DANGER_MIN_ATTACKERS_N 2
 #endif
-static const int KING_DANGER_MIN_ATTACKERS = KING_DANGER_MIN_ATTACKERS_N;
+KD_WEIGHT int KING_DANGER_MIN_ATTACKERS = KING_DANGER_MIN_ATTACKERS_N;
 #ifndef KING_DANGER_OFFSET_N
 #define KING_DANGER_OFFSET_N 0
 #endif
-static const int KING_DANGER_OFFSET = KING_DANGER_OFFSET_N;
+KD_WEIGHT int KING_DANGER_OFFSET = KING_DANGER_OFFSET_N;
 #ifndef KING_DANGER_DEFENDER_W_N
 #define KING_DANGER_DEFENDER_W_N 0
 #endif
-static const int KING_DANGER_DEFENDER_W = KING_DANGER_DEFENDER_W_N;
+KD_WEIGHT int KING_DANGER_DEFENDER_W = KING_DANGER_DEFENDER_W_N;
 #ifndef KING_DANGER_WEAK_W_N
 #define KING_DANGER_WEAK_W_N 0
 #endif
-static const int KING_DANGER_WEAK_W = KING_DANGER_WEAK_W_N;
+KD_WEIGHT int KING_DANGER_WEAK_W = KING_DANGER_WEAK_W_N;
 #ifndef KING_DANGER_CHECK_W_N
 #define KING_DANGER_CHECK_W_N 0
 #endif
-static const int KING_DANGER_CHECK_W = KING_DANGER_CHECK_W_N;
+KD_WEIGHT int KING_DANGER_CHECK_W = KING_DANGER_CHECK_W_N;
 #ifndef KING_DANGER_NO_QUEEN_CUT_N
 #define KING_DANGER_NO_QUEEN_CUT_N 0
 #endif
-static const int KING_DANGER_NO_QUEEN_CUT = KING_DANGER_NO_QUEEN_CUT_N;
+KD_WEIGHT int KING_DANGER_NO_QUEEN_CUT = KING_DANGER_NO_QUEEN_CUT_N;
 
 // Attack information needed by king safety, and by nothing else.
 //

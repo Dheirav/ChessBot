@@ -51,7 +51,10 @@ tools/bbspeed
 tools/configsweep
 tools/evaldump
 tools/gendata
+tools/kstune
 tools/ordering-stats
 tools/review
 tools/treecost
 tools/tune
+build/
+__pycache__/

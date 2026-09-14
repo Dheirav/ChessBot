@@ -330,6 +330,15 @@ tools/tune: build/tune/tune.o $(TUNE_ENGINE_OBJ)
 
 tune: tools/tune
 
+# Fit the king-danger parameters to the evaluation-error corpus under the
+# two-tag constraint. Same tuning build as tools/tune.
+build/tune/kstune.o: tools/kstune.cpp
+	@mkdir -p build/tune
+	$(CXX) $(CXXFLAGS) -DEVAL_TUNING -c $< -o $@
+tools/kstune: build/tune/kstune.o $(TUNE_ENGINE_OBJ)
+	$(CXX) $^ -o $@ $(LDFLAGS)
+kstune: tools/kstune
+
 # --- Profiling ---
 #
 # gprof rather than perf: perf is unavailable under WSL, which is why gmon.out

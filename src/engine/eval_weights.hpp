@@ -92,10 +92,16 @@ const int threatBonus[] = { 0, 0, 10, 25, 30, 50, 100 };
 // back here as constants and rebuild.
 // ---------------------------------------------------------------------------
 #ifdef EVAL_TUNING
-  #define EVAL_WEIGHT int
+  // `inline` rather than plain `int`: this header is included by both
+  // evaluations now (evaluation.cpp and bb_evaluation.cpp), and a mutable
+  // namespace-scope int in a header is defined once per includer, which the
+  // linker rejects. An inline variable is one object across every translation
+  // unit, still mutable, still addressable by name, which is all the tuners
+  // need.
+  #define EVAL_WEIGHT inline int
   // Piece-square tables lose both `static` and `const` so tools/tune can bind
   // to them by name. In the shipped build they stay exactly as they were.
-  #define EVAL_TABLE
+  #define EVAL_TABLE inline
 #else
   #define EVAL_WEIGHT constexpr int
   #define EVAL_TABLE static const

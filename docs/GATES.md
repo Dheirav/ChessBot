@@ -98,6 +98,7 @@ Re-pool any of these with `./tests/pool-shards.sh <dir>/`.
 | `shard-20260909-233453/` | the same, run 2, base 20260909 | +31.7 [+9.0, +54.7] |
 | `shard-pooled-lmrtable/` | **both pooled, 1 120 games** | **+26.4 [+10.4, +42.6]** — **accepted, ON** |
 | `shard-20260910-104041/` | **`improving`** — one extra ply of LMR when the side to move is worse off than two plies ago | **−10.6 [−31.9, +10.7]** — null, stays off |
+| `shard-20260914-214501/` | king danger alone at scale 460, MIN_ATTACKERS 2, two binaries, bot option set, 840 games | **−32.8 [−52.2, −13.6]** — rejected; `docs/KING-SAFETY.md` 2026-09-14 |
 
 ### `improving` null, and history reductions that cannot work — 2026-09-10
 

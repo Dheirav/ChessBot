@@ -4,6 +4,7 @@
 #   ./tests/gate-progress.sh                 newest shard-* directory
 #   ./tests/gate-progress.sh <dir>           a particular one
 #   ./tests/gate-progress.sh <dir> --once    print one frame and exit
+#   ./tests/gate-progress.sh <dir> --watch   the same as without it
 #
 # A gate is hours of wall clock that prints nothing until it is over. That is
 # not merely uncomfortable: it is how a gate that died in its first minute --
@@ -23,6 +24,7 @@ ONCE=0
 for a in "$@"; do
     case "$a" in
         --once) ONCE=1 ;;
+        --watch) ;;   # the default; accepted so the habitual spelling works
         *) DIR="$a" ;;
     esac
 done
