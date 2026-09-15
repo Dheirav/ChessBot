@@ -71,6 +71,29 @@ def main():
           all(any(f"option name {o}" in l for l in out)
               for o in ("Hash", "NullMove", "LMR", "Aspiration")))
 
+    # Every option the engine advertises must be one it accepts, spelled the
+    # way it advertised it. BitboardCore was advertised as that and looked up
+    # as "bbcore", so lichess-bot's config set it before every game from
+    # 2026-09-11 to 09-15 and the engine answered "unknown option" each time
+    # and played the mailbox core (BUGS.md 22). Nothing else could see it: the
+    # option works in-process, and the reply is an info string a GUI ignores.
+    # An option name may contain spaces ("Move Overhead"): it is everything
+    # between "name" and "type". Booleans get "true", the rest their default.
+    advertised = []
+    for l in out:
+        if not l.startswith("option name "): continue
+        t = l.split()
+        name = " ".join(t[2:t.index("type")])
+        default = t[t.index("default") + 1] if "default" in t else "true"
+        advertised.append((name, default))
+    for name, default in advertised:
+        e.send(f"setoption name {name} value {default}")
+    e.send("isready")
+    replies = e.until("readyok")
+    unknown = [l for l in replies if "unknown option" in l]
+    check("every advertised option is accepted", not unknown, "; ".join(unknown))
+    e.send("ucinewgame")
+
     e.send("isready")
     check("isready", e.until("readyok")[-1] == "readyok")
 

@@ -1610,3 +1610,45 @@ now been wrong about exactly that three times. Use `./tools/treecost <depth>
   opposition at 900+10 and went 0-4, with three blunders and eight mistakes
   across the five losses to 2100+ — see 13. The ceiling is real; it is the old
   evidence for it that was thin.
+
+## 22. The bot never ran the bitboard core: one option name, silently refused — 2026-09-15
+
+`lichess/config.yml` has set `BitboardCore: true` since 2026-09-11, and every
+depth and speed claim about the bot since then assumed it took. It did not.
+The UCI handler lowercases the option name a GUI sends and looks it up by the
+short key the match harness uses, which is the lowercased UCI name for every
+search option except this one: `BitboardCore` is keyed `bbcore`. So before
+every game the engine printed `info string unknown option: BitboardCore`,
+which lichess-bot discards, and played the mailbox core with the other nine
+options applied.
+
+Found by accident. A gprof profile of a "bitboard" search showed
+`evaluate_details(Board const&)` and `countPseudoLegalMoves(Board const&, ...)`,
+the mailbox functions, and a fixed-node search reported the same nodes per
+second with the option set and without. The same test on `NullDepthR` moved
+the tree (426 464 to 333 800 nodes at depth 9), so the option path itself
+worked; only the one name did not.
+
+Two earlier observations were this bug and were explained as something else.
+The bot's live speed "576 knps over 489 searches, baseline 585" on 2026-09-12
+was read as load; it was the mailbox core, which is exactly that speed. And
+the whole set of speed measurements on the king-danger term on 2026-09-15
+(22 percent, then a bitboard rewrite of the term that recovered almost none of
+it) was measured on the mailbox evaluation, because the measuring script sent
+the same option and got the same refusal. On the bitboard core the term costs
+5.5 percent (1 302 to 1 231 knps, one thread, idle machine).
+
+What was not affected: every node-limited gate, because the two cores are
+node-identical (`tests/bbequiv` B6) and both sides of every gate got the same
+refusal; and the in-process measurements (`configsweep`, `treecost`, `bench
+--opt bbcore=on`), which set the option by key.
+
+Fixed in `setSearchOption`, which now also matches the UCI name in any case,
+and guarded in `tests/uci_smoke.py`: every option the engine advertises is
+sent back to it as advertised and the reply may not contain "unknown option".
+That test would have failed on 2026-09-11.
+
+The lesson is the same one BUGS.md 8 and 16 already carry: a claim about what
+the bot runs has to be checked on the bot's own path, over UCI, from the
+outside. "The option exists and works in the harness" is not that check, and
+"the bot's speed did not change" was the evidence, misread.

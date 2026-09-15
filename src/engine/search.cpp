@@ -9,6 +9,7 @@
 #include "see.hpp"
 #include <limits>
 #include <algorithm>
+#include <cctype>
 #include <array>
 #include <cmath>
 #include <memory>
@@ -196,8 +197,19 @@ const SearchOptionEntry SEARCH_OPTIONS[] = {
 const size_t SEARCH_OPTION_COUNT = sizeof(SEARCH_OPTIONS) / sizeof(SEARCH_OPTIONS[0]);
 
 bool setSearchOption(SearchOptions& opts, const std::string& name, bool value) {
+    // Matched by the short key ("bbcore") or by the UCI name in any case
+    // ("BitboardCore", "bitboardcore"). The UCI handler lowercases what a GUI
+    // sends and looked it up by key alone, which works whenever the key is
+    // the lowercased UCI name and did not work for the one option where it
+    // is not: BitboardCore sat in lichess/config.yml from 2026-09-11 to
+    // 09-15 and the engine answered "unknown option" to it before every
+    // game, so the bot played the mailbox core the whole time (BUGS.md 22).
+    std::string lowered;
     for (size_t i = 0; i < SEARCH_OPTION_COUNT; ++i) {
-        if (name == SEARCH_OPTIONS[i].name) {
+        lowered.clear();
+        for (const char* c = SEARCH_OPTIONS[i].uciName; *c; ++c)
+            lowered += (char)std::tolower((unsigned char)*c);
+        if (name == SEARCH_OPTIONS[i].name || name == lowered) {
             opts.*(SEARCH_OPTIONS[i].field) = value;
             return true;
         }
