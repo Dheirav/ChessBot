@@ -377,3 +377,69 @@ a cap on the term, a discount when the attacked side is the one to move (the
 candidate collects its nine pawns at leaves where the opponent has the move
 and can simply step away), or the defenders and pawn shield the earlier
 section built, tuned on a corpus that punishes the phantom.
+
+## 2026-09-15: held to its own positions, the term passes, +39.9
+
+The fix the previous section asked for. `tools/self-corpus.py` replays a
+candidate's recorded games, keeps the positions where its evaluation and the
+shipped one disagree by 30 cp or more (that is where the term fires), labels
+them exactly as `tests/data/evalerr.epd` is labelled (Stockfish depth 16,
+quiet, inside the cap, one row per position) and writes them to
+`tests/data/evalerr-self.epd` with `tag self`. `tools/kstune` reads both files
+and holds `self` to its baseline the way it holds the ordinary `ctl` positions.
+
+On the 1 314 positions from the ks460 games the gate result is visible
+statically at last:
+
+| setting | comp | ctl-open | self |
+|---|---|---|---|
+| term off | 543.7 | 153.9 | 148.7 |
+| ks460, the -32.8 candidate | 510.6 | 153.9 | **214.5** |
+| ks460 with the tempo discount at 0 | 514.1 | 152.1 | 172.1 |
+| scale 200 alone | 526.6 | 152.3 | 157.2 |
+
+Sixty-six cp of damage on the positions the search actually reaches, and
+neither half of the old corpus could see any of it. The tempo discount
+(`KING_DANGER_STM_PCT`, the charge kept when the attacked side has the move)
+takes away most of it at the same scale, which confirms the mechanism, but the
+scale itself was the larger part of the problem.
+
+Held to the self set, the tuner lands at a third of the strength: scale 150,
+one attacker is enough, safe checks weighted 1, discount 5%, pawn weight 2,
+queen 7. comp 523.8 (-20 rather than -33), flips 195, self +1.6, ctl-open
+-1.9. A second turn of the loop, recording that candidate's own games, adding
+its 667 term-active positions (it fires on 16% of its positions against 45%
+for ks460) and re-tuning on all 1 981, moved nothing: scale 140 to 160, the
+same shape, comp 523 to 525. The set is doing its job.
+
+Gate, same shape as the one that failed the day before, 840 games:
+
+    shard-20260914-232426    W 359 / D 218 / L 263    55.71%    +39.9  [+21.4, +58.6]
+
+Six of seven shards positive, one flat (-6 [-60, +48]). The first king-safety
+measurement in this project's history that is not negative, on the ninth try,
+and the difference from the eighth is only where the tuning corpus came from.
+
+What it says about the method, since that is the reusable part: an evaluation
+term is not tuned against positions, it is tuned against the search that will
+use it, and the search will steer toward whatever the term rewards. A corpus
+of root positions from real games cannot contain the positions a bad term
+steers into, because no real player goes there. The positions have to come
+from the candidate's own games, and the loop (tune, record, label, add,
+re-tune) has to run until it stops moving, which here took two turns. This is
+the same lesson `BUGS.md` 20 drew from the Texel tune, seen from the other
+side: there the corpus was right and the node cost was the leak; here the
+node cost was nothing and the corpus was the leak.
+
+Speed, measured the same day and corrected the same day. The first numbers
+(22 percent of nodes per second) were taken on the mailbox core by mistake,
+because the measuring script's `BitboardCore` option was being refused
+(`BUGS.md` 22). On the bitboard core the term costs 5.5 percent, one thread,
+idle machine: 1 302 knps off, 1 231 on, after the bitboard evaluation was
+changed to compute every piece's attack set once per call and share it
+between mobility, the threat pass and king danger (the term had been adding
+two more full passes, 118 magic lookups per evaluation against 32). Exact:
+`bbequiv` B4, bench and `evalref` unchanged. And the standing rule in
+`CLAUDE.md`, that king safety cannot be gated by self-play, is contradicted by
+both of these gates, each clear of zero in a different direction; self-play
+sees this term fine.

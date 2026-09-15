@@ -1,17 +1,17 @@
 bench depth 6, 64 MB table
 
 position           nodes  best
-startpos            8139  e2e4
-open-ital          24729  g8f6
-open-sicil         18290  b8c6
-kiwipete          150584  e2a6
-midgame-1          80077  d1c2
-midgame-2          72303  f3e5
-tactical           77041  c5c4
-promo-race          6583  b4f4
-rook-endg           9067  e2d3
-pawn-endg           5534  c2d2
-queen-endg            58  d1d8
-zugzwang           10890  e1e5
+startpos            8167  e2e4
+open-ital          32140  g8f6
+open-sicil         38978  d8a5
+kiwipete          147078  e2a6
+midgame-1          55329  f3e5
+midgame-2          61657  f3e5
+tactical           94066  c5c4
+promo-race          6647  b4f4
+rook-endg           7065  e2d3
+pawn-endg           5521  c2d2
+queen-endg            60  d1d8
+zugzwang            8617  e1f1
 
-total             463295
+total             465325

@@ -1,4 +1,44 @@
-# Handoff — 2026-09-11
+# Handoff — 2026-09-15
+
+## King danger shipped, on the ninth attempt, +39.9
+
+The evaluation now charges for enemy pieces bearing on the king: scale 150,
+one attacker enough, safe checks weighted 1, a 5% discount when the attacked
+side has the move, pawn weight 2, queen 7 (`evaluation.cpp` and
+`bb_evaluation.cpp`, kept identical by `bbequiv` B4). Gated 2026-09-14/15 at
+`shard-20260914-232426/`: **+39.9 [+21.4, +58.6]** over 840 games at 100k
+nodes, six of seven shards positive. Bench is **465,325**; `evalref` and the
+`evalerror` baseline were regenerated after reading the diffs (17 856 of
+23 603 reference positions moved, all through `kingSafety`; mirror symmetry
+passes; `comp` 543.7 to 523.8, flips 210 to 195).
+
+The day before, the same term fitted to the main corpus alone (scale 460)
+lost **−32.8 [−52.2, −13.6]**, the eighth negative king-safety result. Sixty
+recorded games (`tools/record-match.py`, `tools/blame.py`) showed the engine
+parking its queen next to the enemy king to collect nine pawns of term at
+leaves where the opponent had the move. Real games never reach those
+positions, so the corpus never asked about them. `tools/self-corpus.py` takes
+positions from the candidate's own games and `tools/kstune` holds them to
+baseline beside `ctl`; two turns of tune, record, add, re-tune converged on
+the shipped setting. `docs/KING-SAFETY.md` has the whole account and the
+method; `CLAUDE.md` now carries the rule. The old rule that self-play cannot
+see king safety was wrong in both directions.
+
+**And the bot has never actually run the bitboard core** (`BUGS.md` 22).
+`BitboardCore: true` in `lichess/config.yml` was refused as an unknown option
+before every game since 2026-09-11, because the UCI handler looked the name up
+by the harness key `bbcore`. Every node-limited gate stands (the cores are
+node-identical and both sides got the same refusal), but every live-speed
+claim about the bot was the mailbox core. Fixed in `setSearchOption`, guarded
+in `tests/uci_smoke.py`. On the bitboard core, one thread, the king-danger
+term costs 5.5 percent (1 302 to 1 231 knps) now that the bitboard evaluation
+computes every attack set once and shares it between mobility, threats and
+king danger.
+
+**Open.** The gauntlet against Stockfish at 400 nodes has not been run on
+this setting. The bot needs restarting on the new binary; it was stopped this
+morning, last game 06:38 IST, and its first games back will be the first it
+has ever played on the bitboard core.
 
 ## The bot runs the bitboard core
 

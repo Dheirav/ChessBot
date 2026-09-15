@@ -178,7 +178,10 @@ static int countMobility(const Board& board, PieceColor color, int kingSq) {
 // still present and every file at the king has a pawn on it. Attackers are
 // what is left.
 //
-// Off by default (KING_DANGER_SCALE = 0), as an unmeasured term must be.
+// On since 2026-09-15 at the setting below, gated at +39.9 [+21.4, +58.6]
+// (docs/KING-SAFETY.md). Every constant here was fitted by tools/kstune with
+// the search's own positions held (tests/data/evalerr-self.epd); the eighth
+// attempt, fitted to root positions alone, was 460 percent and lost 33 Elo.
 // Under EVAL_TUNING the king-danger parameters are mutable globals so a tuner
 // can drive them without a rebuild per setting; tools/kstune does exactly that.
 // The shipped build keeps them as constants, folded at compile time.
@@ -189,18 +192,36 @@ static int countMobility(const Board& board, PieceColor color, int kingSq) {
   #define KD_WEIGHT static const
   #define KD_TABLE static const
 #endif
-KD_TABLE int KING_DANGER_WEIGHT[7] = { 0, 0, 1, 3, 3, 4, 6 };  // by PieceType
+// By PieceType (NONE, KING, PAWN, KNIGHT, BISHOP, ROOK, QUEEN). Each
+// overridable with -D so a tuned set can be built without editing this file.
+#ifndef KING_DANGER_W_PAWN_N
+#define KING_DANGER_W_PAWN_N 2
+#endif
+#ifndef KING_DANGER_W_KNIGHT_N
+#define KING_DANGER_W_KNIGHT_N 3
+#endif
+#ifndef KING_DANGER_W_BISHOP_N
+#define KING_DANGER_W_BISHOP_N 3
+#endif
+#ifndef KING_DANGER_W_ROOK_N
+#define KING_DANGER_W_ROOK_N 4
+#endif
+#ifndef KING_DANGER_W_QUEEN_N
+#define KING_DANGER_W_QUEEN_N 7
+#endif
+KD_TABLE int KING_DANGER_WEIGHT[7] = { 0, 0, KING_DANGER_W_PAWN_N, KING_DANGER_W_KNIGHT_N,
+                                   KING_DANGER_W_BISHOP_N, KING_DANGER_W_ROOK_N, KING_DANGER_W_QUEEN_N };
 // Percent; 0 is off, 100 is as written. Overridable at build time so variants
 // can be compared without editing the file, which matters because an evaluation
 // change cannot be A/B'd inside one process: g_evalCache is keyed on position
 // alone, so both sides of a --optA/--optB match would share cached scores
 // (BUGS.md 8). Comparing this needs two binaries.
 #ifndef KING_DANGER_SCALE_PCT
-#define KING_DANGER_SCALE_PCT 0
+#define KING_DANGER_SCALE_PCT 150
 #endif
 KD_WEIGHT int KING_DANGER_SCALE = KING_DANGER_SCALE_PCT;
 #ifndef KING_DANGER_MIN_ATTACKERS_N
-#define KING_DANGER_MIN_ATTACKERS_N 2
+#define KING_DANGER_MIN_ATTACKERS_N 1
 #endif
 KD_WEIGHT int KING_DANGER_MIN_ATTACKERS = KING_DANGER_MIN_ATTACKERS_N;
 #ifndef KING_DANGER_OFFSET_N
@@ -216,13 +237,23 @@ KD_WEIGHT int KING_DANGER_DEFENDER_W = KING_DANGER_DEFENDER_W_N;
 #endif
 KD_WEIGHT int KING_DANGER_WEAK_W = KING_DANGER_WEAK_W_N;
 #ifndef KING_DANGER_CHECK_W_N
-#define KING_DANGER_CHECK_W_N 0
+#define KING_DANGER_CHECK_W_N 1
 #endif
 KD_WEIGHT int KING_DANGER_CHECK_W = KING_DANGER_CHECK_W_N;
 #ifndef KING_DANGER_NO_QUEEN_CUT_N
 #define KING_DANGER_NO_QUEEN_CUT_N 0
 #endif
 KD_WEIGHT int KING_DANGER_NO_QUEEN_CUT = KING_DANGER_NO_QUEEN_CUT_N;
+// Percent of the charge kept when the attacked side is the one to move. The
+// 2026-09-14 gate lost 33 Elo to positions where the engine had just moved a
+// queen next to the enemy king and collected the full term at a leaf where
+// the opponent had the move and could step away (docs/KING-SAFETY.md). 100
+// is the symmetric term; lower values say an attack is worth less when the
+// defender has the tempo.
+#ifndef KING_DANGER_STM_PCT_N
+#define KING_DANGER_STM_PCT_N 95
+#endif
+KD_WEIGHT int KING_DANGER_STM_PCT = KING_DANGER_STM_PCT_N;
 
 // Attack information needed by king safety, and by nothing else.
 //
@@ -731,9 +762,11 @@ EvalDetails evaluate_details(const Board& board) {
         // shipped engine pays nothing for a term it does not use.
         KingSafetyAttacks ksAtk;
         if (KING_DANGER_SCALE != 0) buildKingSafetyAttacks(board, ksAtk);
-        kingSafetyScore -= (int)((kingDanger(board, wKingSq, COLOR_BLACK, ksAtk)
-                                  - kingDanger(board, bKingSq, COLOR_WHITE, ksAtk))
-                                 * gamePhaseFactor);
+        int dangerW = kingDanger(board, wKingSq, COLOR_BLACK, ksAtk);
+        int dangerB = kingDanger(board, bKingSq, COLOR_WHITE, ksAtk);
+        if (board.activeColor == COLOR_WHITE) dangerW = dangerW * KING_DANGER_STM_PCT / 100;
+        else                                  dangerB = dangerB * KING_DANGER_STM_PCT / 100;
+        kingSafetyScore -= (int)((dangerW - dangerB) * gamePhaseFactor);
     }
     kingSafetyScore -= (int)((kingExposure(whiteKingFile, whiteKingRank, 7,
                                            (board.castlingRights & (CASTLE_WK | CASTLE_WQ)) != 0,

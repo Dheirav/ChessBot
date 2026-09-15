@@ -125,10 +125,19 @@ reviewed game archive) carries two tags, and they are read separately:
 | `comp` | positions where material says one player is winning and Stockfish says the other is | the compensation blindness of `BUGS.md` 13 — the number a fix aims at |
 | `ctl` | a deterministic sample of ordinary positions | a term that fixes `comp` by wrecking everything else has to be visible somewhere |
 
-As of 2026-08-21 the evaluation scores **182 cp** mean error on `ctl` with 1.5%
-sign flips — a healthy static evaluation — and **544 cp** on `comp` with
-**57.9%** sign flips. That gap is the defect, stated as a number that takes a
-second to recompute.
+As of 2026-09-15 the evaluation scores **182 cp** mean error on `ctl` with 1.3%
+sign flips, a healthy static evaluation, and **524 cp** on `comp` with
+**53.7%** sign flips (544 and 57.9% before king danger shipped). That gap is
+the defect, stated as a number that takes a second to recompute.
+
+There is a third file, `tests/data/evalerr-self.epd`, tagged `self`: positions
+from a candidate's *own* games where its evaluation and the shipped one
+disagree, labelled the same way (`tools/self-corpus.py`). `tools/kstune` reads
+it beside the main corpus and holds it like `ctl`. It exists because the main
+corpus is root positions from real games, and a term that rewards a shape of
+position steers the search into that shape whether or not it is good; no real
+player goes there, so the main corpus never asks. The king-danger term fitted
+without it lost 33 Elo, fitted with it won 40 (`docs/KING-SAFETY.md`).
 
 **The corpus has a floor, and it is high.** Stockfish's own static
 evaluation (`eval`, no search at all) sits **291 cp** from its depth-16
@@ -150,16 +159,20 @@ misleading, so its absolute numbers are not a measure of general accuracy —
 only movement in them is meaningful. And **agreement with Stockfish is not
 Elo** — which stopped being a caution and became a measurement on 2026-08-21:
 
-| | corpus `comp` | self-play, 3 360 games |
-|---|---|---|
-| baseline | 543.7 | — |
-| king exposure 100% + king danger 300% | **506.3** (better by 37cp) | **−33.1 Elo [−43.2, −23.0]** |
+| | corpus `comp` | `self` | self-play |
+|---|---|---|---|
+| baseline | 543.7 | 148.7 | — |
+| king exposure 100% + king danger 300% (2026-08-21) | **506.3** (better by 37cp) | not measured | **−33.1 Elo [−43.2, −23.0]** |
+| king danger 460%, fitted to the main corpus (2026-09-14) | **510.6** | **214.5** (worse by 66) | **−32.8 [−52.2, −13.6]** |
+| king danger 150%, fitted with `self` held (2026-09-15) | 523.8 | 150.3 | **+39.9 [+21.4, +58.6]** |
 
-The corpus called that term a clear improvement on exactly the positions the
-engine loses games from, and it cost 33 Elo. **The corpus anti-predicted the
-result.** Treat it as a way to kill bad hypotheses cheaply and to find where an
-evaluation is wrong — never as a proxy for strength, and never as grounds for
-shipping. Every use of it ends in a gate.
+The corpus called the first two terms clear improvements on exactly the
+positions the engine loses games from, and each cost 33 Elo. **The main corpus
+anti-predicted the result, twice**, and the third row says why: the damage was
+all on positions the search reaches and real games do not, which the `self`
+tag now measures. Treat the main corpus as a way to kill bad hypotheses cheaply
+and to find where an evaluation is wrong, never as grounds for shipping on its
+own. Every use of it ends in a gate.
 
 ### Playing something other than yourself
 

@@ -172,35 +172,6 @@ static inline void forEachAttackedSquare(const Position& pos, int from, F fn) {
     forEachAttackedSquareAs(pos, from, a.type(), a.color(), fn);
 }
 
-// Mobility is counted over pseudo-legal moves rather than legal ones.
-// generateLegalMoves() filters for legality by copying the whole pos, making the
-// move and testing the king square for every candidate - roughly 35 board
-// copies per call, paid twice per evaluated node, to produce two integers.
-// Pseudo-legal counts differ from legal counts only when pieces are pinned or
-// the king is in check, which is the standard trade engines make here.
-// Castling is excluded: it is not mobility, and each castling test costs three
-// more isSquareAttacked() scans.
-// kingSq is the square of 'color's king, or -1 if it has none.
-static int countMobility(const Position& pos, PieceColor color, int kingSq) {
-    const BitboardColor us = (color == COLOR_WHITE) ? BB_WHITE : BB_BLACK;
-    const BitboardColor them = (us == BB_WHITE) ? BB_BLACK : BB_WHITE;
-
-    // In check the pseudo-legal count is not an approximation but simply
-    // wrong: nearly every generated move is illegal, so the side in check
-    // would be credited with mobility it does not have (measured at up to
-    // 108cp, more than a pawn). Checks occur in only ~3% of positions, so
-    // paying for the real legality filter here costs almost nothing.
-    if (kingSq >= 0 && isSquareAttackedBB(pos, kingSq, them)) {
-        // Generated for `color`, which need not be the side to move, because
-        // the evaluation asks the question of both sides at every node.
-        Position flipped = pos;
-        flipped.sideToMove = us;
-        BBMoveList legal;
-        bbGenerate(flipped, legal);
-        return legal.size();
-    }
-    return bbCountPseudoLegal(pos, us);
-}
 
 // Returns a detailed breakdown of evaluation for logging
 // How far a square is from the centre of the pos, measured symmetrically.
@@ -242,19 +213,39 @@ static int countMobility(const Position& pos, PieceColor color, int kingSq) {
 // still present and every file at the king has a pawn on it. Attackers are
 // what is left.
 //
-// Off by default (KING_DANGER_SCALE = 0), as an unmeasured term must be.
-static const int KING_DANGER_WEIGHT[7] = { 0, 0, 1, 3, 3, 4, 6 };  // by PieceType
+// On since 2026-09-15; the constants mirror evaluation.cpp and are kept in
+// step by tests/bbequiv B4, which compares the two evaluations to the
+// centipawn. Change them there first.
+// By PieceType (NONE, KING, PAWN, KNIGHT, BISHOP, ROOK, QUEEN). Each
+// overridable with -D so a tuned set can be built without editing this file.
+#ifndef KING_DANGER_W_PAWN_N
+#define KING_DANGER_W_PAWN_N 2
+#endif
+#ifndef KING_DANGER_W_KNIGHT_N
+#define KING_DANGER_W_KNIGHT_N 3
+#endif
+#ifndef KING_DANGER_W_BISHOP_N
+#define KING_DANGER_W_BISHOP_N 3
+#endif
+#ifndef KING_DANGER_W_ROOK_N
+#define KING_DANGER_W_ROOK_N 4
+#endif
+#ifndef KING_DANGER_W_QUEEN_N
+#define KING_DANGER_W_QUEEN_N 7
+#endif
+static const int KING_DANGER_WEIGHT[7] = { 0, 0, KING_DANGER_W_PAWN_N, KING_DANGER_W_KNIGHT_N,
+                                   KING_DANGER_W_BISHOP_N, KING_DANGER_W_ROOK_N, KING_DANGER_W_QUEEN_N };
 // Percent; 0 is off, 100 is as written. Overridable at build time so variants
 // can be compared without editing the file, which matters because an evaluation
 // change cannot be A/B'd inside one process: g_evalCache is keyed on position
 // alone, so both sides of a --optA/--optB match would share cached scores
 // (BUGS.md 8). Comparing this needs two binaries.
 #ifndef KING_DANGER_SCALE_PCT
-#define KING_DANGER_SCALE_PCT 0
+#define KING_DANGER_SCALE_PCT 150
 #endif
 static const int KING_DANGER_SCALE = KING_DANGER_SCALE_PCT;
 #ifndef KING_DANGER_MIN_ATTACKERS_N
-#define KING_DANGER_MIN_ATTACKERS_N 2
+#define KING_DANGER_MIN_ATTACKERS_N 1
 #endif
 static const int KING_DANGER_MIN_ATTACKERS = KING_DANGER_MIN_ATTACKERS_N;
 #ifndef KING_DANGER_OFFSET_N
@@ -270,38 +261,127 @@ static const int KING_DANGER_DEFENDER_W = KING_DANGER_DEFENDER_W_N;
 #endif
 static const int KING_DANGER_WEAK_W = KING_DANGER_WEAK_W_N;
 #ifndef KING_DANGER_CHECK_W_N
-#define KING_DANGER_CHECK_W_N 0
+#define KING_DANGER_CHECK_W_N 1
 #endif
 static const int KING_DANGER_CHECK_W = KING_DANGER_CHECK_W_N;
 #ifndef KING_DANGER_NO_QUEEN_CUT_N
 #define KING_DANGER_NO_QUEEN_CUT_N 0
 #endif
 static const int KING_DANGER_NO_QUEEN_CUT = KING_DANGER_NO_QUEEN_CUT_N;
+#ifndef KING_DANGER_STM_PCT_N
+#define KING_DANGER_STM_PCT_N 95
+#endif
+static const int KING_DANGER_STM_PCT = KING_DANGER_STM_PCT_N;
 
-// Attack information needed by king safety, and by nothing else.
-//
-// Built once per evaluation and **only when the term is live**, because it walks
-// every piece's attack set a second time. With KING_DANGER_SCALE at 0 the
-// shipped engine never constructs it, which is why bench is unchanged.
-struct KingSafetyAttacks {
-    uint8_t  count[3][64] = {};   // how many times each colour attacks each square
+// The attack set of a piece of the given type and colour standing on `from`,
+// as one bitboard: the same set forEachAttackedSquareAs walks, without the
+// walk. King danger is the one consumer that only ever needs counts and
+// intersections of these sets, so handing it the set is the whole of the
+// speed difference between this file's term and the mailbox one (22% of
+// nodes per second when it visited squares one at a time, 2026-09-15).
+static inline Bitboard attackSet(const Position& pos, int from, PieceType type, PieceColor color) {
+    switch (type) {
+        case PAWN:   return pawnAttacks(color == COLOR_WHITE ? BB_WHITE : BB_BLACK, from);
+        case KNIGHT: return knightAttacks(from);
+        case KING:   return kingAttacks(from);
+        case ROOK:   return rookAttacks(from, pos.occupancyAll);
+        case BISHOP: return bishopAttacks(from, pos.occupancyAll);
+        case QUEEN:  return queenAttacks(from, pos.occupancyAll);
+        default:     return 0;
+    }
+}
+
+// Every piece's attack set, computed once per evaluation and read by
+// mobility, the threat pass and king danger. Before this each of those did
+// its own lookups, and the king-danger term added two more full passes of
+// its own, which was 118 magic lookups per evaluation against the 32 a
+// position actually has pieces for; that was the whole of the term's 22%
+// speed cost (2026-09-15). `twice` is the squares a colour attacks at least
+// twice, which is all the weak-squares term asks of a per-square count
+// ("defended at most once" is "not in twice").
+struct AttackTable {
+    Bitboard piece[64]    = {};   // attack set of the piece standing on each square
     uint64_t byType[3][7] = {};   // squares attacked, per colour per piece type
     uint64_t any[3]       = {};   // squares attacked at all, per colour
+    uint64_t twice[3]     = {};   // squares attacked by two or more pieces
 };
 
-static void buildKingSafetyAttacks(const Position& pos, KingSafetyAttacks& a) {
+static void buildAttackTable(const Position& pos, AttackTable& a) {
     for (Bitboard scan_ = pos.occupancyAll; scan_; scan_ &= scan_ - 1) {
         const int i = lsb(scan_);
         const Piece& p = pos.squares[i];
         if (p.type() == NONE) continue;
         const int col = (int)p.color();
-        const int t   = (int)p.type();
-        forEachAttackedSquare(pos, i, [&](int sq) {
-            if (a.count[col][sq] < 255) ++a.count[col][sq];
-            a.byType[col][t] |= 1ULL << sq;
-            a.any[col]       |= 1ULL << sq;
-        });
+        const Bitboard att = attackSet(pos, i, p.type(), p.color());
+        a.piece[i] = att;
+        a.byType[col][(int)p.type()] |= att;
+        a.twice[col] |= a.any[col] & att;
+        a.any[col]   |= att;
     }
+}
+
+// The pseudo-legal count of bbCountPseudoLegal, reading the piece attack
+// sets from the table instead of looking them up again. The public function
+// stays as the reference the equivalence test compares against movegen.
+static int countPseudoLegalFrom(const Position& pos, BitboardColor color, const AttackTable& a) {
+    const bool white = (color == BB_WHITE);
+    const auto& ours = white ? pos.white : pos.black;
+    const Bitboard own   = white ? pos.occupancyWhite : pos.occupancyBlack;
+    const Bitboard theirs = white ? pos.occupancyBlack : pos.occupancyWhite;
+    const Bitboard empty = ~pos.occupancyAll;
+    int n = 0;
+    Bitboard b = own & ~ours[BB_PAWN];
+    while (b) { n += popcount(a.piece[lsb(b)] & ~own); b &= b - 1; }
+
+    const Bitboard pawns = ours[BB_PAWN];
+    const Bitboard promoRank = white ? RANK_8 : RANK_1;
+    const Bitboard startRank = white ? RANK_2 : RANK_7;
+    auto push = [&](Bitboard x) { return white ? (x >> 8) : (x << 8); };
+    const Bitboard single = push(pawns) & empty;
+    n += popcount(single & ~promoRank);
+    n += 4 * popcount(single & promoRank);
+    n += popcount(push(push(pawns & startRank) & empty) & empty);
+    const Bitboard capL = white ? ((pawns & ~FILE_A) >> 9) : ((pawns & ~FILE_A) << 7);
+    const Bitboard capR = white ? ((pawns & ~FILE_H) >> 7) : ((pawns & ~FILE_H) << 9);
+    for (Bitboard c : { capL & theirs, capR & theirs }) {
+        n += popcount(c & ~promoRank);
+        n += 4 * popcount(c & promoRank);
+    }
+    if (pos.enPassantSquare >= 0) {
+        const BitboardColor them = white ? BB_BLACK : BB_WHITE;
+        n += popcount(pawnAttacks(them, pos.enPassantSquare) & pawns);
+    }
+    return n;
+}
+
+// Mobility is counted over pseudo-legal moves rather than legal ones.
+// generateLegalMoves() filters for legality by copying the whole pos, making the
+// move and testing the king square for every candidate - roughly 35 board
+// copies per call, paid twice per evaluated node, to produce two integers.
+// Pseudo-legal counts differ from legal counts only when pieces are pinned or
+// the king is in check, which is the standard trade engines make here.
+// Castling is excluded: it is not mobility, and each castling test costs three
+// more isSquareAttacked() scans.
+// kingSq is the square of 'color's king, or -1 if it has none.
+static int countMobility(const Position& pos, PieceColor color, int kingSq, const AttackTable& atk) {
+    const BitboardColor us = (color == COLOR_WHITE) ? BB_WHITE : BB_BLACK;
+    const PieceColor theirColor = (color == COLOR_WHITE) ? COLOR_BLACK : COLOR_WHITE;
+
+    // In check the pseudo-legal count is not an approximation but simply
+    // wrong: nearly every generated move is illegal, so the side in check
+    // would be credited with mobility it does not have (measured at up to
+    // 108cp, more than a pawn). Checks occur in only ~3% of positions, so
+    // paying for the real legality filter here costs almost nothing.
+    if (kingSq >= 0 && ((atk.any[(int)theirColor] >> kingSq) & 1ULL)) {
+        // Generated for `color`, which need not be the side to move, because
+        // the evaluation asks the question of both sides at every node.
+        Position flipped = pos;
+        flipped.sideToMove = us;
+        BBMoveList legal;
+        bbGenerate(flipped, legal);
+        return legal.size();
+    }
+    return countPseudoLegalFrom(pos, us, atk);
 }
 
 // Friendly pawns and minor pieces standing in the king's own zone.
@@ -329,25 +409,19 @@ static int kingDefenders(const Position& pos, int kingSq, PieceColor defender) {
 }
 
 static int kingDanger(const Position& pos, int kingSq, PieceColor attacker,
-                      const KingSafetyAttacks& atk) {
+                      const AttackTable& atk) {
     if (KING_DANGER_SCALE == 0 || kingSq < 0) return 0;
-    uint64_t zone = 0;
-    const int kf = kingSq % 8, kr = kingSq / 8;
-    for (int df = -1; df <= 1; ++df) {
-        for (int dr = -1; dr <= 1; ++dr) {
-            const int f = kf + df, r = kr + dr;
-            if (f < 0 || f > 7 || r < 0 || r > 7) continue;
-            zone |= 1ULL << (r * 8 + f);
-        }
-    }
+    // The 3x3 box around the king, king square included: the king's own
+    // attack set plus itself, which is the same nine squares the mailbox
+    // version assembles from file and rank offsets.
+    const uint64_t zone = kingAttacks(kingSq) | (1ULL << kingSq);
     int danger = 0;
     int attackers = 0;      // distinct pieces bearing on the zone
     for (Bitboard scan_ = (attacker == COLOR_WHITE ? pos.occupancyWhite : pos.occupancyBlack); scan_; scan_ &= scan_ - 1) {
         const int i = lsb(scan_);
         const Piece& p = pos.squares[i];
         if (p.type() == NONE || p.type() == KING || p.color() != attacker) continue;
-        int hits = 0;
-        forEachAttackedSquare(pos, i, [&](int sq) { if ((zone >> sq) & 1ULL) ++hits; });
+        const int hits = popcount(atk.piece[i] & zone);
         if (hits > 0) { danger += KING_DANGER_WEIGHT[p.type()] * hits; ++attackers; }
     }
 
@@ -387,11 +461,7 @@ static int kingDanger(const Position& pos, int kingSq, PieceColor attacker,
     // one. A square the defender covers twice is not a hole; a square covered
     // once or not at all is where an attack actually lands.
     if (KING_DANGER_WEAK_W) {
-        int weak = 0;
-        for (int sq = 0; sq < 64; ++sq) {
-            if (!((zone >> sq) & 1ULL)) continue;
-            if (atk.count[att][sq] > 0 && atk.count[def][sq] <= 1) ++weak;
-        }
+        const int weak = popcount(zone & atk.any[att] & ~atk.twice[def]);
         danger += KING_DANGER_WEAK_W * weak;
     }
 
@@ -410,11 +480,8 @@ static int kingDanger(const Position& pos, int kingSq, PieceColor attacker,
         int checks = 0;
         const PieceType kinds[4] = { KNIGHT, BISHOP, ROOK, QUEEN };
         for (int k = 0; k < 4; ++k) {
-            uint64_t from = 0;
-            forEachAttackedSquareAs(pos, kingSq, kinds[k], defender,
-                                    [&](int sq) { from |= 1ULL << sq; });
-            const uint64_t safe = from & atk.byType[att][(int)kinds[k]] & ~atk.any[def];
-            checks += __builtin_popcountll(safe);
+            const uint64_t from = attackSet(pos, kingSq, kinds[k], defender);
+            checks += popcount(from & atk.byType[att][(int)kinds[k]] & ~atk.any[def]);
         }
         danger += KING_DANGER_CHECK_W * checks;
     }
@@ -432,7 +499,7 @@ static int kingDanger(const Position& pos, int kingSq, PieceColor attacker,
     }
 
     // Subtract what is guarding the king before charging for what attacks it.
-    danger -= KING_DANGER_DEFENDER_W * kingDefenders(pos, kingSq, defender);
+    if (KING_DANGER_DEFENDER_W) danger -= KING_DANGER_DEFENDER_W * kingDefenders(pos, kingSq, defender);
 
     danger -= KING_DANGER_OFFSET;
     if (danger <= 0) return 0;
@@ -684,8 +751,10 @@ EvalDetails evaluate_details(const Position& pos) {
     // King squares were located during the piece scan above (index = rank*8 + file).
     int whiteKingSq = (whiteKingFile >= 0) ? whiteKingRank * 8 + whiteKingFile : -1;
     int blackKingSq = (blackKingFile >= 0) ? blackKingRank * 8 + blackKingFile : -1;
-    whiteMobility = countMobility(pos, COLOR_WHITE, whiteKingSq);
-    blackMobility = countMobility(pos, COLOR_BLACK, blackKingSq);
+    AttackTable atk;
+    buildAttackTable(pos, atk);
+    whiteMobility = countMobility(pos, COLOR_WHITE, whiteKingSq, atk);
+    blackMobility = countMobility(pos, COLOR_BLACK, blackKingSq, atk);
     mobilityScore = EvalWeights::MOBILITY * (whiteMobility - blackMobility);
 
     // King safety.
@@ -795,11 +864,11 @@ EvalDetails evaluate_details(const Position& pos) {
         // Built here rather than at file scope because it walks every attack set
         // a second time. At KING_DANGER_SCALE 0 this block never runs, so the
         // shipped engine pays nothing for a term it does not use.
-        KingSafetyAttacks ksAtk;
-        if (KING_DANGER_SCALE != 0) buildKingSafetyAttacks(pos, ksAtk);
-        kingSafetyScore -= (int)((kingDanger(pos, wKingSq, COLOR_BLACK, ksAtk)
-                                  - kingDanger(pos, bKingSq, COLOR_WHITE, ksAtk))
-                                 * gamePhaseFactor);
+        int dangerW = kingDanger(pos, wKingSq, COLOR_BLACK, atk);
+        int dangerB = kingDanger(pos, bKingSq, COLOR_WHITE, atk);
+        if (pos.sideToMove == BB_WHITE) dangerW = dangerW * KING_DANGER_STM_PCT / 100;
+        else                            dangerB = dangerB * KING_DANGER_STM_PCT / 100;
+        kingSafetyScore -= (int)((dangerW - dangerB) * gamePhaseFactor);
     }
     kingSafetyScore -= (int)((kingExposure(whiteKingFile, whiteKingRank, 7,
                                            (pos.castlingRights & (CASTLE_WK | CASTLE_WQ)) != 0,
@@ -836,14 +905,15 @@ EvalDetails evaluate_details(const Position& pos) {
         const PieceColor ac = attacker.color();
         const int attackerValue = pieceValues[attacker.type()];
 
-        forEachAttackedSquare(pos, i, [&](int j) {
+        for (Bitboard t = atk.piece[i]; t; t &= t - 1) {
+            const int j = lsb(t);
             attackedBy[ac][j] = true;
 
             const Piece& target = pos.squares[j];
-            if (target.type() == NONE || target.color() == ac) return;
+            if (target.type() == NONE || target.color() == ac) continue;
 
             // The king is handled by the search's mate scores, not the static threats.
-            if (target.type() == KING) return;
+            if (target.type() == KING) continue;
 
             int threatValue = ::threatBonus[target.type()];
             if (ac == COLOR_WHITE) whiteThreats += threatValue;
@@ -855,7 +925,7 @@ EvalDetails evaluate_details(const Position& pos) {
                 if (ac == COLOR_WHITE) captureIncentive += valueGap / 10; // 10% of value difference
                 else                   captureIncentive -= valueGap / 10;
             }
-        });
+        }
     }
 
     threatScore = (whiteThreats - blackThreats) + captureIncentive;

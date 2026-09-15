@@ -1,6 +1,12 @@
 // Fit the king-danger parameters against the evaluation-error corpus.
 //
-//   make kstune && ./tools/kstune [tests/data/evalerr.epd]
+//   make kstune && ./tools/kstune [corpus.epd ...]
+//
+// With no arguments it reads tests/data/evalerr.epd and, when it exists,
+// tests/data/evalerr-self.epd: the positions a candidate's own search reached
+// (tools/self-corpus.py). The main corpus alone was tuned against on
+// 2026-09-14 and the result lost 33 Elo to positions that corpus does not
+// contain; `tag self` is held to its baseline exactly as ctl is.
 //
 // King safety has been built four times here and rejected four times, and the
 // last write-up (docs/KING-SAFETY.md) ended on the real blocker: seven
@@ -35,14 +41,17 @@
 extern int KING_DANGER_WEIGHT[7];
 extern int KING_DANGER_SCALE, KING_DANGER_MIN_ATTACKERS, KING_DANGER_OFFSET,
            KING_DANGER_DEFENDER_W, KING_DANGER_WEAK_W, KING_DANGER_CHECK_W,
-           KING_DANGER_NO_QUEEN_CUT;
+           KING_DANGER_NO_QUEEN_CUT, KING_DANGER_STM_PCT;
 
 namespace {
 
-struct Row { Board board; int label; bool comp; };
+// comp is the objective; ctl and self are the two sets the term must not
+// damage. self is the search's own positions (tools/self-corpus.py), the ones
+// the main corpus cannot contain and the 2026-09-14 gate was lost on.
+enum Tag { COMP, CTL, SELF };
+struct Row { Board board; int label; Tag tag; };
 
-std::vector<Row> load(const std::string& path) {
-    std::vector<Row> rows;
+void load(const std::string& path, std::vector<Row>& rows) {
     std::ifstream in(path);
     std::string line;
     while (std::getline(in, line)) {
@@ -58,15 +67,15 @@ std::vector<Row> load(const std::string& path) {
         };
         Row r;
         if (!r.board.setFromFEN(trim(parts[0]))) continue;
-        r.label = 0; r.comp = false;
+        r.label = 0; r.tag = CTL;
         for (size_t i = 1; i < parts.size(); ++i) {
             const std::string t = trim(parts[i]);
             if (t.rfind("sf ", 0) == 0) r.label = std::atoi(t.c_str() + 3);
-            else if (t.rfind("tag ", 0) == 0) r.comp = (t.substr(4) == "comp");
+            else if (t.rfind("tag ", 0) == 0)
+                r.tag = (t.substr(4) == "comp") ? COMP : (t.substr(4) == "self") ? SELF : CTL;
         }
         rows.push_back(r);
     }
-    return rows;
 }
 
 // ctl is reported whole and also over the "open" positions, the ones whose
@@ -75,10 +84,10 @@ std::vector<Row> load(const std::string& path) {
 // +1000 improves the clamped error there while doing nothing for play. The
 // constraint binds on the open ones, because those are the ordinary positions
 // the control set exists to protect.
-struct Score { double comp, ctl, ctlOpen; int flips; };
+struct Score { double comp, ctl, ctlOpen, self; int flips; };
 
 Score score(const std::vector<Row>& rows) {
-    double sc = 0, sl = 0, so = 0; int nc = 0, nl = 0, no = 0, flips = 0;
+    double sc = 0, sl = 0, so = 0, ss = 0; int nc = 0, nl = 0, no = 0, ns = 0, flips = 0;
     const bool clamp = !std::getenv("KSTUNE_NOCLAMP");
     for (const Row& r : rows) {
         // Same clamp the labels carry: Stockfish caps at +-1000, so an
@@ -86,15 +95,32 @@ Score score(const std::vector<Row>& rows) {
         int ours = evaluate_details(r.board).total;
         if (clamp) ours = std::max(-1000, std::min(1000, ours));
         const double err = std::fabs((double)ours - (double)r.label);
-        if (r.comp) {
+        if (r.tag == COMP) {
             sc += err; ++nc;
             if ((ours >= 100 && r.label <= -100) || (ours <= -100 && r.label >= 100)) ++flips;
+        } else if (r.tag == SELF) {
+            ss += err; ++ns;
         } else {
             sl += err; ++nl;
             if (std::abs(r.label) < 1000) { so += err; ++no; }
         }
     }
-    return { nc ? sc / nc : 0, nl ? sl / nl : 0, no ? so / no : 0, flips };
+    return { nc ? sc / nc : 0, nl ? sl / nl : 0, no ? so / no : 0, ns ? ss / ns : 0, flips };
+}
+
+// The constraint: neither held set may be worse than its baseline plus the
+// tolerance. Both are measured against the term-off evaluation, so "worse"
+// means the term did damage there, whatever the absolute level.
+bool held(const Score& s, const Score& base, double tol) {
+    return s.ctlOpen <= base.ctlOpen + tol && s.self <= base.self + tol;
+}
+// How much of the tolerance is used up. A step that leaves comp where it is
+// and buys slack here is worth taking, because the slack is what lets a later
+// step on another parameter lower comp; a descent that only ever accepts
+// comp improvements cannot move a parameter whose whole job is to protect the
+// held sets, which is exactly what the tempo discount is.
+double slack(const Score& s, const Score& base) {
+    return (s.ctlOpen - base.ctlOpen) + (s.self - base.self);
 }
 
 struct Param { const char* name; int* ptr; int lo, hi, step; };
@@ -103,9 +129,13 @@ struct Param { const char* name; int* ptr; int lo, hi, step; };
 
 int main(int argc, char** argv) {
     initMoveLookupTables();
-    const std::string path = (argc > 1) ? argv[1] : "tests/data/evalerr.epd";
-    const std::vector<Row> rows = load(path);
-    if (rows.empty()) { std::printf("no positions in %s\n", path.c_str()); return 1; }
+    // Every argument is a corpus file; the default is the main corpus plus the
+    // self-play half when it exists.
+    std::vector<Row> rows;
+    if (argc > 1) { for (int i = 1; i < argc; ++i) load(argv[i], rows); }
+    else { load("tests/data/evalerr.epd", rows); load("tests/data/evalerr-self.epd", rows); }
+    if (rows.empty()) { std::printf("no positions\n"); return 1; }
+    int nSelf = 0; for (const Row& r : rows) if (r.tag == SELF) ++nSelf;
 
     Param params[] = {
         {"SCALE",         &KING_DANGER_SCALE,         0, 2000, 10},
@@ -115,6 +145,7 @@ int main(int argc, char** argv) {
         {"WEAK_W",        &KING_DANGER_WEAK_W,        0,  12,  1},
         {"CHECK_W",       &KING_DANGER_CHECK_W,       0,  12,  1},
         {"NO_QUEEN_CUT",  &KING_DANGER_NO_QUEEN_CUT,  0,  40,  2},
+        {"STM_PCT",       &KING_DANGER_STM_PCT,       0, 100,  5},
         {"W[PAWN]",       &KING_DANGER_WEIGHT[PAWN],   0,  8,  1},
         {"W[KNIGHT]",     &KING_DANGER_WEIGHT[KNIGHT], 0, 10,  1},
         {"W[BISHOP]",     &KING_DANGER_WEIGHT[BISHOP], 0, 10,  1},
@@ -143,16 +174,17 @@ int main(int argc, char** argv) {
         env("KD_WEAK_W", &KING_DANGER_WEAK_W);
         env("KD_CHECK_W", &KING_DANGER_CHECK_W);
         env("KD_NO_QUEEN_CUT", &KING_DANGER_NO_QUEEN_CUT);
+        env("KD_STM_PCT", &KING_DANGER_STM_PCT);
         const Score s = score(rows);
-        std::printf("comp %.1f  ctl %.1f  ctl-open %.1f  flips %d\n", s.comp, s.ctl, s.ctlOpen, s.flips);
+        std::printf("comp %.1f  ctl %.1f  ctl-open %.1f  self %.1f  flips %d\n", s.comp, s.ctl, s.ctlOpen, s.self, s.flips);
         return 0;
     }
 
     Score base = score(rows);
-    const double ctlCeiling = base.ctlOpen + CTL_TOLERANCE;
-    std::printf("%zu positions. baseline  comp %.1f  ctl %.1f  ctl-open %.1f  flips %d\n",
-                rows.size(), base.comp, base.ctl, base.ctlOpen, base.flips);
-    std::printf("constraint: ctl-open <= %.1f\n\n", ctlCeiling);
+    std::printf("%zu positions (%d self). baseline  comp %.1f  ctl %.1f  ctl-open %.1f  self %.1f  flips %d\n",
+                rows.size(), nSelf, base.comp, base.ctl, base.ctlOpen, base.self, base.flips);
+    std::printf("constraint: ctl-open <= %.1f, self <= %.1f\n\n",
+                base.ctlOpen + CTL_TOLERANCE, base.self + CTL_TOLERANCE);
 
     // The term is off at SCALE 0 and nothing else matters until it is on. A
     // greedy descent from a gentle switch-on cannot reach a region the
@@ -163,21 +195,23 @@ int main(int argc, char** argv) {
     // negative one it is what makes the search feasible at all.
     Score cur = base;
     int bestScale = 0;
+    double bestHeld = 0;
     for (int sc = 10; sc <= params[0].hi; sc += params[0].step) {
         KING_DANGER_SCALE = sc;
         const Score s = score(rows);
-        if (s.ctlOpen < cur.ctlOpen - 0.05) { cur = s; bestScale = sc; }
+        const double h = (s.ctlOpen - base.ctlOpen) + (s.self - base.self);
+        if (h < bestHeld - 0.05) { cur = s; bestScale = sc; bestHeld = h; }
     }
     KING_DANGER_SCALE = bestScale;
     cur = score(rows);
-    if (cur.ctlOpen > ctlCeiling) {
+    if (!held(cur, base, CTL_TOLERANCE)) {
         // Even the ctl-optimal scale breaks the ceiling: raise the attacker
         // threshold and try again before giving up.
         KING_DANGER_MIN_ATTACKERS = 3;
         cur = score(rows);
     }
-    std::printf("start     comp %.1f  ctl %.1f  ctl-open %.1f  flips %d   (SCALE %d, MIN_ATTACKERS %d)\n\n",
-                cur.comp, cur.ctl, cur.ctlOpen, cur.flips, KING_DANGER_SCALE, KING_DANGER_MIN_ATTACKERS);
+    std::printf("start     comp %.1f  ctl %.1f  ctl-open %.1f  self %.1f  flips %d   (SCALE %d, MIN_ATTACKERS %d)\n\n",
+                cur.comp, cur.ctl, cur.ctlOpen, cur.self, cur.flips, KING_DANGER_SCALE, KING_DANGER_MIN_ATTACKERS);
 
     // Coordinate descent. A step must improve comp AND respect the ctl
     // ceiling. Repeated until a full pass over every parameter changes nothing.
@@ -192,10 +226,12 @@ int main(int argc, char** argv) {
                     if (next < p.lo || next > p.hi) break;
                     *p.ptr = next;
                     const Score s = score(rows);
-                    if (s.comp < cur.comp - 0.05 && s.ctlOpen <= ctlCeiling) {
+                    const bool better = s.comp < cur.comp - 0.05;
+                    const bool freer  = s.comp <= cur.comp && slack(s, base) < slack(cur, base) - 0.5;
+                    if ((better || freer) && held(s, base, CTL_TOLERANCE)) {
                         cur = s; moved = true;
-                        std::printf("  pass %2d  %-14s %4d -> %4d   comp %.1f  ctl %.1f  ctl-open %.1f  flips %d\n",
-                                    pass, p.name, old, next, s.comp, s.ctl, s.ctlOpen, s.flips);
+                        std::printf("  pass %2d  %-14s %4d -> %4d   comp %.1f  ctl %.1f  ctl-open %.1f  self %.1f  flips %d\n",
+                                    pass, p.name, old, next, s.comp, s.ctl, s.ctlOpen, s.self, s.flips);
                     } else { *p.ptr = old; break; }
                 }
             }
@@ -203,16 +239,17 @@ int main(int argc, char** argv) {
         if (!moved) { std::printf("\nconverged after pass %d\n", pass); break; }
     }
 
-    std::printf("\nresult    comp %.1f  ctl %.1f  ctl-open %.1f  flips %d   (baseline comp %.1f  ctl %.1f  ctl-open %.1f  flips %d)\n",
-                cur.comp, cur.ctl, cur.ctlOpen, cur.flips, base.comp, base.ctl, base.ctlOpen, base.flips);
+    std::printf("\nresult    comp %.1f  ctl %.1f  ctl-open %.1f  self %.1f  flips %d   (baseline comp %.1f  ctl %.1f  ctl-open %.1f  self %.1f  flips %d)\n",
+                cur.comp, cur.ctl, cur.ctlOpen, cur.self, cur.flips, base.comp, base.ctl, base.ctlOpen, base.self, base.flips);
     std::printf("\n  -DKING_DANGER_SCALE_PCT=%d -DKING_DANGER_MIN_ATTACKERS_N=%d "
                 "-DKING_DANGER_OFFSET_N=%d -DKING_DANGER_DEFENDER_W_N=%d "
                 "-DKING_DANGER_WEAK_W_N=%d -DKING_DANGER_CHECK_W_N=%d "
-                "-DKING_DANGER_NO_QUEEN_CUT_N=%d\n",
+                "-DKING_DANGER_NO_QUEEN_CUT_N=%d -DKING_DANGER_STM_PCT_N=%d\n",
                 KING_DANGER_SCALE, KING_DANGER_MIN_ATTACKERS, KING_DANGER_OFFSET,
                 KING_DANGER_DEFENDER_W, KING_DANGER_WEAK_W, KING_DANGER_CHECK_W,
-                KING_DANGER_NO_QUEEN_CUT);
-    std::printf("  KING_DANGER_WEIGHT = { 0, 0, %d, %d, %d, %d, %d }\n",
+                KING_DANGER_NO_QUEEN_CUT, KING_DANGER_STM_PCT);
+    std::printf("  -DKING_DANGER_W_PAWN_N=%d -DKING_DANGER_W_KNIGHT_N=%d -DKING_DANGER_W_BISHOP_N=%d "
+                "-DKING_DANGER_W_ROOK_N=%d -DKING_DANGER_W_QUEEN_N=%d\n",
                 KING_DANGER_WEIGHT[PAWN], KING_DANGER_WEIGHT[KNIGHT], KING_DANGER_WEIGHT[BISHOP],
                 KING_DANGER_WEIGHT[ROOK], KING_DANGER_WEIGHT[QUEEN]);
     return 0;
