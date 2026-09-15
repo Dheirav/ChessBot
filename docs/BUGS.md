@@ -1652,3 +1652,28 @@ The lesson is the same one BUGS.md 8 and 16 already carry: a claim about what
 the bot runs has to be checked on the bot's own path, over UCI, from the
 outside. "The option exists and works in the harness" is not that check, and
 "the bot's speed did not change" was the evidence, misread.
+
+## 23. gprof charges small inlined routines for work they do not do — 2026-09-15
+
+A `-pg` profile of the bitboard search put 12 percent of the time in
+`std::__introsort_loop<quiescence...>`, the sort of the capture list in
+quiescence. The list averages 4.4 moves and the node searches one or two of
+them, so replacing the sort with a pick-the-best-remaining selection (and
+resolving SEE lazily, once per pick) looked like a free ten percent. Built,
+exact (`bbequiv` B6 node-identical with the tie-break on), and measured by CPU
+time for a fixed 3 000 000 nodes: 3.45 s before, 3.43 s after. Nothing.
+
+The profile was wrong about the sort because profiling changed it. With `-pg`
+the comparator lambda and `tieKey` are instrumented functions that cannot be
+inlined, so every comparison in the sort became two real calls through
+`mcount`; in the `-O2` build they are inlined and the sort of four elements
+costs what four comparisons cost. The same applies to anything small and hot:
+`getRookAttacks` at 28 million calls, `getMoveScore`, the ordering sorts. Read
+a gprof flat profile for the big functions it cannot distort
+(`evaluate_details`, TT probe) and distrust every line that is a small
+function called millions of times. The measurement that decides a speed
+change is CPU time at fixed nodes on the optimised build, not the profile.
+
+Reverted. The change was correct and harmless but it moves the bot's tie
+order among equal captures, and a tree change with no measured gain has no
+grounds.

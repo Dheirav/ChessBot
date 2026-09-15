@@ -42,6 +42,8 @@ extern int KING_DANGER_WEIGHT[7];
 extern int KING_DANGER_SCALE, KING_DANGER_MIN_ATTACKERS, KING_DANGER_OFFSET,
            KING_DANGER_DEFENDER_W, KING_DANGER_WEAK_W, KING_DANGER_CHECK_W,
            KING_DANGER_NO_QUEEN_CUT, KING_DANGER_STM_PCT;
+extern int PASSED_RANK[7];
+extern int PASSED_FREE_PCT, PASSED_KING_PCT, PASSED_EG_PCT;
 
 namespace {
 
@@ -137,7 +139,12 @@ int main(int argc, char** argv) {
     if (rows.empty()) { std::printf("no positions\n"); return 1; }
     int nSelf = 0; for (const Row& r : rows) if (r.tag == SELF) ++nSelf;
 
-    Param params[] = {
+    // KSTUNE_SET picks the family: "king" (default) or "passed". The other
+    // family stays at its shipped values, so each fit is one term against the
+    // corpus with everything else held, and the report says which.
+    const std::string set = std::getenv("KSTUNE_SET") ? std::getenv("KSTUNE_SET") : "king";
+    std::vector<Param> params;
+    if (set == "king") params = {
         {"SCALE",         &KING_DANGER_SCALE,         0, 2000, 10},
         {"MIN_ATTACKERS", &KING_DANGER_MIN_ATTACKERS, 1,   4,  1},
         {"OFFSET",        &KING_DANGER_OFFSET,        0,  60,  2},
@@ -152,7 +159,19 @@ int main(int argc, char** argv) {
         {"W[ROOK]",       &KING_DANGER_WEIGHT[ROOK],   0, 12,  1},
         {"W[QUEEN]",      &KING_DANGER_WEIGHT[QUEEN],  0, 16,  1},
     };
-    const int NP = (int)(sizeof(params) / sizeof(params[0]));
+    else if (set == "passed") params = {
+        {"RANK_1",   &PASSED_RANK[1],   0, 120,  2},
+        {"RANK_2",   &PASSED_RANK[2],   0, 120,  2},
+        {"RANK_3",   &PASSED_RANK[3],   0, 160,  2},
+        {"RANK_4",   &PASSED_RANK[4],   0, 200,  2},
+        {"RANK_5",   &PASSED_RANK[5],   0, 300,  4},
+        {"RANK_6",   &PASSED_RANK[6],   0, 400,  4},
+        {"FREE_PCT", &PASSED_FREE_PCT,  0, 200,  5},
+        {"KING_PCT", &PASSED_KING_PCT,  0, 100,  2},
+        {"EG_PCT",   &PASSED_EG_PCT,    0, 300,  5},
+    };
+    else { std::printf("unknown KSTUNE_SET %s\n", set.c_str()); return 1; }
+    const int NP = (int)params.size();
 
     // The constraint. ctl may not end up more than this much worse than it
     // started; every previous attempt at this term would have failed it.
@@ -186,32 +205,31 @@ int main(int argc, char** argv) {
     std::printf("constraint: ctl-open <= %.1f, self <= %.1f\n\n",
                 base.ctlOpen + CTL_TOLERANCE, base.self + CTL_TOLERANCE);
 
-    // The term is off at SCALE 0 and nothing else matters until it is on. A
-    // greedy descent from a gentle switch-on cannot reach a region the
-    // constraint allows only at larger scales, and there is one: along SCALE
-    // alone, ctl-open falls before it rises. So the start is the SCALE that
-    // minimises ctl-open, found by a plain sweep, and the descent runs from
-    // there. With a positive tolerance the sweep changes nothing; with a
-    // negative one it is what makes the search feasible at all.
     Score cur = base;
-    int bestScale = 0;
-    double bestHeld = 0;
-    for (int sc = 10; sc <= params[0].hi; sc += params[0].step) {
-        KING_DANGER_SCALE = sc;
-        const Score s = score(rows);
-        const double h = (s.ctlOpen - base.ctlOpen) + (s.self - base.self);
-        if (h < bestHeld - 0.05) { cur = s; bestScale = sc; bestHeld = h; }
-    }
-    KING_DANGER_SCALE = bestScale;
-    cur = score(rows);
-    if (!held(cur, base, CTL_TOLERANCE)) {
-        // Even the ctl-optimal scale breaks the ceiling: raise the attacker
-        // threshold and try again before giving up.
-        KING_DANGER_MIN_ATTACKERS = 3;
+    if (set == "king") {
+        // The term is off at SCALE 0 and nothing else matters until it is on. A
+        // greedy descent from a gentle switch-on cannot reach a region the
+        // constraint allows only at larger scales, and there is one: along SCALE
+        // alone, ctl-open falls before it rises. So the start is the SCALE that
+        // minimises the held sets' excess, found by a plain sweep, and the
+        // descent runs from there.
+        int bestScale = 0;
+        double bestHeld = 0;
+        for (int sc = 10; sc <= params[0].hi; sc += params[0].step) {
+            KING_DANGER_SCALE = sc;
+            const Score s = score(rows);
+            const double h = (s.ctlOpen - base.ctlOpen) + (s.self - base.self);
+            if (h < bestHeld - 0.05) { cur = s; bestScale = sc; bestHeld = h; }
+        }
+        KING_DANGER_SCALE = bestScale;
         cur = score(rows);
+        if (!held(cur, base, CTL_TOLERANCE)) {
+            KING_DANGER_MIN_ATTACKERS = 3;
+            cur = score(rows);
+        }
     }
-    std::printf("start     comp %.1f  ctl %.1f  ctl-open %.1f  self %.1f  flips %d   (SCALE %d, MIN_ATTACKERS %d)\n\n",
-                cur.comp, cur.ctl, cur.ctlOpen, cur.self, cur.flips, KING_DANGER_SCALE, KING_DANGER_MIN_ATTACKERS);
+    std::printf("start     comp %.1f  ctl %.1f  ctl-open %.1f  self %.1f  flips %d   (set %s)\n\n",
+                cur.comp, cur.ctl, cur.ctlOpen, cur.self, cur.flips, set.c_str());
 
     // Coordinate descent. A step must improve comp AND respect the ctl
     // ceiling. Repeated until a full pass over every parameter changes nothing.
@@ -241,16 +259,24 @@ int main(int argc, char** argv) {
 
     std::printf("\nresult    comp %.1f  ctl %.1f  ctl-open %.1f  self %.1f  flips %d   (baseline comp %.1f  ctl %.1f  ctl-open %.1f  self %.1f  flips %d)\n",
                 cur.comp, cur.ctl, cur.ctlOpen, cur.self, cur.flips, base.comp, base.ctl, base.ctlOpen, base.self, base.flips);
-    std::printf("\n  -DKING_DANGER_SCALE_PCT=%d -DKING_DANGER_MIN_ATTACKERS_N=%d "
-                "-DKING_DANGER_OFFSET_N=%d -DKING_DANGER_DEFENDER_W_N=%d "
-                "-DKING_DANGER_WEAK_W_N=%d -DKING_DANGER_CHECK_W_N=%d "
-                "-DKING_DANGER_NO_QUEEN_CUT_N=%d -DKING_DANGER_STM_PCT_N=%d\n",
-                KING_DANGER_SCALE, KING_DANGER_MIN_ATTACKERS, KING_DANGER_OFFSET,
-                KING_DANGER_DEFENDER_W, KING_DANGER_WEAK_W, KING_DANGER_CHECK_W,
-                KING_DANGER_NO_QUEEN_CUT, KING_DANGER_STM_PCT);
-    std::printf("  -DKING_DANGER_W_PAWN_N=%d -DKING_DANGER_W_KNIGHT_N=%d -DKING_DANGER_W_BISHOP_N=%d "
-                "-DKING_DANGER_W_ROOK_N=%d -DKING_DANGER_W_QUEEN_N=%d\n",
-                KING_DANGER_WEIGHT[PAWN], KING_DANGER_WEIGHT[KNIGHT], KING_DANGER_WEIGHT[BISHOP],
-                KING_DANGER_WEIGHT[ROOK], KING_DANGER_WEIGHT[QUEEN]);
+    if (set == "king") {
+        std::printf("\n  -DKING_DANGER_SCALE_PCT=%d -DKING_DANGER_MIN_ATTACKERS_N=%d "
+                    "-DKING_DANGER_OFFSET_N=%d -DKING_DANGER_DEFENDER_W_N=%d "
+                    "-DKING_DANGER_WEAK_W_N=%d -DKING_DANGER_CHECK_W_N=%d "
+                    "-DKING_DANGER_NO_QUEEN_CUT_N=%d -DKING_DANGER_STM_PCT_N=%d\n",
+                    KING_DANGER_SCALE, KING_DANGER_MIN_ATTACKERS, KING_DANGER_OFFSET,
+                    KING_DANGER_DEFENDER_W, KING_DANGER_WEAK_W, KING_DANGER_CHECK_W,
+                    KING_DANGER_NO_QUEEN_CUT, KING_DANGER_STM_PCT);
+        std::printf("  -DKING_DANGER_W_PAWN_N=%d -DKING_DANGER_W_KNIGHT_N=%d -DKING_DANGER_W_BISHOP_N=%d "
+                    "-DKING_DANGER_W_ROOK_N=%d -DKING_DANGER_W_QUEEN_N=%d\n",
+                    KING_DANGER_WEIGHT[PAWN], KING_DANGER_WEIGHT[KNIGHT], KING_DANGER_WEIGHT[BISHOP],
+                    KING_DANGER_WEIGHT[ROOK], KING_DANGER_WEIGHT[QUEEN]);
+    } else {
+        std::printf("\n  -DPASSED_RANK_1_N=%d -DPASSED_RANK_2_N=%d -DPASSED_RANK_3_N=%d "
+                    "-DPASSED_RANK_4_N=%d -DPASSED_RANK_5_N=%d -DPASSED_RANK_6_N=%d\n"
+                    "  -DPASSED_FREE_PCT_N=%d -DPASSED_KING_PCT_N=%d -DPASSED_EG_PCT_N=%d\n",
+                    PASSED_RANK[1], PASSED_RANK[2], PASSED_RANK[3], PASSED_RANK[4], PASSED_RANK[5], PASSED_RANK[6],
+                    PASSED_FREE_PCT, PASSED_KING_PCT, PASSED_EG_PCT);
+    }
     return 0;
 }

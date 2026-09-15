@@ -255,6 +255,65 @@ KD_WEIGHT int KING_DANGER_NO_QUEEN_CUT = KING_DANGER_NO_QUEEN_CUT_N;
 #endif
 KD_WEIGHT int KING_DANGER_STM_PCT = KING_DANGER_STM_PCT_N;
 
+// --- Passed pawns ----------------------------------------------------------
+//
+// Until 2026-09-15 a passed pawn was worth PASSED_PAWN (20) flat: the same on
+// the second rank as the seventh, blocked or free, with the kings anywhere.
+// Six of the thirty worst compensation positions were passed-pawn positions.
+// The shape below is the standard one (a bonus by relative rank, more when the
+// square in front is free, king proximity as the pieces come off), with every
+// constant a -D hook and mutable under EVAL_TUNING so tools/kstune can fit it
+// with the search's own positions held. At the defaults it reproduces the flat
+// 20 exactly, so shipping the shape changed nothing until the fit shipped.
+#ifndef PASSED_RANK_1_N
+#define PASSED_RANK_1_N 20
+#endif
+#ifndef PASSED_RANK_2_N
+#define PASSED_RANK_2_N 20
+#endif
+#ifndef PASSED_RANK_3_N
+#define PASSED_RANK_3_N 20
+#endif
+#ifndef PASSED_RANK_4_N
+#define PASSED_RANK_4_N 20
+#endif
+#ifndef PASSED_RANK_5_N
+#define PASSED_RANK_5_N 20
+#endif
+#ifndef PASSED_RANK_6_N
+#define PASSED_RANK_6_N 20
+#endif
+// Percent added to the rank bonus when the square in front is empty.
+#ifndef PASSED_FREE_PCT_N
+#define PASSED_FREE_PCT_N 0
+#endif
+// Percent added to the rank bonus per unit of (their king distance minus our
+// king distance) to the square in front, scaled by how far into the endgame
+// the position is.
+#ifndef PASSED_KING_PCT_N
+#define PASSED_KING_PCT_N 0
+#endif
+// Percent added to the whole bonus at full endgame (no pieces left).
+#ifndef PASSED_EG_PCT_N
+#define PASSED_EG_PCT_N 0
+#endif
+KD_TABLE int PASSED_RANK[7] = { 0, PASSED_RANK_1_N, PASSED_RANK_2_N, PASSED_RANK_3_N,
+                                PASSED_RANK_4_N, PASSED_RANK_5_N, PASSED_RANK_6_N };
+KD_WEIGHT int PASSED_FREE_PCT = PASSED_FREE_PCT_N;
+KD_WEIGHT int PASSED_KING_PCT = PASSED_KING_PCT_N;
+KD_WEIGHT int PASSED_EG_PCT   = PASSED_EG_PCT_N;
+
+// One passed pawn's worth. `rel` is its rank counted from its own side, 1 for
+// a pawn still at home through 6 for one on the seventh. `endgame` is 0 in a
+// full middlegame and 1 with no pieces left (1 - gamePhaseFactor).
+static int passedPawnWorth(int rel, bool frontFree, int theirKingDist, int ourKingDist, float endgame) {
+    int worth = PASSED_RANK[rel] * 100;
+    if (frontFree) worth += PASSED_RANK[rel] * PASSED_FREE_PCT;
+    worth += (int)(PASSED_RANK[rel] * PASSED_KING_PCT * (theirKingDist - ourKingDist) * endgame);
+    worth += (int)(worth * PASSED_EG_PCT * endgame / 100);
+    return worth / 100;
+}
+
 // Attack information needed by king safety, and by nothing else.
 //
 // Built once per evaluation and **only when the term is live**, because it walks
@@ -530,6 +589,7 @@ EvalDetails evaluate_details(const Board& board) {
     // rook open-file test each used to walk a file or a rank range square by
     // square; with these they become constant-time bit tests.
     uint8_t whitePawnFile[8] = {}, blackPawnFile[8] = {};
+    int whitePassers[8], blackPassers[8], nWhitePassers = 0, nBlackPassers = 0;
     for (int i = 0; i < 64; ++i) {
         const Piece& p = board.squares[i];
         if (p.type() != PAWN) continue;
@@ -574,7 +634,7 @@ EvalDetails evaluate_details(const Board& board) {
                 if (file < 7 && board.squares[i+1].type() == PAWN && board.squares[i+1].color() == COLOR_WHITE) whiteConnectedPawns++;
                 // No black pawn on this or an adjacent file, ahead of us
                 // (white advances toward rank 0).
-                if ((span3(blackPawnFile, file) & ranksBelow(rank)) == 0) whitePassedPawns++;
+                if ((span3(blackPawnFile, file) & ranksBelow(rank)) == 0) { whitePassedPawns++; whitePassers[nWhitePassers++] = i; }
                 // Every friendly pawn behind us on the same file.
                 whiteDoubledPawns += __builtin_popcount((unsigned)(whitePawnFile[file] & ranksAbove(rank)));
                 if (adj2(whitePawnFile, file) == 0) whiteIsolatedPawns++;
@@ -604,7 +664,7 @@ EvalDetails evaluate_details(const Board& board) {
                 if (file > 0 && board.squares[i-1].type() == PAWN && board.squares[i-1].color() == COLOR_BLACK) blackConnectedPawns++;
                 if (file < 7 && board.squares[i+1].type() == PAWN && board.squares[i+1].color() == COLOR_BLACK) blackConnectedPawns++;
                 // Mirror of the white case: black advances toward rank 7.
-                if ((span3(whitePawnFile, file) & ranksAbove(rank)) == 0) blackPassedPawns++;
+                if ((span3(whitePawnFile, file) & ranksAbove(rank)) == 0) { blackPassedPawns++; blackPassers[nBlackPassers++] = i; }
                 blackDoubledPawns += __builtin_popcount((unsigned)(blackPawnFile[file] & ranksBelow(rank)));
                 if (adj2(blackPawnFile, file) == 0) blackIsolatedPawns++;
                 if ((span3(blackPawnFile, file) & ranksBelow(rank)) == 0) blackBackwardPawns++;
@@ -644,13 +704,37 @@ EvalDetails evaluate_details(const Board& board) {
     isolatedPawnPenalty = EvalWeights::ISOLATED_PAWN * (whiteIsolatedPawns - blackIsolatedPawns);
     backwardPawnPenalty = EvalWeights::BACKWARD_PAWN * (whiteBackwardPawns - blackBackwardPawns);
     connectedPawnBonus = EvalWeights::CONNECTED_PAWN * (whiteConnectedPawns - blackConnectedPawns);
-    passedPawnBonus = EvalWeights::PASSED_PAWN * (whitePassedPawns - blackPassedPawns);
+    (void)whitePassedPawns; (void)blackPassedPawns;   // counted above; priced per pawn below
     pawnChainBonus = EvalWeights::PAWN_CHAIN * (whitePawnChains - blackPawnChains);
 
     // Mobility
     // King squares were located during the piece scan above (index = rank*8 + file).
     int whiteKingSq = (whiteKingFile >= 0) ? whiteKingRank * 8 + whiteKingFile : -1;
     int blackKingSq = (blackKingFile >= 0) ? blackKingRank * 8 + blackKingFile : -1;
+    {
+        // Passed pawns, priced per pawn now that the kings are known. Board
+        // rank 0 is the eighth rank, so White's relative rank is 7 - rank and
+        // Black's is rank; the square in front is one rank toward promotion.
+        // Same phase as gamePhaseFactor below: material without the kings.
+        const float endgame = 1.0f - std::min(1.0f, (whiteMaterial + blackMaterial - pieceValues[KING] * 2) / 3200.0f);
+        auto dist = [](int a, int b) {
+            return std::max(std::abs(a % 8 - b % 8), std::abs(a / 8 - b / 8));
+        };
+        for (int k = 0; k < nWhitePassers; ++k) {
+            const int sq = whitePassers[k], front = sq - 8;
+            const bool free = front >= 0 && board.squares[front].type() == NONE;
+            passedPawnBonus += passedPawnWorth(7 - sq / 8, free,
+                blackKingSq >= 0 ? dist(blackKingSq, front) : 0,
+                whiteKingSq >= 0 ? dist(whiteKingSq, front) : 0, endgame);
+        }
+        for (int k = 0; k < nBlackPassers; ++k) {
+            const int sq = blackPassers[k], front = sq + 8;
+            const bool free = front < 64 && board.squares[front].type() == NONE;
+            passedPawnBonus -= passedPawnWorth(sq / 8, free,
+                whiteKingSq >= 0 ? dist(whiteKingSq, front) : 0,
+                blackKingSq >= 0 ? dist(blackKingSq, front) : 0, endgame);
+        }
+    }
     whiteMobility = countMobility(board, COLOR_WHITE, whiteKingSq);
     blackMobility = countMobility(board, COLOR_BLACK, blackKingSq);
     mobilityScore = EvalWeights::MOBILITY * (whiteMobility - blackMobility);

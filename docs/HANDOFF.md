@@ -35,6 +35,15 @@ term costs 5.5 percent (1 302 to 1 231 knps) now that the bitboard evaluation
 computes every attack set once and shares it between mobility, threats and
 king danger.
 
+**Passed pawns, same method, null.** The flat 20 per passed pawn became a
+bonus by rank with free-square, king-distance and endgame percentages, all
+`-D` hooks that reproduce the flat 20 at their defaults, and `tools/kstune`
+got a `KSTUNE_SET=passed` family. Two turns of the loop took the seventh-rank
+value from 276 to 168 and comp from 523.8 to 509.0 with the self set held;
+the gate (`shard-20260915-113731/`, 840 games) read **+7.4 [−9.2, +24.2]**.
+Not shipped. The shape stays in the code at its no-op defaults for whoever
+returns to it, and the self set now has 3 130 rows.
+
 **Open.** The gauntlet against Stockfish at 400 nodes has not been run on
 this setting. The bot needs restarting on the new binary; it was stopped this
 morning, last game 06:38 IST, and its first games back will be the first it

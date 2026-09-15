@@ -100,6 +100,7 @@ Re-pool any of these with `./tests/pool-shards.sh <dir>/`.
 | `shard-20260910-104041/` | **`improving`** — one extra ply of LMR when the side to move is worse off than two plies ago | **−10.6 [−31.9, +10.7]** — null, stays off |
 | `shard-20260914-214501/` | king danger alone at scale 460, MIN_ATTACKERS 2, two binaries, bot option set, 840 games | **−32.8 [−52.2, −13.6]** — rejected; `docs/KING-SAFETY.md` 2026-09-14 |
 | `shard-20260914-232426/` | king danger re-tuned with the search's own positions held: scale 150, one attacker, safe checks 1, tempo discount 5%, pawn 2, queen 7. Same shape of gate | **+39.9 [+21.4, +58.6]** — six of seven shards positive; `docs/KING-SAFETY.md` 2026-09-15 |
+| `shard-20260915-113731/` | passed pawns by rank instead of a flat 20: ranks 1-2 nothing, 3-5 the old 20, seventh rank 168, +10% with the square in front free; fitted with the self set held over two turns (comp 523.8 to 509.0). Same shape of gate, on top of the shipped king danger | +7.4 [−9.2, +24.2] — null, not shipped; the shape stays in at its no-op defaults |
 
 ### `improving` null, and history reductions that cannot work — 2026-09-10
 
