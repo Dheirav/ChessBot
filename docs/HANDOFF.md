@@ -1,4 +1,4 @@
-# Handoff — 2026-09-15
+# Handoff — 2026-09-22
 
 ## King danger shipped, on the ninth attempt, +39.9
 
@@ -44,17 +44,27 @@ the gate (`shard-20260915-113731/`, 840 games) read **+7.4 [−9.2, +24.2]**.
 Not shipped. The shape stays in the code at its no-op defaults for whoever
 returns to it, and the self set now has 3 130 rows.
 
-**Open.** The gauntlet against Stockfish at 400 nodes has not been run on
-this setting. The bot needs restarting on the new binary; it was stopped this
-morning, last game 06:38 IST, and its first games back will be the first it
-has ever played on the bitboard core.
+**Rating, as of 2026-09-19:** **2279 Lichess rapid** (the last archived game,
+09-19 01:16 UTC, was played at 2282 and lost 3), 827 games in the archive.
+The 64 games on this build from 09-15 to 09-19: **52-4-8**, and against 2300+
+opponents **3-1-6** where the 75 games before it were 1-1-12. Small numbers,
+right direction. `MEASUREMENTS.md` has the reading.
 
-## The bot runs the bitboard core
+**Open.** The gauntlet against Stockfish at 400 nodes has not been run on
+this setting. The bot has been down since 09-19; nothing blocks restarting it.
+The "State right now" table further down this file is the 2026-08-27 state
+and is kept for the record; this section is the current one.
+
+## The bot's option set, 2026-09-11 (the bitboard core only took from 09-15)
 
 `lichess/config.yml` sets ten UCI options: the bitboard core plus the
-branching-factor and quiescence work. The engine's own defaults are unchanged,
-so bench is still 463,295 and every test binary passes, and reverting is
-deleting one block from that file with no rebuild.
+branching-factor and quiescence work. Written 2026-09-11; the nine search
+options applied from that day, and `BitboardCore` was silently refused until
+the fix of 09-15 (`BUGS.md` 22), so every depth and speed number in this
+section was measured in-process and the bot itself ran the mailbox core with
+the other nine until then. The engine's own defaults were unchanged at the
+time, so bench was still 463,295 and every test binary passed, and reverting
+is deleting one block from that file with no rebuild.
 
 Measured over 24 middlegame positions at 5 s on one thread, with every
 disagreement adjudicated by Stockfish at depth 18 rather than against this
@@ -227,9 +237,11 @@ the baseline of their day, not a regression.
 
 ## Measured playing strength — the external baseline
 
-**Current: 2152 Lichess rapid (rd ±45) over 294 rated games**, as of
-2026-08-27. The bot plays rated 900+10 against other bots, seeking opponents up
-to 2500 since `opponent_max_rating` was raised on 2026-08-21.
+**Current: 2279 Lichess rapid, 827 archived games, as of 2026-09-19** (the
+head of this file). What follows is the 2026-08-27 reading, 2152 over 294
+games, kept as written. The bot plays rated 900+10 against other bots, seeking
+opponents from 1200 to 2500 since `opponent_max_rating` was raised on
+2026-08-21.
 
 **The rating is falling on purpose: 2190 → 2160 → 2130 across three days.** The
 per-band scores have not moved — the crossover is still 2100-2150 — but nine of
@@ -281,15 +293,15 @@ log for `ConnectionError` before calling it a chess problem.**
 
 ## In flight — 2026-08-27
 
-**Read this section first; the rest of the file is older than it.**
+**This section is the 2026-08-27 state, superseded by the head of the file.**
 
-### State right now
+### State as of 2026-08-27
 
 | | |
 |---|---|
 | **bot** | **DOWN.** Restart it — nothing blocks that |
-| **`./chessbot`** | LMP at depth 2 (`lmpshallow`), bench **445,492** |
-| **rating** | **2152**, rd ±45, prog 0, over 294 rated games |
+| **`./chessbot`** | LMP at depth 2 (`lmpshallow`), bench **445,492** (465,325 as of 2026-09-15) |
+| **rating** | **2152**, rd ±45, prog 0, over 294 rated games (2279 as of 2026-09-19) |
 | **git** | `main` clean and pushed; `eval-texel-tune` and `tt-16byte` parked |
 | **CPUs** | **8** — raised from 4 and applied 2026-08-27, `nproc` verified. Gates roughly halve: ~110 min → ~60 |
 

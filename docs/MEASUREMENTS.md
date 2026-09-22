@@ -571,3 +571,30 @@ Also worth carrying: the day's game median read 595 while a direct probe read
 poker job scaled up. **A daily median is a lagging indicator**, so a same-day
 reading cannot clear a machine that got busy an hour ago. Probe directly before
 trusting a gate.
+
+
+## Fifth measurement — 2026-09-19, after Lazy SMP, the LMR table and king danger
+
+From the PGN archive (`game_records/`, 827 records); the live page read 2279
+over 798 rated games the same week.
+
+| | 08-22 20:25 UTC | 09-15 05:04 UTC | 09-19 01:16 UTC |
+|---|---|---|---|
+| rating | 2130 | 2249 | **2279** (2282 before the last game, which lost 3) |
+| archive records | 218 | 763 | 827 |
+
+Two builds are in that span. Lazy SMP at `Threads=6` and the LMR table went
+live on 09-07 and 09-10 (`GATES.md`, +162 and +26.4 at fixed nodes) and took
+the rating from 2130 to about 2250. King danger, the bitboard core actually
+applied over UCI (`BUGS.md` 22) and the speed that came with it went live at
+09-15 10:34 IST. The 64 games on that build to 09-19:
+
+| opponents | before (75 games, 09-13 to 09-15) | on the 09-15 build (64 games) |
+|---|---|---|
+| 2300+ | 1-1-12 | **3-1-6** |
+| 2000 to 2299 | 16-3-2 | 11-2-2 |
+| under 2000 | 36-4-0 | 38-1-0 |
+
+The 2300+ row is the one king danger was built for and the only one with
+room to move; ten games is direction, not a rate. The bot has been down since
+09-19.

@@ -5,7 +5,8 @@
 Every strength number in this repo is self-referential. SPRT gates measure a change
 against the previous version of itself, which says a heuristic helped but says nothing
 about where the engine actually sits. Lichess fixed half of that: `Crimsy_Bot` holds a
-non-provisional **2130 rapid (rd ±45) over 218 rated games** as of 2026-08-23.
+non-provisional **2279 rapid over about 800 rated games** as of 2026-09-19
+(2130 over 218 when this was written on 2026-08-23).
 `HANDOFF.md` carries the current reading and `MEASUREMENTS.md` every past one —
 do not restate either here, since this document is read months after it is written.
 

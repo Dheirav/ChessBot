@@ -7,9 +7,10 @@ ChessBot is a local C++ chess application with an SFML-based graphical interface
 It includes:
 - A full chess board with click-to-move and drag-and-drop input
 - A negamax alpha-beta engine with iterative deepening, a transposition table,
-  bounded quiescence search, null-move pruning, late move reductions, check
+  bounded quiescence search, null-move pruning, late move reductions with a
+  depth-and-move table, razoring, reverse futility, late move pruning, check
   extensions and aspiration windows, under a wall-clock budget it is required
-  to respect
+  to respect; searched by up to eight threads (Lazy SMP), with pondering
 - Perft-verified move generation, including castling, en passant and promotion
 - Full terminal detection — checkmate, stalemate, fifty-move, threefold
   repetition, insufficient material — plus PGN export, undo/redo, resignation,
@@ -123,15 +124,31 @@ reporting mates as `mate N` rather than a centipawn value.
 | option | type | default | notes |
 |---|---|---|---|
 | `Hash` | spin, 1–4096 | 256 | transposition table size in MB |
+| `Threads` | spin, 1–8 | 1 | Lazy SMP; the bot runs 6. Gated **+162** Elo at 8 against 1 |
+| `Ponder` | check | false | think on the opponent's time; `go ponder` and `ponderhit` are implemented |
+| `Move Overhead` | spin, 0–5000 | 100 | ms held back from every clock budget |
+| `RootSeed` | spin | 0 | pins the per-process seed that `EvalNoise` uses, for exact replays |
 | `NullMove` | check | true | null-move pruning |
 | `LMR` | check | true | late move reductions |
+| `LmrTable` | check | true | reduction from a depth-and-move-number table instead of a constant; gated **+26.4** Elo |
 | `Aspiration` | check | true | aspiration windows |
 | `TtAging` | check | true | age the TT once per search |
 | `SeeOrdering` | check | true | order captures by SEE; gated **+25.6** Elo |
 | `SeePruning` | check | **false** | drop losing captures in quiescence; gated twice, **not demonstrated** either way |
 | `QBound` | check | true | cap quiescence 8 plies past the horizon; a repair, ungated |
 | `CheckExt` | check | true | extend a ply when in check; gated **+23.0** Elo |
-| `DeltaPruning` | check | **false** | skip captures that cannot reach alpha; **+7.1**, interval spans zero |
+| `Razoring` | check | true | drop to quiescence when the static score is 500cp under alpha at low depth; gated **+39.1** Elo |
+| `RevFutility` | check | true | cut off when the static score is far above beta at low depth; gated **+18.4** Elo on top of razoring |
+| `Lmp` / `LmpShallow` | check | true | late move pruning, from depth 2; gated **+13.1** and **+15.0** Elo |
+| `EvalNoise` | check | true | ±5cp seeded perturbation of the static score, so repeated games differ; gated null (−3.9 [−16.9, +9.0]) and kept for the variety |
+| `DeltaPruning` | check | **false** | skip captures that cannot reach alpha; re-measured **+0.9 [−5.8, +7.7]**, closed |
+
+Ten more options (`BitboardCore`, `NullDepthR`, `NullVerify`, `LmpDeep`,
+`InteriorPvs`, `QMoveCount`, `QNoUnderpromo`, `QCheckExempt`, `CaptHist`,
+`QCaptHist`) default to off and are switched on by `lichess/config.yml`; they
+are the bitboard search core and the branching-factor work of September 2026
+(`docs/HANDOFF.md`). The rest of the advertised list is gated-off experiments,
+kept switchable so a gate can be re-run without a rebuild.
 
 The heuristic toggles are exposed on purpose: A/B testing a single feature can
 then run through standard tooling instead of only through `tests/match`. They
@@ -148,9 +165,12 @@ gain, which is a different claim. `SeePruning` cuts 41% of nodes and measured
 which is what settled the margin rather than the technique. Every figure above
 is 3,360 games; see [`docs/PLAN.md`](docs/PLAN.md) for the gate that produced it.
 
-Note that this engine advertises no `Threads`, `SyzygyPath` or `Move Overhead`.
-python-chess raises on any option the engine did not advertise, so a GUI config
-copied from a template will fail on the first game.
+Note that this engine advertises `Threads`, `Ponder` and `Move Overhead` but
+no `SyzygyPath`. python-chess raises on any option the engine did not
+advertise, so a GUI config copied from a template will fail on the first game;
+and an option the engine advertises under one name but looks up under another
+fails silently, which is what `tests/uci_smoke.py` now guards against
+(`docs/BUGS.md` 22).
 
 ## Playing online
 
@@ -184,7 +204,10 @@ instead of being played into a position it never examined.
 The search is a single negamax alpha-beta with iterative deepening — there is
 deliberately no second, simpler variant, because a second copy drifts from the
 one the application actually runs and then benchmarks describe a search nobody
-plays.
+plays. It runs on one thread by default and on up to eight with `Threads`
+(Lazy SMP: every thread searches the same root and shares the transposition
+table, which is where they help each other; +162 Elo at 8 against 1, and the
+bot plays 6).
 
 | technique | what it buys | why it is there |
 |---|---|---|
@@ -199,6 +222,12 @@ plays.
 | **Static exchange evaluation** | plays an exchange out to see if a capture actually wins material | MVV-LVA sorts by victim alone, so it cannot tell QxP-that-hangs-a-queen from QxP-that-wins-a-pawn. Ships **half on** — see below. |
 | **Check extensions** | search one ply deeper when in check | The reply to a check is usually forced, so few evasions exist and the extra ply is cheap. It is also where the horizon effect does most damage: a search that stops while in check evaluates a position whose material is about to change. Costs 9.2% more nodes and won its gate by **+23.0** Elo anyway. |
 | **Bounded quiescence** | quiescence stops 8 plies past the horizon | It had no bound at all. In check it searches every legal evasion rather than captures only, so a long forcing sequence could recurse without limit — and an overrun on a clock is a forfeit, not a bad move. A repair rather than a feature, so it defaults on. |
+| **Razoring** | at low depth, a static score 500cp under alpha drops straight to quiescence | If the position is that bad, a shallow full search almost never rescues it. The margin is sized from the evaluation's measured error rather than the textbook 150, because a margin inside that noise pruned good lines and lost 50 Elo. Gated **+39.1**. |
+| **Reverse futility** | at low depth, a static score far above beta returns it | The mirror image: a position that good will not lose enough in two plies to matter. **+18.4** on top of razoring. |
+| **Late move pruning** | past a move count that grows with depth, quiet moves are skipped at low depth | Good ordering means the twentieth quiet move at depth 2 is almost never the best one. From depth 2; **+13.1** and **+15.0**. |
+| **LMR table** | the reduction depends on depth and move number, not a constant | A constant reduction is right at one depth and wrong at every other. **+26.4**. |
+| **Lazy SMP** | several threads search the same root and share the table | No work splitting: the threads diverge through timing and the shared table, and the deeper table is the whole gain. **+162** at eight threads against one. |
+| **Pondering** | the engine searches during the opponent's turn on the move it expects | Free time. `ponderhit` keeps the search; a different reply restarts it. |
 
 Only alpha-beta itself, the transposition table and quiescence are exact — they
 return the same move a full search would. The rest are heuristics: they trade a
@@ -368,5 +397,4 @@ is, not just what it does — `search.hpp`, `bitboard.hpp`, `see.hpp` and
 `transposition_table.hpp` in particular are worth reading before changing them.
 
 ## License
-[LICENSE](LICENSE) is currently empty — no licence has been chosen yet, so
-default copyright applies and no permissions are granted.
+MIT, see [LICENSE](LICENSE).

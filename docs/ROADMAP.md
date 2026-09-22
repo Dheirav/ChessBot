@@ -505,7 +505,7 @@ wrong twice about where the time goes, and both corrections came from measuring.
 
 ## Phase 7 — The road to 3000 *(the strength programme, 2026-08-22)*
 
-`Crimsy_Bot` is **2130 Lichess rapid** over 218 rated games (2026-08-23;
+`Crimsy_Bot` is **2279 Lichess rapid** as of 2026-09-19, 2130 over 218 rated games when this was written (2026-08-23;
 `HANDOFF.md` states the current reading, `MEASUREMENTS.md` the history). 3000 is
 about **870 Elo away**, which is not a tuning problem: it is the distance between a
 competent classical engine and a modern one. Every item below is ordinary

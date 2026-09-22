@@ -80,10 +80,14 @@ file is in version control.
   process is in.
 - **`move_overhead: 2000`.** Raise it if games are lost on time despite the
   engine returning moves promptly; WSL plus network latency is what it covers.
-- **Matchmaking is on and rated**, 5+3 and 10+5, within 300 rating points. Rated
-  games are the point: a Lichess rating is an *independent* strength measurement,
-  which self-play SPRT cannot produce — that only ever measures a change against
-  the previous version of itself.
+- **Matchmaking is on and rated**, one control only, 15+10, against bots rated
+  1200 to 2500 as absolute bounds (`opponent_rating_difference` is deliberately
+  unset; the comments in `config.yml` say why). One control because Lichess
+  rates blitz and rapid separately, and splitting games between them makes
+  each rating converge half as fast. Rated games are the point: a Lichess
+  rating is an *independent* strength measurement, which self-play SPRT cannot
+  produce — that only ever measures a change against the previous version of
+  itself.
 
 ## Checking the engine end without Lichess
 
