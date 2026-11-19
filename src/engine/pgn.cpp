@@ -274,6 +274,8 @@ bool parsePgn(const std::string& text, PgnGame& out, std::string* error) {
         else if (key == "Result") out.tags.result = val;
         else if (key == "FEN")    out.tags.startFen = val;
         else if (key == "TimeControl") out.tags.timeControl = val;
+        else if (key == "WhiteElo") out.tags.whiteElo = val;
+        else if (key == "BlackElo") out.tags.blackElo = val;
     }
 
     Board board;

@@ -223,6 +223,14 @@ int main() {
         check(!parsePgn("1. e4 e5 2. Ke2xq9 *", g, &err) && !err.empty(),
               "an impossible move fails loudly rather than being skipped");
 
+        // Ratings feed the review's player strips. They are read and never
+        // written, so a game without them must come back empty and not "0".
+        check(parsePgn("[WhiteElo \"872\"]\n[BlackElo \"876\"]\n1. e4 *", g, &err)
+                  && g.tags.whiteElo == "872" && g.tags.blackElo == "876",
+              "WhiteElo and BlackElo are read");
+        check(parsePgn("1. e4 *", g, &err) && g.tags.whiteElo.empty() && g.tags.blackElo.empty(),
+              "absent ratings stay empty");
+
         // Annotations must not break reading. A review writes NAGs and
         // comments into its output, and that output is read back by the same
         // parser — if a glyph or a brace confused it, the tool would silently

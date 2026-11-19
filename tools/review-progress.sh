@@ -25,7 +25,13 @@ done
 snap() {
     local start now el cur tot line rate eta w=30 f
     start=$(cat "$OUT/$ID.start" 2>/dev/null) || { echo "no start time for $ID"; return 1; }
-    now=$(date +%s); el=$((now - start))
+    now=$(date +%s)
+    # Once the report exists the run is over, so stop the clock at the moment it
+    # was written. Counting on to "now" made a finished run read as hours long.
+    if [ -f "$OUT/$ID.html" ] && [ "$(stat -c %Y "$OUT/$ID.html")" -ge "$start" ]; then
+        now=$(stat -c %Y "$OUT/$ID.html")
+    fi
+    el=$((now - start))
     line=$(tr '\r' '\n' < "$OUT/$ID.log" 2>/dev/null | grep -o 'analysing [0-9]*/[0-9]*' | tail -1)
     if [ -z "$line" ]; then
         printf '%s: no position finished yet, %ds elapsed (fetching or starting Stockfish)\n' "$ID" "$el"

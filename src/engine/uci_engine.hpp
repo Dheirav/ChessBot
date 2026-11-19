@@ -160,6 +160,7 @@ public:
         send(go);
 
         haveScore_ = false;
+        haveSecond_ = false;
         pv_.clear();
         std::string line;
         while (readLine(line)) {
@@ -191,6 +192,18 @@ public:
     // named evaluation terms has to walk to the end of this line first.
     const std::vector<std::string>& lastPv() const { return pv_; }
 
+    // The second-best line's score, in the same units, when the engine was
+    // asked for MultiPV 2 and the position has a second legal move.
+    //
+    // Needed for one question the best score cannot answer: was the best move
+    // the *only* good one? A move that holds the position when every
+    // alternative loses is worth more than one of three equal choices, and the
+    // difference between the first and second line is the only measure of it.
+    // Absent unless setOption("MultiPV", "2") was sent, so nothing that does not
+    // ask for it sees a change.
+    bool haveSecondScore() const { return haveSecond_; }
+    int  lastSecondScore() const { return secondScore_; }
+
     void quit() {
         if (pid_ <= 0) return;
         if (out_) { send("quit"); fclose(out_); out_ = nullptr; }
@@ -211,6 +224,8 @@ private:
     FILE* out_ = nullptr;
     int  lastScore_ = 0;
     bool haveScore_ = false;
+    int  secondScore_ = 0;
+    bool haveSecond_ = false;
     std::vector<std::string> pv_;
 
     void send(const std::string& s) {
@@ -249,16 +264,44 @@ private:
         while (in >> mv) pv_.push_back(mv);
     }
 
+    // Which line of a MultiPV block this is; 1 when the token is absent, which
+    // is every line from an engine that was not asked for more than one.
+    static int multipvIndex(const std::string& line) {
+        const size_t m = line.find(" multipv ");
+        return (m == std::string::npos) ? 1 : std::atoi(line.c_str() + m + 9);
+    }
+
     void captureScore(const std::string& line) {
-        capturePv(line);
+        const int index = multipvIndex(line);
         size_t p = line.find(" score ");
         if (p == std::string::npos) return;
         p += 7;
-        if (line.compare(p, 3, "cp ") == 0) {
-            lastScore_ = std::atoi(line.c_str() + p + 3);
+        // Line 2 is a different move's score and must never overwrite line 1's:
+        // everything downstream reads lastScore_ as the value of the best move.
+        // Lines past 2 are not used.
+        if (index >= 2) {
+            if (index == 2 && (line.compare(p, 3, "cp ") == 0 || line.compare(p, 5, "mate ") == 0)) {
+                secondScore_ = scoreFrom(line, p);
+                haveSecond_ = true;
+            }
+            return;
+        }
+        // A new block starts at line 1, so a second score left over from the
+        // previous depth must not survive into a position with only one move.
+        haveSecond_ = false;
+        capturePv(line);
+        if (line.compare(p, 3, "cp ") == 0 || line.compare(p, 5, "mate ") == 0) {
+            lastScore_ = scoreFrom(line, p);
             haveScore_ = true;
-        } else if (line.compare(p, 5, "mate ") == 0) {
-            int n = std::atoi(line.c_str() + p + 5);
+        }
+    }
+
+    // Centipawns, with mate mapped as described below. `p` points at "cp " or
+    // "mate ".
+    static int scoreFrom(const std::string& line, size_t p) {
+        if (line.compare(p, 3, "cp ") == 0) return std::atoi(line.c_str() + p + 3);
+        {
+            const int n = std::atoi(line.c_str() + p + 5);
             // n == 0 is not "I mate in zero" — it is the score of a position
             // that is *already* checkmated, which every engine reports for the
             // side to move there. Reading it as a win handed +30000 to the side
@@ -267,8 +310,7 @@ private:
             // `tests/match` never met this because it detects mate itself
             // before asking for a move; `tools/review` searches all n+1
             // positions and did.
-            lastScore_ = (n > 0) ? (30000 - n * 2) : (-30000 - n * 2);
-            haveScore_ = true;
+            return (n > 0) ? (30000 - n * 2) : (-30000 - n * 2);
         }
     }
 };

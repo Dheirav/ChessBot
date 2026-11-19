@@ -66,7 +66,10 @@ BOT="${BOT:-Crimsy_Bot}"
 STEM="${ID:-$NAME}"
 date +%s > "$OUT/$STEM.start"
 echo "reviewing $NAME   (watch: ./tools/review-progress.sh $STEM --watch)"
-nice -n 10 "$REPO/tools/review" "$PGN" --html "$HTML" --me "$BOT" "$@" \
+# --multipv 2 is what lets the Great class tell "the only good move" from one of
+# several; it costs more per position and nudges the scores slightly, which is
+# why review-archive.sh, whose numbers are compared across builds, leaves it off.
+nice -n 10 "$REPO/tools/review" "$PGN" --html "$HTML" --me "$BOT" --multipv 2 "$@" \
     2> >(tee "$OUT/$STEM.log" >&2) || exit 1
 
 # Opening a browser is best-effort: the report is the deliverable and it is

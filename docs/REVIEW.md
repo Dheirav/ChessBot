@@ -288,13 +288,10 @@ baseline to compare *this* engine against itself over time, and nothing else.
 It is also not comparable to the 92.6% this file used to quote: different
 parser, different archive size.
 
-### Not implemented, deliberately
+### The four classes that were left out, and where they went
 
-`Book`, `Brilliant`, `Great` and `Miss` are all still unimplemented. `Great`
-needs MultiPV — Stockfish has it, `UciEngine` does not request it. `Brilliant`
-needs "material sacrificed and still best". `Miss` needs mate scores preserved
-rather than clamped. Each is a small piece of work and none of them change what
-the tool is for, which is why the core landed without them.
+`Book`, `Brilliant`, `Great` and `Miss` were not part of the core. They exist
+now, as R9 below, and as approximations: see there for what each one is.
 
 ---
 
@@ -662,3 +659,74 @@ and has not been exercised), variants, and Chess960.
 `review-open.sh` writes its counter to `~/reviews/<id>.log`;
 `tools/review-progress.sh` turns that into done/total and an ETA from the rate
 so far. At depth 16 a 47-ply game took 243 s here (48 positions, one Stockfish thread).
+
+---
+
+## R9. Chess.com's classes and page — **DONE 2026-11-19**
+
+The report now speaks Chess.com's vocabulary: Brilliant, Great, Book, Best,
+Excellent, Good, Inaccuracy, Mistake, Miss, Blunder, in that order, with a
+badge, a per-side count table, key moments, and a coach line for the move being
+viewed. `docs/REVIEW.md` R5 and R7 describe the page it replaced.
+
+**`label` did not change; `cls` is new.** `archive-profile.py` and the archive
+index count Blunder, Mistake and Inaccuracy from `label`, and those counts are a
+series compared across builds. A relabelling that moved moves between buckets
+would have broken the one baseline this project has. So the Chess.com class is a
+second field in the record, the text report prints it as a second table, and old
+records (version 2, no `cls`) still render from their labels. Record version is
+3, which means `review-archive.sh` will re-review the whole archive when next
+run, about half an hour of Stockfish for 200 games, so run it when the machine
+is free.
+
+### What is Chess.com's rule and what is not
+
+Their support article gives the expected-points limits for the loss-based
+classes: Excellent to 0.02, Good to 0.05, Inaccuracy to 0.10, Mistake to 0.20,
+Blunder above. Those are used as win-probability points, which are the limits
+this tool already had. Their model of win probability depends on the player's
+rating and this one is a fixed curve, so the boundaries agree and the moves that
+land on them will sometimes differ.
+
+**Brilliant, Great, Miss and Book have no published numbers, only a
+description, so what follows is this tool's reading of the description and has
+not been compared with Chess.com's own review.** The review page is behind a
+login, and checking it would have meant making an account.
+
+| class | rule here |
+|---|---|
+| Book | the position after the move is on a line of the Lichess opening list (`tools/data/openings.tsv`, CC0, 3 865 lines), and the move did not lose 10 points or more. Keyed on placement, side to move and castling, so transpositions count. A sound line that is rarely played will not be in a list this size. |
+| Brilliant | cost under 2 points, not already above 85% win, not below 40% after, and a sacrifice: either material down 2 or more at the end of the engine's line (up to 12 plies, then recaptures), or the opponent can win a minor piece on a static exchange after the move, net of what the move itself took. |
+| Great | the best move, the second-best at least 10 points worse, position not lost, and not a recapture or a free capture. Needs `--multipv 2`. |
+| Miss | an inaccuracy or mistake after the opponent gave up 10 points or more, when the position offered 70% or better. A missed forced mate counts too. A blunder stays a blunder. |
+
+**What I checked.** Byrne against Fischer 1956 at depth 14: 17...Be6, the queen
+sacrifice, and 11...Na4 came out Brilliant, and the other moves of that game
+that are not sacrifices did not. Getting there found two faults, both fixed and
+both worth remembering. A walk down the engine's best line cannot see a
+sacrifice the opponent should decline, because the line never loses anything, so
+Be6 read as quiet; that is why the exchange test exists. And a six-ply walk read
+an ordinary exchange on move 13 as a sacrifice because the line was cut before
+the material came back, which is why it is twelve. A third showed up on a
+real game: taking a queen that had been left hanging was called Great, which is
+why a free capture is excluded. All three came from looking at two games, so
+expect more edges in games nobody has looked at yet. The opening it names for the first game,
+`B12 Caro-Kann Defense: Advance Variation`, has the same ECO code Chess.com wrote
+in that game's own tags.
+
+`--multipv 2` is off by default and `review-open.sh` turns it on. It changes the
+engine's scores slightly, so it stays out of anything compared across builds.
+
+### The page
+
+Layout follows what could be seen of Chess.com's analysis page without an
+account: the board between two player strips (name, rating, clock at the move
+being viewed), an evaluation bar at its left edge, and a panel beside it. The
+panel has a coach card for the current move above Summary and Moves tabs. Its
+look is this project's own, not Chess.com's: the badge colours, icons and
+palette were chosen here, and the only thing measured from their page was that
+its dark surface is a warm grey and its side panel a translucent layer over it.
+Colour is spent on the badges and the evaluation bar only, and every badge is
+paired with its name. Not yet looked at: a game with hundreds of key moments, a
+name long enough to wrap, a PGN with no ratings or clocks on the phone layout.
+

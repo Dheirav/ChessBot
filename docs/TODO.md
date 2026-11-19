@@ -200,13 +200,14 @@ budgets are — but the bot is not, and rated games cannot be re-run.
 | ~~**Archive index view**~~ | — | **done 2026-08-17**. Sortable table with date, opponent, rating, result, opening, accuracy, cp loss, blunders and clock used/left, plus the band table. Built from the cached records plus PGN tags via `--pgn-dir`, so it costs no analysis. |
 | ~~**Opening names**~~ | — | **done 2026-08-17** with the index — the `ECO` and `Opening` tags are read straight from the export. |
 | **Phantom-loss floor** | M | ~3% of criticised moves are moves the engine itself would have played, from successive searches disagreeing across a shared transposition table (`REVIEW.md`). Clearing the table between positions would cost analysis time; measure before choosing. |
-| **`Miss` label** | S | Needs mate scores preserved rather than clamped to ±1000. |
-| **`Brilliant` label** | M | Needs "material sacrificed and still best". |
-| **`Great` label** | M | Needs MultiPV; `UciEngine` does not request it. |
+| ~~**`Miss`, `Brilliant`, `Great`, `Book`**~~ | — | **done 2026-11-19** as approximations (`REVIEW.md` R9). Not compared with Chess.com's own review, which is behind a login. Next step is to read a few dozen labelled moves by eye and move the thresholds. |
+| **Archive re-review** | S | Record version is 3. `tools/review-archive.sh` re-reviews every game on its next run, about half an hour for 200. Run it with the bot idle. |
+| **Rook and bishop under-promotions in `chesscom-pgn.py`** | S | Decoder confirmed through the knight against 5 real games; none with a rook or bishop turned up in four months of one archive. |
 | **`review-archive.sh` default path** | S | Hardcodes the Lichess archive; `ARCHIVE=` overrides. Fine for the bot, awkward for anyone reviewing their own games. |
 
 **Explicitly not doing** (`REVIEW.md`): reimplementing Stockfish's analysis, a
-tablebase or cloud-eval integration, an opening book for the `Book` label.
+tablebase or cloud-eval integration. (An opening list for `Book` was on this line
+until 2026-11-19; it is built, from the Lichess list.)
 
 ---
 

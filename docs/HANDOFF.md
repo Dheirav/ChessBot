@@ -212,9 +212,16 @@ report, an annotated PGN, or a self-contained HTML page. Stockfish 16 is at
 ./tools/review-open.sh --latest               # newest game, opened
 ./tools/review g.pgn --html o.html --me you   # someone else's export
 BOT=you ./tools/review-open.sh https://www.chess.com/game/<id>   # fetch, review, open
+                                              # (defaults to CrimsyCane for a link)
 ./tools/review-progress.sh --watch            # how far along, ETA from the measured rate
 ./tools/archive-profile.py --compare <stamp>  # accuracy before/after a build
 ```
+
+The report speaks Chess.com's classes (Brilliant, Great, Book, Miss and the
+rest) in a field called `cls`, separate from `label`, which `archive-profile.py`
+reads. Record version is **3**, so the next `review-archive.sh` re-reviews the
+archive. Brilliant, Great, Miss and Book are approximations that have not been
+compared with Chess.com's output: `REVIEW.md` R9.
 
 It carries a known **3% phantom-loss floor** from successive searches
 disagreeing, so a lone inaccuracy under ~5 win% is not evidence of anything.

@@ -24,6 +24,10 @@ struct PgnTags {
     std::string result = "*";            // "1-0", "0-1", "1/2-1/2" or "*"
     std::string startFen;                // empty = the standard opening position
     std::string timeControl;             // "600", "900+10"; empty when absent
+    // Read from WhiteElo/BlackElo and never written back: they describe the
+    // players when the game was played, which this engine's own games do not
+    // have, and toPgn() writes only what it can stand behind. Empty when absent.
+    std::string whiteElo, blackElo;
 };
 
 // Today's date as PGN spells it.
