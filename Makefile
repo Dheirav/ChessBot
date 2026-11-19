@@ -237,6 +237,13 @@ tools/review: tools/review.o $(ENGINE_OBJ)
 
 review: tools/review
 
+# Chess.com games arrive as from/to squares; this turns them into SAN through
+# the engine's own toSan(). tools/chesscom-pgn.py is the caller.
+tools/uci2pgn: tools/uci2pgn.o $(ENGINE_OBJ)
+	$(CXX) $^ -o $@ $(LDFLAGS)
+
+uci2pgn: tools/uci2pgn
+
 # Self-play corpus generation for NNUE (docs/NNUE-DECISION.md). Same engine
 # objects as everything else: the data has to come from the engine being
 # trained, not from a variant of it.
@@ -291,7 +298,7 @@ gate-check:
 	  exit 1; \
 	fi
 
-everything: gate-check chessbot tools/configsweep tests/bbequiv tests/bench tests/bitboard_test tests/engine tests/evalerror tests/evalref tests/evaltrace tests/gamestate tests/guiinput tests/match tests/perft tests/pgn tests/see_test tests/timecontrol tools/bbspeed tools/evaldump tools/gendata tools/review tools/treecost
+everything: gate-check chessbot tools/configsweep tests/bbequiv tests/bench tests/bitboard_test tests/engine tests/evalerror tests/evalref tests/evaltrace tests/gamestate tests/guiinput tests/match tests/perft tests/pgn tests/see_test tests/timecontrol tools/bbspeed tools/evaldump tools/gendata tools/review tools/treecost tools/uci2pgn
 
 bbspeed: tools/bbspeed
 	./tools/bbspeed
@@ -377,7 +384,7 @@ lichess:
 
 # Clean up build files
 clean:
-	rm -f $(OBJ) $(DEP) $(TEST_OBJ) $(TEST_DEP) $(TOOL_OBJ) $(TOOL_DEP) $(EXEC) $(TESTS) tools/review $(PROF_BIN) gmon.out
+	rm -f $(OBJ) $(DEP) $(TEST_OBJ) $(TEST_DEP) $(TOOL_OBJ) $(TOOL_DEP) $(EXEC) $(TESTS) tools/review tools/uci2pgn $(PROF_BIN) gmon.out
 
 # Clean and rebuild the project
 remake:
@@ -385,4 +392,4 @@ remake:
 	$(MAKE) all
 
 # Mark these targets as not actual files
-.PHONY: ordering-stats everything gate-check all clean remake lichess profile review tests test-perft test-match test-gamestate test-evalref evalref-regen test-evalerror evalerror-baseline evalerror-corpus bench test-bench bench-regen test-timecontrol test-see test-bitboard test-bbequiv test-guiinput test-pgn test-uci
+.PHONY: ordering-stats everything gate-check all clean remake lichess profile review uci2pgn tests test-perft test-match test-gamestate test-evalref evalref-regen test-evalerror evalerror-baseline evalerror-corpus bench test-bench bench-regen test-timecontrol test-see test-bitboard test-bbequiv test-guiinput test-pgn test-uci

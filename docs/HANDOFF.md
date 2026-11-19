@@ -211,6 +211,8 @@ report, an annotated PGN, or a self-contained HTML page. Stockfish 16 is at
 ./tools/review-archive.sh                     # every archived game, one file
 ./tools/review-open.sh --latest               # newest game, opened
 ./tools/review g.pgn --html o.html --me you   # someone else's export
+BOT=you ./tools/review-open.sh https://www.chess.com/game/<id>   # fetch, review, open
+./tools/review-progress.sh --watch            # how far along, ETA from the measured rate
 ./tools/archive-profile.py --compare <stamp>  # accuracy before/after a build
 ```
 

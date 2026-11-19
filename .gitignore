@@ -55,6 +55,7 @@ tools/kstune
 tools/ordering-stats
 tools/review
 tools/treecost
+tools/uci2pgn
 tools/tune
 build/
 __pycache__/

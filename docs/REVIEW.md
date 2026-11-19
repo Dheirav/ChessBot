@@ -624,3 +624,41 @@ confidently wrong about the games most worth reviewing.
 Build R0 now — it is useful regardless and perfectly testable. Weigh the rest
 against tuning the evaluation, which is the work that would make the reviewer
 worth listening to.
+
+---
+
+## R8. Reviewing a Chess.com link — **DONE 2026-11-19**
+
+```bash
+make uci2pgn                                   # once; not while a gate is running
+BOT=your_username ./tools/review-open.sh https://www.chess.com/game/187525839308
+```
+
+`tools/chesscom-pgn.py` reads the JSON the game page itself loads
+(`/callback/live/game/<id>`), so it needs the id and nothing else, and no
+account. The public API was the first thing considered and is the wrong shape:
+it serves a player's monthly archive, which needs a username and a month that a
+bare link does not carry. The PGN is kept in `~/reviews/chesscom/<id>.pgn`.
+
+The moves come as two characters per ply, from-square then to-square, and a
+promotion packs the piece and the file step into the destination character. The
+decoder only produces coordinates. SAN comes from `tools/uci2pgn`, which calls
+the engine's own `toSan()` and refuses any move that is not legal where it is
+played, for the reason R0 gives: a second SAN generator is a second place for
+disambiguation to be wrong.
+
+**Checked against Chess.com's own PGNs, not against itself.** 50 games from a
+public archive (25 with promotions, a spread of time controls) came back with
+identical SAN and identical clocks, plus the 5 games with knight
+under-promotions that four months of the same archive held. **Rook and bishop
+under-promotions are untested**: none turned up, and the piece order
+`qnrbkp` is only confirmed as far as the knight. A wrong order would show as an
+illegal move or a different game, not a silent success, because every move is
+replayed through the legal move generator.
+
+Not covered: daily games (`/callback/daily/` is tried when the id is not live,
+and has not been exercised), variants, and Chess960.
+
+`review-open.sh` writes its counter to `~/reviews/<id>.log`;
+`tools/review-progress.sh` turns that into done/total and an ETA from the rate
+so far. At depth 16 a 47-ply game took 243 s here (48 positions, one Stockfish thread).
